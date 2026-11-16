@@ -87,7 +87,7 @@ test("Module graphs register complete cyclic dependencies and cache module ident
   assert.equal(first.blob, second.blob);
   assert.equal(env.requests.length, 2);
   assert.equal(env.mappings.size, 2);
-  assert.match(env.blobs.get(first.blob).source, /https:\/\/example.com\/b.js/);
+  assert.match(env.blobs.get(first.blob).source, /sandstone:module:/);
   assert.equal(env.blobs.get(first.blob).type, "text/javascript");
 });
 
@@ -98,16 +98,20 @@ test("Redirected modules resolve dependencies and metadata against the final URL
   });
   const record = await env.loader.prepare_url("./start.js", "https://example.com/");
   const compiled = env.blobs.get(record.blob).source;
-  assert.match(compiled, /https:\/\/cdn.test\/assets\/dep.js/);
+  assert.match(compiled, /blob:test\//);
+  assert.equal(env.requests[1].url, "https://cdn.test/assets/dep.js");
   assert.match(compiled, /__module_meta__\("https:\/\/cdn.test\/assets\/main.js"\)/);
   assert.equal(env.loader.meta(record.url).resolve("./image.png"), "https://cdn.test/assets/image.png");
 });
 
-test("Inline modules use the document base and JSON modules retain their MIME type", async () => {
+test("Inline modules use the document base and JSON modules work without native import attributes", async () => {
   const env = environment({"https://example.com/assets/data.json": '{"value":42}'});
   const record = await env.loader.prepare_inline("import data from './data.json' with {type:'json'}; window.data=data;", "https://example.com/assets/page");
   assert.match(env.blobs.get(record.blob).source, /__ctx__.window.data=data/);
-  assert.equal([...env.blobs.values()].find(blob => blob.type === "application/json").source, '{"value":42}');
+  const json = [...env.blobs.values()].find(blob => blob.original.endsWith('data.json'));
+  assert.equal(json.type, "text/javascript");
+  assert.match(json.source, /export default __ctx__\.__json_module__/);
+  assert.doesNotMatch(env.blobs.get(record.blob).source, /with\s*\{/);
   assert.equal(env.requests[0].url, "https://example.com/assets/data.json");
 });
 
@@ -118,4 +122,15 @@ test("Failed graph preparation cannot fall through to a native remote import or 
   assert.equal(env.blobs.size, 0);
   const result = await env.loader.import("./good.js", "https://example.com/");
   assert.match(result.blob, /^blob:test\//);
+});
+
+test("Acyclic graphs use direct blob imports and need no native import-map support", async () => {
+  const env = environment({
+    "https://example.com/root.js": "export {value} from './leaf.js';",
+    "https://example.com/leaf.js": "export const value=1;"
+  });
+  const record = await env.loader.prepare_url("./root.js", "https://example.com/");
+  assert.equal(env.mappings.size, 0);
+  assert.match(env.blobs.get(record.blob).source, /from "blob:test\/0"/);
+  assert.doesNotMatch(env.blobs.get(record.blob).source, /from "https?:/);
 });

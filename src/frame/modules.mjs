@@ -82,6 +82,7 @@ export class ModuleLoader {
     this.metadata = new Map();
     this.tail = Promise.resolve();
     this.inline_id = 0;
+    this.module_id = 0;
   }
 
   record(key, type = "javascript", credentials = "same-origin") {
@@ -89,7 +90,7 @@ export class ModuleLoader {
     let record = this.records.get(key);
     if (record && record.type !== type) throw new TypeError(`Conflicting module types for ${key}`);
     if (!record) {
-      record = {key, url: key, type, credentials, source: undefined, blob: null};
+      record = {key, url: key, type, credentials, source: undefined, blob: null, nativeKey: `sandstone:module:${++this.module_id}`, dependencies: []};
       this.records.set(key, record);
     }
     return record;
@@ -102,7 +103,7 @@ export class ModuleLoader {
   }
 
   prepare_url(specifier, base, options = {}) {
-    return this.serialize(() => this.prepare_graph(this.record(this.map.resolve(specifier, base), options.with?.type || "javascript", options.credentials || this.records.get(base)?.credentials)));
+    return this.serialize(() => this.prepare_graph(this.record(this.map.resolve(specifier, base), options.with?.type || options.assert?.type || "javascript", options.credentials || this.records.get(base)?.credentials)));
   }
 
   prepare_inline(source, base, credentials) {
@@ -129,19 +130,41 @@ export class ModuleLoader {
           if (!this.records.has(record.url)) this.records.set(record.url, record);
         }
         if (record.type === "json") { JSON.parse(record.source); continue; }
+        record.dependencies = [];
         for (const dependency of module_dependencies(record.source)) {
           const key = this.map.resolve(dependency.specifier, record.url);
-          queue.push(this.record(key, dependency.type, record.credentials));
+          const target = this.record(key, dependency.type, record.credentials);
+          record.dependencies.push(target);
+          queue.push(target);
         }
       } catch (error) { record.error = error; throw error; }
     }
-    const compiled = [...graph].map(record => [record, record.type === "json" ? record.source : this.rewrite(record.source, {
-      module: true, url: record.url, resolve: specifier => this.map.resolve(specifier, record.url)
-    })]);
-    for (const [record, source] of compiled) record.blob = this.createURL(source, record.type === "json" ? "application/json" : "text/javascript", record.url);
+    const compile = record => {
+      const source = record.type === "json" ? `export default __ctx__.__json_module__(${JSON.stringify(record.source)});` : this.rewrite(record.source, {
+        module: true, url: record.url, stripAttributes: true, resolve: specifier => {
+          const dependency = this.records.get(this.map.resolve(specifier, record.url));
+          return dependency.blob || dependency.nativeKey;
+        }
+      });
+      record.blob = this.createURL(source, "text/javascript", record.url);
+    };
+    // DAGs need no import map at all. This also supports dynamic chunk loading in
+    // browsers that only accept one import map per document.
+    const remaining = new Set(graph);
+    let progress = true;
+    while (remaining.size && progress) {
+      progress = false;
+      for (const record of remaining) {
+        if (record.dependencies.some(dependency => !dependency.blob)) continue;
+        compile(record);
+        remaining.delete(record);
+        progress = true;
+      }
+    }
+    for (const record of remaining) compile(record);
     const imports = Object.create(null);
-    for (const [key, record] of this.records) {
-      if (record.blob && !this.registered.has(key)) imports[key] = record.blob;
+    for (const record of remaining) {
+      if (!this.registered.has(record.nativeKey)) imports[record.nativeKey] = record.blob;
     }
     if (Object.keys(imports).length) {
       this.register(imports);
@@ -151,8 +174,10 @@ export class ModuleLoader {
   }
 
   async import(specifier, base, options) {
+    const attributes = options?.with || options?.assert || {};
+    if (Object.keys(attributes).some(key => key !== "type")) throw new TypeError("Unsupported module import attribute");
     const record = await this.prepare_url(specifier, base, options);
-    return this.execute(record.blob, options);
+    return this.execute(record.blob);
   }
 
   meta(url) {

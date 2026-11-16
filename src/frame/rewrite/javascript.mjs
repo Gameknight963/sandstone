@@ -15,7 +15,7 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false, url, resolve} = {}) {
+export function rewrite_source(source, globals, {module = false, url, resolve, stripAttributes = false} = {}) {
   const ast = parse(source, {ranges: true, webcompat: true, module, next: true});
   const scopes = new WeakMap();
   const bindings = new WeakSet();
@@ -60,6 +60,7 @@ export function rewrite_source(source, globals, {module = false, url, resolve} =
     if (node.type === "BlockStatement" && node.body[0]?.directive === "use asm") return;
     if (resolve && ["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type) && node.source) {
       edits.push([node.source.start, node.source.end, JSON.stringify(resolve(node.source.value))]);
+      if (stripAttributes && node.attributes?.length) edits.push([node.source.end, node.end, ";"]);
     }
     if (url && node.type === "ImportExpression") {
       edits.push([node.start, node.start + 6, `__ctx__.__import__.bind(null,${JSON.stringify(url)})`]);

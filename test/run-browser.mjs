@@ -9,6 +9,8 @@ const dexieSource = await readFile(new URL("../node_modules/dexie/dist/dexie.js"
 const verify = runInThisContext(`(${testSource})`);
 const moduleTest = await readFile(new URL("modules.playwright.js", import.meta.url), "utf8");
 const verifyModules = runInThisContext(`(${moduleTest})`);
+const resourceTest = await readFile(new URL("resources.playwright.js", import.meta.url), "utf8");
+const verifyResources = runInThisContext(`(${resourceTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 async function timed(operation, label) {
@@ -25,13 +27,17 @@ try {
       Object.defineProperty(window, "indexedDB", {get() { throw new DOMException("Storage denied", "SecurityError"); }});
     });
     const page = await context.newPage();
-    page.on("pageerror", error => console.error("Browser error:", error.message));
-    page.on("console", message => { if (message.type() === "error") console.error("Browser console:", message.text()); });
+    const browserErrors = [];
+    page.on("pageerror", error => { browserErrors.push(error.message); console.error("Browser error:", error.message); });
+    page.on("console", message => {
+      if (message.type() === "error") { browserErrors.push(message.text()); console.error("Browser console:", message.text()); }
+    });
     const requests = [];
     page.on("request", request => requests.push(request.url()));
     const result = await timed(verify(page, target), "Browser compatibility fixture");
     const moduleResults = await timed(verifyModules(page), "Module fixture");
     result.passed.push(...moduleResults);
+    result.passed.push(...await timed(verifyResources(page), "Resource fixture"));
     await page.evaluate(source => main_frame.eval_js(source), dexieSource);
     const dexieResult = await page.evaluate(() => main_frame.eval_js(`(async () => {
       const database = new Dexie('browser-dexie');
@@ -64,6 +70,7 @@ try {
     assert.equal(survivedReload, !storageDenied, "IndexedDB persistence did not match the storage capability");
     assert.equal(reloaded.name, storageDenied ? null : 'alpha');
     if (target.startsWith("file:")) assert.deepEqual(requests.filter(url => /^https?:/.test(url)), [], "The standalone fixture made a direct HTTP request");
+    assert.deepEqual(browserErrors, [], "The browser reported an unexpected runtime error");
     console.log(JSON.stringify({storageDenied, survivedReload, ...result}));
     await context.close();
   }

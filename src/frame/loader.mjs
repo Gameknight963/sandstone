@@ -6,6 +6,7 @@ import * as parser from "./parser.mjs";
 import { update_ctx, run_script, run_script_safe, ctx, convert_url } from "./context.mjs";
 import { pending_scripts } from "./rewrite/script.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
+import { flush_import_map } from "./polyfill/module.mjs";
 
 export const navigate = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export const local_storage = rpc.create_rpc_wrapper(rpc.host, "local_storage");
@@ -150,6 +151,7 @@ async function load_html(options) {
   //apply the rewritten html
   console.log("done downloading page");
   document.documentElement.replaceWith(html.documentElement);
+  flush_import_map();
   is_loaded = true;
   if (site_settings.allow_js) {
     await evaluate_scripts();

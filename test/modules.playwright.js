@@ -11,7 +11,8 @@ async page => {
         window.moduleEvents.push('module-start');
         window.moduleResult = {before: value, url: import.meta.url,
           asset: new URL('./image.png', import.meta.url).href,
-          resolved: import.meta.resolve('shared'), ready: document.readyState, scoped, setting: settings.answer};
+          resolved: import.meta.resolve('shared'), ready: document.readyState, scoped, setting: settings.answer,
+          jsonOwnPrototype: Object.hasOwn(settings, '__proto__')};
         increment();
         window.moduleResult.after = value;
         await new Promise(resolve => document.addEventListener('DOMContentLoaded', () => {
@@ -28,7 +29,7 @@ async page => {
       '/assets/lazy.mjs': "import {value} from 'shared'; export {value};",
       '/assets/scoped/consumer.mjs': "import {scoped} from 'shared'; export {scoped};",
       '/assets/scoped-shared.mjs': "export const scoped = 'scoped-map';",
-      '/assets/settings.json': '{"answer":42}'
+      '/assets/settings.json': '{"answer":42,"__proto__":{"safe":true}}'
     };
     const previous = sandstone.network.session.fetch;
     globalThis.moduleRequests = [];
@@ -62,7 +63,7 @@ async page => {
   const expected = {
     before: 1, after: 2, url: 'https://fixture.test/assets/entry.mjs',
     asset: 'https://fixture.test/assets/image.png', resolved: 'https://fixture.test/assets/shared.mjs',
-    ready: 'interactive', scoped: 'scoped-map', setting: 42, cycle: 'cycle-a', lazy: 2, json: 42, done: true, noModule: false
+    ready: 'interactive', scoped: 'scoped-map', setting: 42, jsonOwnPrototype: true, cycle: 'cycle-a', lazy: 2, json: 42, done: true, noModule: false
   };
   for (const [key, value] of Object.entries(expected)) {
     if (result[key] !== value) throw new Error(`Module ${key}: expected ${JSON.stringify(value)}, got ${JSON.stringify(result[key])}; full result ${JSON.stringify(result)}`);

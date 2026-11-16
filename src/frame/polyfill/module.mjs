@@ -1,22 +1,31 @@
 import { ModuleLoader } from "../modules.mjs";
 import * as network from "../network.mjs";
 import * as parser from "../parser.mjs";
+import * as loader from "../loader.mjs";
 
 // Keep native import out of webpack's chunk loader; every URL here is a prepared blob.
 const native_import = Function("url", "options", "return import(url, options)");
+let pending_imports = Object.create(null);
+
+export function flush_import_map() {
+  if (!Object.keys(pending_imports).length) return;
+  if (typeof document === "undefined") throw new TypeError("Cyclic module workers require a separate module resolver");
+  const script = document.createElement("script");
+  script.__rewritten__ = true;
+  script.type = "importmap";
+  script.textContent = JSON.stringify({imports: pending_imports});
+  document.head.append(script);
+  script.remove();
+  pending_imports = Object.create(null);
+}
 
 export const modules = new ModuleLoader({
   fetch: (url, options) => network.fetch(url, options),
   rewrite: (source, options) => parser.rewrite_js(source, options),
   createURL: (source, type, original) => network.create_blob_url(new Blob([source], {type}), original),
   register(imports) {
-    if (typeof document === "undefined") throw new TypeError("Module workers require a separate module resolver");
-    const script = document.createElement("script");
-    script.__rewritten__ = true;
-    script.type = "importmap";
-    script.textContent = JSON.stringify({imports});
-    document.head.append(script);
-    script.remove();
+    Object.assign(pending_imports, imports);
+    if (loader.is_loaded) flush_import_map();
   },
   execute: native_import
 });

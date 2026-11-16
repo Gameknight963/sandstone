@@ -1,4 +1,4 @@
-import { ctx, get_handler_keys, create_obj_proxy } from "../context.mjs";
+import { ctx, get_handler_keys, create_obj_proxy, intercept_property, proxy_function } from "../context.mjs";
 import { get_cookie, set_cookie } from "../polyfill/cookie.mjs";
 import * as loader from "../loader.mjs";
 
@@ -40,8 +40,23 @@ class CustomDocument {
   }
 
   createTreeWalker(root, whatToShow, filter) {
-    if (root === this) root = document.documentElement;
-    return this.__target__.createTreeWalker(root, whatToShow, filter);
+    const native_document = this.__target__;
+    const proxy = this.__proxy__;
+    if (root === this || root === proxy) root = native_document;
+    const walker = native_document.createTreeWalker(root, whatToShow, filter);
+    const wrap = value => value === native_document ? proxy : value;
+    const unwrap = value => value === proxy ? native_document : value;
+    let current;
+    current = intercept_property(walker, "currentNode", {
+      get: () => wrap(current.get.call(walker)),
+      set: value => current.set.call(walker, unwrap(value))
+    });
+    let root_descriptor;
+    root_descriptor = intercept_property(walker, "root", {get: () => wrap(root_descriptor.get.call(walker))});
+    for (const method of ["parentNode", "firstChild", "lastChild", "previousSibling", "nextSibling", "previousNode", "nextNode"]) {
+      proxy_function(walker, method, (target, receiver, args) => wrap(Reflect.apply(target, walker, args)));
+    }
+    return walker;
   }
 }
 

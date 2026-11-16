@@ -4,6 +4,7 @@ import * as intercept from "./intercept/index.mjs";
 import * as parser from "./parser.mjs";
 import * as loader from "./loader.mjs";
 import { modules } from "./polyfill/module.mjs";
+const parse_json = JSON.parse;
 
 export const is_worker = typeof importScripts === "function";
 export const ctx_vars = [];
@@ -130,6 +131,7 @@ export class CustomCTX {
 
   __import__(referrer, specifier, options) { return modules.import(specifier, referrer, options); }
   __module_meta__(url) { return modules.meta(url); }
+  __json_module__(source) { return parse_json(source); }
 
   __get_this__(this_obj) {
     if (this_obj === globalThis)
@@ -242,8 +244,13 @@ export function run_script(js) {
 }
 
 export function intercept_property(target, key, handler) {
-  let descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(target), key);
+  let prototype = Object.getPrototypeOf(target);
+  let descriptor;
+  while (prototype && !descriptor) {
+    descriptor = Object.getOwnPropertyDescriptor(prototype, key);
+    prototype = Object.getPrototypeOf(prototype);
+  }
   if (!descriptor) return;
-  Object.defineProperty(target, key, handler);
+  Object.defineProperty(target, key, {configurable: true, enumerable: descriptor.enumerable, ...handler});
   return descriptor;
 }
