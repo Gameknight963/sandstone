@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {create_websocket_class} from '../src/frame/websocket.mjs';
-import {relay_websocket_class} from '../src/host/websocket.mjs';
+import {relay_websocket_class, websocket_options} from '../src/host/websocket.mjs';
+import {SiteDataStore} from '../src/host/site_data.mjs';
 
 globalThis.CloseEvent ||= class CloseEvent extends Event {
   constructor(type, options) { super(type); Object.assign(this, options); }
@@ -91,4 +92,39 @@ test('Host adapter releases pending sessions and exposes selected handshake prot
   socket.create_request('', () => {}, () => {}, () => {});
   assert.equal(socket.protocol, 'selected');
   socket.cleanup(); socket.cleanup(); assert.equal(released, 1);
+});
+
+test('WebSocket cookies use HTTP schemes, path, Secure, SameSite and HttpOnly rules', () => {
+  const store = new SiteDataStore();
+  for (const cookie of ['strict=s; SameSite=Strict; Path=/', 'lax=l; SameSite=Lax; Path=/',
+    'none=n; SameSite=None; Secure; Path=/', 'session=secret; HttpOnly; Secure; Path=/socket',
+    'other=hidden; Path=/other', 'expired=old; Max-Age=0; Path=/']) store.setCookie('https://chat.example.test/', cookie);
+  const options = (url, source = 'https://chat.example.test/', top_url = source) =>
+    websocket_options(store, url, {url: source, top_url, userAgent: 'test browser'});
+  const own = options('wss://chat.example.test/socket/live');
+  assert.deepEqual(new Set(own.headers.Cookie.split('; ')), new Set(['strict=s', 'lax=l', 'none=n', 'session=secret']));
+  assert.equal(own.headers.Origin, 'https://chat.example.test');
+  assert.equal(own.headers['User-Agent'], 'test browser');
+  assert.equal(options('wss://chat.example.test/socket/live', 'https://different.test/').headers.Cookie, 'session=secret; none=n');
+  assert.equal(options('wss://chat.example.test/', 'https://chat.example.test/', 'https://different.test/').headers.Cookie, 'none=n');
+  assert.equal(options('ws://chat.example.test/', 'http://chat.example.test/').headers.Cookie, 'strict=s; lax=l');
+  assert.equal(options('wss://unrelated.test/').headers.Cookie, undefined);
+  assert.throws(() => options('https://chat.example.test/'), TypeError);
+  own.onHeader('set-cookie', 'handshake=accepted; HttpOnly; Path=/');
+  assert.ok(store.cookies.getCookieStringSync('https://chat.example.test/').includes('handshake=accepted'));
+  assert.ok(!JSON.stringify(store.documentCookies('https://chat.example.test/')).includes('handshake'));
+});
+
+test('Host adapter forwards each Set-Cookie field without joining or UTF-8 corruption', () => {
+  class Session { close() {} }
+  class Curl extends Session {
+    constructor(options) { super(); this.options = options; }
+    create_request(url, data, end, headers) {
+      const raw = 'HTTP/1.1 101 Switching Protocols\r\nSet-Cookie: a=one; Expires=Wed, 21 Oct 2037 07:28:00 GMT\r\nSet-Cookie: b=\xe9; HttpOnly\r\n\r\n';
+      for (const character of raw) headers(new Uint8Array([character.charCodeAt(0)]));
+    }
+  }
+  const fields = [], Relay = relay_websocket_class(Curl);
+  new Relay({onHeader: (name, value) => fields.push([name, value])}).create_request('', () => {}, () => {}, () => {});
+  assert.deepEqual(fields, [['set-cookie', 'a=one; Expires=Wed, 21 Oct 2037 07:28:00 GMT'], ['set-cookie', 'b=\xe9; HttpOnly']]);
 });

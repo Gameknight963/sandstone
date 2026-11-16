@@ -1,6 +1,6 @@
 import { getPublicSuffix } from "tough-cookie";
 
-function same_site(a, b) {
+export function same_site(a, b) {
   const domain = hostname => getPublicSuffix(hostname, {ignoreError: true}) || hostname;
   return a.protocol === b.protocol && domain(a.hostname) === domain(b.hostname);
 }

@@ -5,7 +5,7 @@ import { site_data } from "./site_data.mjs";
 import { fetch_with_cookies } from "./request.mjs";
 import { requests, request_key, cancel_requests } from "./streams.mjs";
 import { streaming_http_session } from "./http_session.mjs";
-import { relay_websocket_class } from "./websocket.mjs";
+import { relay_websocket_class, websocket_options } from "./websocket.mjs";
 
 export const ws_connections = {};
 export let session = null;
@@ -83,9 +83,14 @@ rpc_handlers["fetch_abort"] = function(frame_id, request_id) {
 };
 
 //handle websocket creation 
-rpc_handlers["ws_new"] = function (frame_id, url, protocols, options) {
+rpc_handlers["ws_new"] = function (frame_id, url, protocols) {
   let ws_id = Math.random() + "";
-  if (!iframes[frame_id]) throw new TypeError('Unknown frame');
+  const frame = iframes[frame_id];
+  if (!frame) throw new TypeError('Unknown frame');
+  const source = frame.url.origin === 'null' && frame.origin && frame.origin !== 'null' ? frame.origin + '/' : frame.url.href;
+  const options = websocket_options(site_data, url, {
+    url: source, top_url: iframes[frame.root_id]?.url.href || source, userAgent: navigator.userAgent
+  });
   const RelayWebSocket = relay_websocket_class(libcurl.CurlWebSocket);
   let ws = new RelayWebSocket(url, protocols, options);
   let ws_events = [];
@@ -101,7 +106,8 @@ rpc_handlers["ws_new"] = function (frame_id, url, protocols, options) {
   //set up event listeners to forward to the frame
   for (let event_name of ["open", "message", "close", "error"]) {
     ws["on" + event_name] = (data) => {
-      if (event_name === 'open') data = {protocol: ws.protocol || ''};
+      if (event_name === 'open') data = {protocol: ws.protocol || '', cookies: site_data.documentCookies(source)};
+      if (event_name === 'error') data = {cookies: site_data.documentCookies(source)};
       if (event_name === 'close' || event_name === 'error') ws_info.ended = true;
       ws_info.events.push([event_name, data]);
       ws_info.callback?.();

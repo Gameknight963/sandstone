@@ -100,10 +100,12 @@ export function create_blob_url(blob, target_url = null) {
 
 export const WebSocket = create_websocket_class({
   base: () => ctx.document?.baseURI || ctx.location.href,
-  connect: (url, protocols) => rpc_ws_new(loader.frame_id, url, protocols, {
-    headers: {Origin: ctx.location.origin, 'User-Agent': navigator.userAgent}
-  }),
-  events: id => rpc_ws_event(loader.frame_id, id),
+  connect: (url, protocols) => rpc_ws_new(loader.frame_id, url, protocols),
+  async events(id) {
+    const batch = await rpc_ws_event(loader.frame_id, id);
+    for (const [, data] of batch || []) if (data?.cookies) load_cookies(data.cookies);
+    return batch;
+  },
   send: (id, data) => rpc_ws_send(loader.frame_id, id, data),
   close: id => rpc_ws_close(loader.frame_id, id)
 });

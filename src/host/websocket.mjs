@@ -1,3 +1,5 @@
+import {same_site} from './request.mjs';
+
 // libcurl.js 0.7 only cleans up sockets after they become connected. Its base
 // session close also needs the polling loop stopped before freeing the session.
 export function relay_websocket_class(CurlWebSocket) {
@@ -6,7 +8,9 @@ export function relay_websocket_class(CurlWebSocket) {
     create_request(url, data, end, headers) {
       let pending = '';
       return super.create_request(url, data, end, chunk => {
-        pending += new TextDecoder().decode(chunk);
+        // HTTP field values are bytes, not UTF-8 text. Avoid replacing bytes
+        // above 0x7f when forwarding Set-Cookie to the same jar used by fetch.
+        for (const byte of chunk) pending += String.fromCharCode(byte);
         let index;
         while ((index = pending.indexOf('\n')) !== -1) {
           const line = pending.slice(0, index).trim();
@@ -14,6 +18,8 @@ export function relay_websocket_class(CurlWebSocket) {
           if (/^HTTP\//i.test(line)) this.protocol = '';
           const match = /^sec-websocket-protocol:\s*(.*)$/i.exec(line);
           if (match) this.protocol = match[1];
+          const field = /^([^:]+):\s*(.*)$/.exec(line);
+          if (field) this.options?.onHeader?.(field[1].toLowerCase(), field[2]);
         }
         headers(chunk);
       });
@@ -29,6 +35,24 @@ export function relay_websocket_class(CurlWebSocket) {
       if (this.session_ptr) closeSession.call(this);
       if (error) this.onerror(error);
       else this.onclose();
+    }
+  };
+}
+// WebSocket handshakes use HTTP cookie rules, including HttpOnly cookies. The
+// source is the virtual page/worker origin, never the local HTML file's origin.
+export function websocket_options(store, input, {url, top_url = url, userAgent}) {
+  const target = new URL(input);
+  if (!['ws:', 'wss:'].includes(target.protocol)) throw new TypeError('Invalid WebSocket URL');
+  target.protocol = target.protocol === 'wss:' ? 'https:' : 'http:';
+  const source = new URL(url), top = new URL(top_url);
+  const sameSiteContext = same_site(top, source) && same_site(top, target) ? 'strict' : 'none';
+  const headers = {Origin: source.origin, 'User-Agent': userAgent};
+  const cookie = store.cookies.getCookieStringSync(target.href, {sameSiteContext});
+  if (cookie) headers.Cookie = cookie;
+  return {
+    headers,
+    onHeader(name, value) {
+      if (name === 'set-cookie') store.setCookie(target.href, value);
     }
   };
 }

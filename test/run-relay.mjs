@@ -9,10 +9,21 @@ import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
 const held=new Map(),requests=[],closed=[],sockets=new Set(),timers=new Set();
+const authRequests=[];
 const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
 const server=createServer({shouldUpgradeCallback:request=>request.headers.upgrade?.toLowerCase()==='websocket'},(request,response)=>{
   const url=new URL(request.url,'http://localhost');
   const client=url.searchParams.get('client');
+  if(url.pathname==='/ws-login'){
+    response.writeHead(200,{'Set-Cookie':[
+      'auth_session=token; HttpOnly; SameSite=Strict; Path=/ws-auth',
+      'auth_login=visible; SameSite=Lax; Path=/',
+      'auth_wrong=hidden; Path=/unrelated', 'auth_expired=old; Max-Age=0; Path=/'
+    ]});response.end('logged in');return;
+  }
+  if(url.pathname==='/ws-cookies'){
+    response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify(request.headers.cookie||''));return;
+  }
   if(url.pathname==='/redirect'){
     response.writeHead(302,{Location:'/events?'+url.searchParams,'Set-Cookie':'redirect=visible; Path=/'});response.end();return;
   }
@@ -44,14 +55,28 @@ const server=createServer({shouldUpgradeCallback:request=>request.headers.upgrad
 });
 server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));});
 const echoes = new WebSocketServer({noServer: true, handleProtocols: protocols => protocols.has('second') ? 'second' : false});
+echoes.on('headers',(headers,request)=>{
+  if(new URL(request.url,'http://localhost').pathname==='/ws-auth')headers.push(
+    'Set-Cookie: auth_visible=handshake; SameSite=Lax; Path=/',
+    'Set-Cookie: auth_hidden=secret; HttpOnly; SameSite=Strict; Path=/'
+  );
+});
 echoes.on('connection', (socket, request) => {
   if (request.url === '/ws-close') { socket.close(4001, 'server finished'); return; }
   socket.on('message', (data, isBinary) => socket.send(data, {binary: isBinary}));
 });
 server.on('upgrade',(request,socket,head)=>{
-  if (request.url === '/echo' || request.url === '/ws-close') echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
+  const path=new URL(request.url,'http://localhost').pathname;
+  if(path==='/ws-auth'){
+    authRequests.push({cookie:request.headers.cookie||'',origin:request.headers.origin});
+    if(!request.headers.cookie?.split('; ').includes('auth_session=token') || request.headers.origin!=='http://'+request.headers.host){
+      socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');return;
+    }
+    echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
+  }
+  else if (request.url === '/echo' || request.url === '/ws-close') echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
   else if (request.url === '/ws-pending') server.emit('ws-pending',socket);
-  else if (request.url === '/ws-refused') socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');
+  else if (request.url === '/ws-refused') socket.end('HTTP/1.1 403 Forbidden\r\nSet-Cookie: refused=visible; Path=/\r\nContent-Length: 0\r\n\r\n');
   else wisp.routeRequest(request,socket,head);
 });
 server.listen(0,'127.0.0.1');await once(server,'listening');
@@ -89,11 +114,27 @@ const websocketScript = `new Promise((resolve,reject)=>{
   };
   socket.onclose=()=>{clearTimeout(timeout);resolve(JSON.stringify({values,state:socket.readyState,buffered:socket.bufferedAmount}));};
 })`;
+const authenticatedScript=`(async()=>{
+  await fetch(${JSON.stringify(origin+'/ws-login')});
+  const visible=await new Promise((resolve,reject)=>{
+    const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-auth')});
+    const timeout=setTimeout(()=>{socket.close();reject(new Error('Authenticated WebSocket timeout'));},10000);
+    let snapshot;
+    socket.onopen=()=>{snapshot=document.cookie;socket.close();};
+    socket.onerror=()=>reject(new Error('Authenticated handshake failed'));
+    socket.onclose=()=>{clearTimeout(timeout);resolve(snapshot);};
+  });
+  const sent=await (await fetch(${JSON.stringify(origin+'/ws-cookies')})).json();
+  const auth=value=>value.split('; ').filter(cookie=>cookie.startsWith('auth_')).sort();
+  return JSON.stringify({visible:auth(visible),sent:auth(sent)});
+})()`;
 try{
   browser=await chromium.launch({channel:channel==='headless'?undefined:channel,headless:true});
   const nativeContext=await browser.newContext(),nativePage=await nativeContext.newPage();
   await nativePage.goto(origin);
   const baseline=JSON.parse(await nativePage.evaluate(source=>eval(source),sourceScript('native')).catch(error=>{console.error(JSON.stringify({requests,held:[...held.keys()]}));throw error;}));
+  const authBaseline=JSON.parse(await nativePage.evaluate(source=>eval(source),authenticatedScript));
+  assert.deepEqual(authBaseline,{visible:['auth_login=visible','auth_visible=handshake'],sent:['auth_hidden=secret','auth_login=visible','auth_visible=handshake']});
   await nativeContext.close();
   for(const storageDenied of [false,true]){
   const client='proxy-'+storageDenied,workerClient='worker-'+storageDenied;
@@ -114,6 +155,8 @@ try{
     main_frame.special_pages[origin+'/page']='<!doctype html><body>Relay SSE fixture</body>';
     await main_frame.navigate_to(origin+'/page');
   },origin);
+  const authResult=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),authenticatedScript));
+  assert.deepEqual(authResult,authBaseline,'WebSocket login/handshake cookie behavior differs from the native browser');
   const echoed=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),websocketScript));
   assert.deepEqual(echoed,{values:[[98,108,111,98,32,102,105,114,115,116],'text second',[2,3],'last'],state:3,buffered:0});
   const workerEcho=JSON.parse(await page.evaluate(source=>main_frame.eval_js(`new Promise((resolve,reject)=>{
@@ -123,6 +166,14 @@ try{
     worker.onerror=event=>{event.preventDefault();reject(new Error(event.message));};worker.postMessage('start');
   })`),websocketScript));
   assert.deepEqual(workerEcho,echoed);
+  const workerAuth=await page.evaluate(origin=>main_frame.eval_js(`new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(new Blob(['onmessage=()=>{const socket=new WebSocket('+${JSON.stringify(JSON.stringify(origin.replace('http:','ws:')+'/ws-auth'))}+');socket.onopen=()=>socket.close();socket.onerror=()=>postMessage(false);socket.onclose=()=>postMessage(true);};'],{type:'text/javascript'}));
+    const worker=new Worker(url);worker.onmessage=event=>{worker.terminate();URL.revokeObjectURL(url);resolve(event.data);};worker.onerror=event=>{event.preventDefault();reject(new Error(event.message));};worker.postMessage('start');
+  })`),origin);
+  assert.equal(workerAuth,true,'Blob worker did not inherit the authenticated page origin');
+  const lastAuth=authRequests.at(-1);
+  assert.equal(lastAuth.origin,origin);assert.ok(lastAuth.cookie.includes('auth_session=token'));
+  assert.ok(!lastAuth.cookie.includes('auth_wrong='));assert.ok(!lastAuth.cookie.includes('auth_expired='));
   const serverClosed=await page.evaluate(origin=>main_frame.eval_js(`new Promise(resolve=>{
     const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-close')},['second']);
     socket.onclose=()=>resolve(socket.readyState);
@@ -138,6 +189,7 @@ try{
   await socketCancelled;assert.deepEqual(JSON.parse(cancelledStates),['error',3]);
   const refused=await page.evaluate(origin=>main_frame.eval_js(`new Promise(resolve=>{const states=[];const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-refused')});socket.onerror=()=>states.push('error');socket.onclose=()=>resolve(JSON.stringify([...states,socket.readyState]));})`),origin);
   assert.deepEqual(JSON.parse(refused),['error',3]);
+  assert.ok(await page.evaluate(()=>main_frame.eval_js(`document.cookie.split('; ').includes('refused=visible')`)), 'Failed handshake cookies were discarded');
   assert.equal(await page.evaluate(()=>Object.values(sandstone.network.ws_connections).flatMap(Object.values).length),0);
   const proxied=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),sourceScript(client,true)).catch(async error=>{
     console.error(JSON.stringify({requests,errors}));throw error;
@@ -173,11 +225,18 @@ try{
     worker.onerror=event=>{event.preventDefault();reject(new Error(event.message));};worker.postMessage('start');
   })`),workerSource));
   assert.deepEqual(worker,baseline);
+  await page.evaluate(()=>sandstone.controller.site_data.clear('127.0.0.1'));
+  const cleared=await page.evaluate(origin=>main_frame.eval_js(`new Promise(resolve=>{
+    const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-auth')});
+    let failed=false;socket.onerror=()=>failed=true;socket.onclose=()=>resolve(JSON.stringify({failed,cookies:document.cookie}));
+  })`),origin);
+  assert.deepEqual(JSON.parse(cleared),{failed:true,cookies:''},'Per-site clearing did not remove WebSocket credentials');
+  assert.equal(authRequests.at(-1).cookie,'');
   await page.waitForFunction(()=>sandstone.network.session.active_requests===0 && sandstone.network.session.requests_list.length===0 && Object.keys(sandstone.network.session.request_callbacks).length===0);
-  assert.deepEqual(direct,[],'A relayed EventSource made a direct HTTP request');
-  assert.deepEqual(errors,[],'A relayed EventSource produced a browser error');
+  assert.deepEqual(direct,[],'A relayed connection made a direct HTTP request');
+  assert.deepEqual(errors,[],'A relayed connection produced a browser error');
   assert.ok(closed.some(value=>value.client===client&&value.count===3));
-    console.log(JSON.stringify({storageDenied,passed:['WebSocket echo/protocol/binary ordering','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','native request cleanup'],events:proxied,direct}));
+    console.log(JSON.stringify({storageDenied,passed:['WebSocket echo/protocol/binary ordering','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','native request cleanup'],events:proxied,direct}));
   await context.close();
   }
 }finally{
