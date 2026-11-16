@@ -208,7 +208,7 @@ export function update_ctx(options = {}) {
   internal.location = is_worker ? new polyfill.FakeWorkerLocation() : new polyfill.FakeLocation();
   internal.self = ctx.__proxy__;
   internal.globalThis = ctx.__proxy__;
-  internal.history = is_worker ? undefined : new polyfill.FakeHistory();
+  internal.history = is_worker ? undefined : new polyfill.FakeHistory(options.history);
   if (is_worker) { internal.localStorage = undefined; internal.sessionStorage = undefined; }
   if (!is_worker) {
   internal.localStorage = new polyfill.FakeStorage(options.local_storage, entries => {

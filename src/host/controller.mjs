@@ -3,6 +3,7 @@ import * as util from "../util.mjs";
 import * as network from "./network.mjs";
 import { site_data } from "./site_data.mjs";
 import { indexed_db } from "./indexeddb.mjs";
+import { NavigationHistory } from "../history.mjs";
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 
@@ -50,6 +51,7 @@ let frame_html = `
 `;
 
 export const iframes = {};
+const saved_child_histories = new Map();
 export const persist_storage_key = "proxy_local_storage";
 export let local_storage = {};
 local_storage = site_data.local;
@@ -69,6 +71,7 @@ export class ProxyFrame {
     this.is_navigating = false;
     this.navigation_id = 0;
     this.session_storage = Object.create(null);
+    this.history = new NavigationHistory();
     this.id = Math.random() + "";
     this.root_id = this.id;
     this.iframe = document.createElement("iframe");
@@ -99,7 +102,8 @@ export class ProxyFrame {
     await libcurl.load_wasm();
   }
 
-  async navigate_to(url, form_data=null) {
+  async navigate_to(url, form_data=null, navigation = {}) {
+    if (!util.is_valid_url(url)) throw TypeError("Invalid URL");
     const navigation_id = ++this.navigation_id;
     this.is_navigating = true;
     await this.wait_for_libcurl();
@@ -113,6 +117,7 @@ export class ProxyFrame {
     this.url = new URL(url);
     
     this.iframe.style.backgroundColor = "#222222";
+    this.history.save_scroll(navigation.scroll);
     this.on_navigate();
     this.iframe.src = get_frame_bundle();
     indexed_db.disconnect(this.id);
@@ -123,6 +128,9 @@ export class ProxyFrame {
         network.clean_ws_connections(id);
         delete iframes[id];
       }
+    }
+    for (const [id, saved] of saved_child_histories) {
+      if (saved.root_id === this.id) saved_child_histories.delete(id);
     }
 
     let html = null;
@@ -152,6 +160,7 @@ export class ProxyFrame {
     }
     if (navigation_id !== this.navigation_id) return;
     this.url = new URL(url);
+    this.history.navigate(url, {mode: navigation.history_mode || "push"});
     
     let settings = this.site_settings.find((item) => {
       return item.hostname.test(this.url.hostname);
@@ -177,6 +186,7 @@ export class ProxyFrame {
         local_storage: local_storage[this.url.origin],
         session_storage: this.session_storage[this.url.origin],
         cookies: site_data.documentCookies(this.url.href),
+        history: {...this.history.snapshot(), traversed: !!navigation.traversed, restored: navigation.history_mode === "reload"},
         version: version
       });
     }
@@ -199,18 +209,40 @@ export class ProxyFrame {
   }
 }
 
-rpc.rpc_handlers["navigate"] = async (frame_id, url, reload=true, form_data=null) => {
+rpc.rpc_handlers["navigate"] = async (frame_id, url, reload=true, form_data=null, navigation={}) => {
   let frame = iframes[frame_id];
   if (!frame) return;
 
   if (reload) {
-    await frame.navigate_to(url, form_data);
+    await frame.navigate_to(url, form_data, navigation);
   }
   else {
     frame.url = new URL(url);
     frame.on_url_change();
   }
 }
+
+rpc.rpc_handlers["history_mutate"] = (id, kind, state, url, scroll) => {
+  const frame = iframes[id];
+  if (!frame?.history) throw new DOMException("Inactive history", "InvalidStateError");
+  frame.history.mutate(kind, state, url, scroll);
+  frame.url = new URL(url);
+  frame.on_url_change();
+};
+
+rpc.rpc_handlers["history_go"] = (id, delta, scroll) => {
+  const frame = iframes[id];
+  if (!frame?.history) return null;
+  const snapshot = frame.history.go(delta, scroll);
+  if (!snapshot) return null;
+  if (snapshot.sameDocument) {
+    frame.url = new URL(snapshot.url);
+    frame.on_url_change();
+    return snapshot;
+  }
+  frame.navigate_to(snapshot.url, null, {history_mode: "traverse", traversed: true}).catch(console.error);
+  return null;
+};
 
 rpc.rpc_handlers["local_storage"] = async (frame_id, entries) => {
   let frame = iframes[frame_id];
@@ -232,33 +264,44 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   const parent = iframes[parent_id];
   if (!parent || iframes[child_id]) throw new TypeError("Invalid child frame");
   const root = iframes[parent.root_id];
+  const saved = saved_child_histories.get(child_id);
+  saved_child_histories.delete(child_id);
   const child = {
     id: child_id, parent_id, root_id: root.id, url: new URL(url),
     origin: options.worker ? new URL(url).protocol === "data:" ? "null" : parent.origin || parent.url.origin : new URL(url).origin,
     session_storage: parent.session_storage,
-    async navigate_to(url, form_data) {
+    history: saved?.history || new NavigationHistory(),
+    async navigate_to(url, form_data, navigation = {}) {
       child.url = new URL(url, child.url);
-      const ports = [root.rpc_target.target, ...root.rpc_target.extra_targets];
-      await Promise.all(ports.map(port => rpc.call_procedure(port, "child_navigate", [child_id, child.url.href, form_data])));
+      child.history.save_scroll(navigation.scroll);
+      child.pending_navigation = navigation;
+      const port = parent_id === root.id ? root.rpc_target.target : root.rpc_target.extra_frame_targets.get(parent_id);
+      if (!port) throw new DOMException("Parent frame is disconnected", "InvalidStateError");
+      await rpc.call_procedure(port, "child_navigate", [child_id, child.url.href, form_data]);
     },
     on_url_change() {}
   };
   iframes[child_id] = child;
+  child.history.navigate(url, {mode: saved?.navigation?.history_mode || "push"});
   return {
     local_storage: site_data.local[child.origin],
     session_storage: child.session_storage[child.origin],
-    cookies: site_data.documentCookies(child.origin === "null" ? child.url.href : child.origin + "/")
+    cookies: site_data.documentCookies(child.origin === "null" ? child.url.href : child.origin + "/"),
+    history: {...child.history.snapshot(), traversed: !!saved?.navigation?.traversed, restored: saved?.navigation?.history_mode === "reload"}
   };
 };
 
-rpc.rpc_handlers["frame_unregister"] = child_id => {
+rpc.rpc_handlers["frame_unregister"] = (child_id, options = {}) => {
   const child = iframes[child_id];
   if (!child?.parent_id) return;
+  if (options.keep_history) saved_child_histories.set(child_id, {root_id: child.root_id, history: child.history, navigation: child.pending_navigation});
+  else saved_child_histories.delete(child_id);
   for (const frame of Object.values(iframes)) {
     if (frame.parent_id === child_id) rpc.rpc_handlers["frame_unregister"](frame.id);
   }
   indexed_db.disconnect(child_id);
   network.clean_ws_connections(child_id);
+  iframes[child.root_id]?.rpc_target.remove_extra_target(child_id);
   delete iframes[child_id];
 };
 

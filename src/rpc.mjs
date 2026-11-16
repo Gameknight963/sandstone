@@ -9,6 +9,7 @@ export class RPCTarget {
   constructor(target=null) {
     this.target = null;
     this.extra_targets = [];
+    this.extra_frame_targets = new Map();
     this.msg_callback = this.handle_msg.bind(this);
     this.onmessage = () => {};
     if (target)
@@ -16,19 +17,34 @@ export class RPCTarget {
   }
 
   set_target(new_target) {
-    if (this.target)
+    if (this.target) {
       this.target.removeEventListener("message", this.msg_callback);
+      this.target.close?.();
+    }
     for (let target of this.extra_targets) {
       target.removeEventListener("message", this.msg_callback);
+      target.close?.();
     }
     this.target = new_target;
     this.extra_targets = [];
+    this.extra_frame_targets.clear();
     this.target.addEventListener("message", this.msg_callback);
   }
 
-  add_extra_target(target) {
+  add_extra_target(target, frame_id) {
+    if (frame_id) this.remove_extra_target(frame_id);
     target.addEventListener("message", this.msg_callback);
     this.extra_targets.push(target);
+    if (frame_id) this.extra_frame_targets.set(frame_id, target);
+  }
+
+  remove_extra_target(frame_id) {
+    const target = this.extra_frame_targets.get(frame_id);
+    if (!target) return;
+    target.removeEventListener("message", this.msg_callback);
+    target.close?.();
+    this.extra_targets = this.extra_targets.filter(item => item !== target);
+    this.extra_frame_targets.delete(frame_id);
   }
 
   handle_msg(event) {
@@ -97,7 +113,7 @@ export async function message_listener(event, target) {
       host.postMessage(msg, {targetOrigin: "*", transfer: [msg_port]});
     }
     else {
-      target.add_extra_target(msg_port);
+      target.add_extra_target(msg_port, msg.frame_id);
       msg_port.start();
     }
   }
@@ -130,9 +146,10 @@ export function create_rpc_wrapper(target, procedure) {
 }
 
 //attach an additional message port to the host
-export function attach_host(msg_port) {
+export function attach_host(msg_port, frame_id) {
   let msg = {
     type: "attach",
+    frame_id,
     id: Math.random() + ""
   };
   host.postMessage(msg, {targetOrigin: "*", transfer: [msg_port]});

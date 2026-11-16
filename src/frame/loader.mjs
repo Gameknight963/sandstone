@@ -141,15 +141,8 @@ async function load_html(options) {
       run_script_safe(original_js)
     }
     else {
-      let original_href = convert_url(element.href, ctx.location.href);
-      let url = new URL(original_href);
-      if (url.pathname === location.pathname) {
-        let element_id = url.hash.substring(1);
-        let element = document.getElementById(element_id);
-        if (element) element.scrollIntoView({behavior: "instant"});
-        return;
-      }
-      navigate(frame_id, original_href);  
+      const original_href = convert_url(element.getAttribute("href") || "", ctx.document.baseURI);
+      ctx.location.assign(original_href);
     }
   });
 
@@ -179,6 +172,8 @@ async function load_html(options) {
   ctx.document.dispatchEvent(new Event("readystatechange"));
   ctx.document.dispatchEvent(new Event("load"));
   ctx.window.dispatchEvent(new Event("load"));
+  ctx.window.dispatchEvent(new PageTransitionEvent("pageshow", {persisted: false}));
+  ctx.history._restored(options.history);
 }
 
 async function get_favicon() {

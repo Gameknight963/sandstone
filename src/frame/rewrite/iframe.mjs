@@ -12,8 +12,8 @@ export function rewrite_iframe(iframe_element) {
   let iframe_src = iframe_element.src;
   let iframe_url = "";
 
-  let fetch_src = async (value) => {
-    if (registered) await unregister(frame_id);
+  let fetch_src = async (value, form_data = null) => {
+    if (registered) await unregister(frame_id, {keep_history: true});
     //download the proxied html
     iframe_element.setAttribute("__src", value);
     iframe_url = convert_url(value, ctx.location.href);
@@ -22,7 +22,9 @@ export function rewrite_iframe(iframe_element) {
     let error; //possible network error
     let html;
     try {
-      let response = await network.fetch(iframe_url);
+      let response = await network.fetch(iframe_url, form_data ? {
+        method: "POST", headers: form_data.headers || {"Content-Type": form_data.enctype}, body: form_data.body
+      } : undefined);
       html = await response.text();
       final_url = response.url;
     }
@@ -37,12 +39,12 @@ export function rewrite_iframe(iframe_element) {
       iframe_element.addEventListener("load", (event) => {
         event.stopImmediatePropagation();
         resolve();
-      });
+      }, {once: true});
     })
     
     //create the rpc message channel
     let msg_channel = new MessageChannel();
-    rpc.attach_host(msg_channel.port1);
+    rpc.attach_host(msg_channel.port1, frame_id);
     rpc.set_host(iframe_element, msg_channel.port2);
 
     //create additional rpc target for sending the html

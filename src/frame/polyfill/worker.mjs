@@ -245,7 +245,7 @@ export class FakeWorker extends EventTarget {
     this.#worker.onmessageerror = event => this.dispatchEvent(new MessageEvent("messageerror", {data: event.data}));
     this.#worker.onerror = event => { event.preventDefault(); this.#error(event.error || new Error(event.message)); };
     const channel = new MessageChannel();
-    rpc.attach_host(channel.port1);
+    rpc.attach_host(channel.port1, this.#id);
     rpc.set_host(this.#worker, channel.port2);
     this.#worker.postMessage({sandstone_worker: this.#token, type: "connect"}, [this.#receiver]);
     this.#receiver = null;

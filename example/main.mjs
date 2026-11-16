@@ -69,7 +69,7 @@ async function render_site_data() {
         if (selection.indexedDB) await indexed_db.clear(site.hostname);
         site_data.clear(site.hostname, selection);
         await render_site_data();
-        if (affects_current) await main_frame.navigate_to(current.href);
+        if (affects_current) await main_frame.navigate_to(current.href, null, {history_mode: "reload"});
       };
       row.append(button);
     }
