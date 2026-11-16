@@ -8,6 +8,8 @@ Traditional web proxies like [Ultraviolet](https://github.com/titaniumnetwork-de
 
 Try it here: https://sandstone.pages.dev/
 
+[Download the latest build (ZIP)](https://nightly.link/Gameknight963/sandstone/workflows/build.yaml/main/sandstone.zip). Extract the ZIP and open `sandstone.html` in your browser. The download is available after the first successful build on this fork's `main` branch.
+
 ## Features
 - Every proxied page runs in a sandboxed iframe
 - Can be used from an HTML file or as a data URL
