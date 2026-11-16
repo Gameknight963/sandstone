@@ -1,179 +1,276 @@
 import * as network from "../network.mjs";
 import * as loader from "../loader.mjs";
 import * as rpc from "../../rpc.mjs";
-import * as util from "../../util.mjs";
-import { wrap_obj, run_script_safe, convert_url } from "../context.mjs";
+import * as parser from "../parser.mjs";
+import { ctx, update_ctx, run_script, convert_url } from "../context.mjs";
+import { modules } from "./module.mjs";
+import { prefetch_worker_scripts } from "../worker_scripts.mjs";
+
+const NativeWorker = globalThis.Worker;
+const native_import_scripts = globalThis.importScripts?.bind(globalThis);
+const native_post = globalThis.postMessage?.bind(globalThis);
+const NativeXHR = globalThis.XMLHttpRequest;
+const imported_blobs = new Map();
+let worker_options;
+let worker_ready = false;
+let message_queue = [];
+let pumping = false;
+
+function pump() {
+  if (!worker_ready || pumping || !message_queue.length) return;
+  pumping = true;
+  setTimeout(() => {
+    pumping = false;
+    const event = message_queue.shift();
+    if (event) globalThis.dispatchEvent(new MessageEvent(event.type, {data: event.data, ports: [...event.ports]}));
+    pump();
+  }, 0);
+}
+
+export function mark_worker_started() {
+  if (worker_ready) return;
+  setTimeout(() => { worker_ready = true; pump(); }, 0);
+}
 
 export function fakeImportScripts(...paths) {
-  let script_urls = paths.map((path) => convert_url(path, loader.url));
-  console.log("DEBUG importScripts", network.requests_allowed, script_urls)
-
-  //requests are allowed, we are running as the real worker  
-  if (network.requests_allowed) {
-    for (let url of script_urls) {
-      if (typeof network.resource_cache[url] === "string") {
-        run_script_safe(network.resource_cache[url]);
-      }
-      else if (network.resource_cache[url] === false) {
-        throw Error("Script network request failed");
-      }
-      else {
-        //cache miss - try to load the script async anyways
-        console.warn("WARN importScripts cache miss for", url);
-        network.fetch(url).then(r => r.text()).then((js) => {
-          run_script_safe(js);
-        })
-      }
+  if (loader.worker_type === "module") throw new TypeError("Module scripts don't support importScripts()");
+  const urls = paths.map(path => convert_url(String(path), loader.url));
+  const blobs = urls.map(url => {
+    let source = network.resource_cache[url];
+    if (source === undefined && /^(data|blob):/.test(url) && NativeXHR) {
+      const request = new NativeXHR();
+      request.open("GET", url, false);
+      request.send();
+      source = request.responseText;
+      network.cache_put(url, source);
     }
+    if (source === undefined && worker_options?.probe) {
+      native_post({sandstone_worker: worker_options.token, type: "need-script", url});
+      throw new DOMException("Worker discovery needs a script", "NetworkError");
+    }
+    if (typeof source !== "string") throw new DOMException(`Worker script is unavailable: ${url}`, "NetworkError");
+    if (!imported_blobs.has(url)) {
+      const rewritten = parser.rewrite_js(source, {url});
+      imported_blobs.set(url, network.create_blob_url(new Blob([rewritten], {type: "text/javascript"}), url));
+    }
+    return imported_blobs.get(url);
+  });
+  native_import_scripts(...blobs);
+}
+
+// Invoked by the native worker bootstrap, in its own thread and opaque origin.
+export function initialize_worker(options) {
+  worker_options = options;
+  loader.set_worker_context(options);
+  update_ctx();
+  globalThis.importScripts = fakeImportScripts;
+  for (const [url, source] of Object.entries(options.sources || {})) network.cache_put(url, source);
+  if (options.probe) {
+    network.enable_network(false);
+    const blocked = () => { throw new DOMException("Network disabled during worker discovery", "NetworkError"); };
+    for (const key of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "WebTransport"]) {
+      try { globalThis[key] = blocked; } catch {}
+    }
+    globalThis.postMessage = () => {};
+    for (const key of ["log", "warn", "error", "info"]) console[key] = () => {};
+    try { run_script(options.source); } catch {}
+    setTimeout(() => native_post({sandstone_worker: options.token, type: "probe-done"}), 500);
+    return;
   }
-  //otherwise just log the url that was fetched
-  else {
-    self.postMessage({
-      frame_id: loader.frame_id,
-      urls: script_urls
-    })
-  }
+
+  let port;
+  let host_ready = false;
+  let started = false;
+  const start = async () => {
+    if (started || !port || !host_ready) return;
+    started = true;
+    network.enable_network();
+    try {
+      if (options.type === "module") {
+        modules.preamble = "__ctx__.__worker_module_started__();\n";
+        const record = modules.record(options.url, "javascript", options.credentials);
+        record.source = options.source;
+        await modules.import(options.url, options.url);
+      } else run_script(options.source);
+      mark_worker_started();
+    } catch (error) {
+      native_post({sandstone_worker: options.token, type: "error", message: error.message, name: error.name, stack: error.stack});
+    }
+  };
+  rpc.set_on_attach(() => { host_ready = true; start(); });
+  const connect = event => {
+    if (event.data?.sandstone_worker !== options.token || event.data.type !== "connect" || !event.ports[0]) return;
+    event.stopImmediatePropagation();
+    globalThis.removeEventListener("message", connect);
+    port = event.ports[0];
+    port.onmessage = event => { message_queue.push(event); pump(); };
+    port.onmessageerror = event => { message_queue.push(event); pump(); };
+    port.start();
+    start();
+  };
+  globalThis.addEventListener("message", connect);
+  const native_close = globalThis.close.bind(globalThis);
+  globalThis.close = () => {
+    native_post({sandstone_worker: options.token, type: "closed"});
+    native_close();
+  };
+}
+
+function handler(target, type) {
+  let callback;
+  Object.defineProperty(target, "on" + type, {
+    enumerable: true, configurable: true,
+    get: () => callback?.original || null,
+    set(value) {
+      if (callback) target.removeEventListener(type, callback);
+      callback = typeof value === "function" ? event => { if (value.call(target, event) === false) event.preventDefault(); } : null;
+      if (callback) { callback.original = value; target.addEventListener(type, callback); }
+    }
+  });
 }
 
 export class FakeWorker extends EventTarget {
-  #url; #options; #worker; #msg_queue; #terminated;
+  #url; #options; #worker; #port; #receiver; #terminated = false;
+  #id = "" + Math.random();
+  #token = "" + Math.random();
+  #registered = false;
+  #bootstrap;
+  #controller = new AbortController();
+  #unload;
 
-  constructor(url, options) {
-    console.log("DEBUG new Worker", url, options);
+  constructor(url, options = {}) {
     super();
-    this.#url = url;
-    this.#options = options;
-    this.#worker = null;
-    this.#msg_queue = [];
-    this.#terminated = false;
-
-    this.onerror = () => {};
-    this.onmessage = () => {};
-    this.onmessageerror = () => {};
-
-    this.#load_worker();
+    this.#url = convert_url(String(url), ctx.document?.baseURI || ctx.location.href);
+    this.#options = {...options, type: options.type || "classic", credentials: options.credentials || "same-origin"};
+    if (!["classic", "module"].includes(this.#options.type)) throw new TypeError("Invalid worker type");
+    if (!["omit", "same-origin", "include"].includes(this.#options.credentials)) throw new TypeError("Invalid worker credentials");
+    const target = new URL(this.#url);
+    if (/^https?:$/.test(target.protocol) && target.origin !== ctx.location.origin) throw new DOMException("Worker must be same-origin", "SecurityError");
+    const channel = new MessageChannel();
+    this.#port = channel.port1;
+    this.#receiver = channel.port2;
+    for (const type of ["message", "messageerror", "error"]) handler(this, type);
+    this.#unload = () => this.terminate();
+    globalThis.addEventListener("beforeunload", this.#unload, {once: true});
+    this.#start().catch(error => { if (!this.#terminated) { this.#error(error); this.terminate(); } });
   }
 
-  async #load_worker() {
-    let response = await network.fetch(this.#url);
-    let worker_js = JSON.stringify(await response.text());
-    let worker_id = "" + Math.random();
-    const worker_url = response.url || convert_url(this.#url, loader.url);
-    const register = rpc.create_rpc_wrapper(rpc.host, "frame_register");
-    await register(loader.frame_id, worker_id, worker_url);
-    let temp_script = `
-      ${loader.runtime_src}
-      sandstone_frame.loader.set_url(${JSON.stringify(worker_url)});
-      sandstone_frame.loader.set_frame_id("${worker_id}");
-      sandstone_frame.context.update_ctx();
-      sandstone_frame.rpc.set_on_attach(() => {
-        sandstone_frame.context.run_script(${worker_js});
-      })
-    `;
-    let temp_blob = new Blob([temp_script], {type: "text/javascript"});
-    let temp_blob_url = URL.createObjectURL(temp_blob);
+  #error(error) {
+    const event = new ErrorEvent("error", {message: error.message, filename: this.#url, error, cancelable: true});
+    if (this.dispatchEvent(event)) console.error(error);
+  }
 
+  #payload(source, url, sources, probe = false) {
+    return {
+      source, url, sources: Object.fromEntries(sources), probe,
+      frame_id: this.#id, token: this.#token, type: this.#options.type,
+      credentials: this.#options.credentials, runtime_src: loader.runtime_src,
+      origin: new URL(url).protocol === "data:" ? "null" : ctx.location.origin
+    };
+  }
+
+  #blob(payload) {
+    return URL.createObjectURL(new Blob([
+      loader.runtime_src, "\nsandstone_frame.worker.initialize_worker(", JSON.stringify(payload), ");"
+    ], {type: "text/javascript"}));
+  }
+
+  async #probe(source, url, sources) {
+    for (let attempt = 0; attempt < 32 && !this.#terminated; attempt++) {
+      const payload = this.#payload(source, url, sources, true);
+      payload.type = "classic";
+      const blob = this.#blob(payload);
+      const probe = new NativeWorker(blob);
+      let timer;
+      let abort;
+      const missing = await new Promise(resolve => {
+        abort = () => resolve(null);
+        this.#controller.signal.addEventListener("abort", abort, {once: true});
+        timer = setTimeout(() => resolve(null), 1500);
+        probe.onmessage = event => {
+          if (event.data?.sandstone_worker !== this.#token) return;
+          if (event.data.type === "need-script") resolve(event.data.url);
+          else if (event.data.type === "probe-done") resolve(null);
+        };
+        probe.onerror = event => { event.preventDefault(); resolve(null); };
+      });
+      clearTimeout(timer);
+      this.#controller.signal.removeEventListener("abort", abort);
+      probe.terminate();
+      URL.revokeObjectURL(blob);
+      if (!missing || sources.has(missing)) break;
+      sources.set(missing, false);
+      try {
+        const response = await network.fetch(missing, {signal: this.#controller.signal});
+        if (!response.ok) continue;
+        const script = await response.text();
+        sources.set(missing, script);
+        await prefetch_worker_scripts(script, url, resource => network.fetch(resource, {signal: this.#controller.signal}), sources);
+      } catch {}
+    }
+  }
+
+  async #start() {
+    const credentials = this.#options.type === "classic" ? "same-origin" : this.#options.credentials;
+    const response = await network.fetch(this.#url, {credentials, signal: this.#controller.signal});
+    if (!response.ok) throw new TypeError(`Worker request failed: ${response.status}`);
+    const source = await response.text();
+    const url = response.url || this.#url;
+    let sources = new Map();
+    if (this.#options.type === "classic") {
+      const prefetched = await prefetch_worker_scripts(source, url, resource => network.fetch(resource, {signal: this.#controller.signal}));
+      sources = prefetched.cache;
+      if (prefetched.dynamic) await this.#probe(source, url, sources);
+    }
     if (this.#terminated) return;
-    let temp_worker = new Worker(temp_blob_url, this.#options);
-    this.#worker_attach(temp_worker);
-    let recorded_urls = new Set();
-    let terminate_worker;
-    temp_worker.onmessage = (event) => {
-      if (event.data.frame_id !== worker_id) return;
-      for (let url of event.data.urls)
-        recorded_urls.add(url);
-    }
-    temp_worker.onerror = () => {
-      terminate_worker();
-    }
-
-    //wait for the temp worker to record the imported URLs, then kill it
-    await new Promise((resolve) => {
-      terminate_worker = resolve;
-      setTimeout(resolve, 500);
-    });
-    temp_worker.terminate();
-
-    //fetch all of the imported URLs
-    let promises = [];
-    let script_data = {};
-    for (let url of recorded_urls) {
-      script_data[url] = false;
-      promises.push((async () => {
-        let response = await network.fetch(url);
-        let script_text = await response.text();
-        script_data[url] = script_text;
-      })());
-    }
-    await util.run_parallel(promises);
-
-    console.log("DEBUG recorded urls", recorded_urls);
-    let cache_puts = [];
-    for (let url of recorded_urls) {
-      let safe_url = JSON.stringify(url);
-      let safe_contents = JSON.stringify(script_data[url]);
-      cache_puts.push(`sandstone_frame.network.cache_put(${safe_url}, ${safe_contents});`);
-    }
-    let cache_substr = cache_puts.join("\n");
-    let real_script = `
-      ${loader.runtime_src}
-      ${cache_substr}
-      sandstone_frame.loader.set_url(${JSON.stringify(worker_url)});
-      sandstone_frame.loader.set_frame_id("${worker_id}");
-      sandstone_frame.network.enable_network();
-      sandstone_frame.context.update_ctx();
-      sandstone_frame.rpc.set_on_attach(() => {
-        sandstone_frame.context.run_script(${worker_js});
-      })
-    `;
-    let real_blob = new Blob([real_script], {type: "text/javascript"});
-    let real_blob_url = network.create_blob_url(real_blob, this.#url);
-
-    this.#worker = new Worker(real_blob_url, this.#options);
-    this.#worker_attach(this.#worker);
-    for (let event of ["error", "message", "messageerror"]) {
-      this.#setup_listener(event);
-    }
-    for (let [message, transfer] of this.#msg_queue) {
-      this.#worker.postMessage(message, transfer);
-    }
-
-    //forward the attach message to the parent frame
-    this.#worker.addEventListener("message", (event) => {
-      rpc.message_listener(event);
-      event.stopImmediatePropagation();
-    }, {once: true});
-
-    window.addEventListener("beforeunload", () => {
-      this.terminate();
-    }, null, true);
-  }
-
-  #worker_attach(worker) {
-    let msg_channel = new MessageChannel();
-    rpc.attach_host(msg_channel.port1);
-    rpc.set_host(worker, msg_channel.port2);
-  }
-
-  #setup_listener(event_name) {
-    this.#worker.addEventListener(event_name, (event) => {
-      this["on" + event_name](event);
-      let new_event = new event.constructor(event_name);
-      wrap_obj(event, new_event);
-      this.dispatchEvent(new_event);
-    })
+    const register = rpc.create_rpc_wrapper(rpc.host, "frame_register");
+    await register(loader.frame_id, this.#id, url, {worker: true});
+    this.#registered = true;
+    if (this.#terminated) { this.#unregister(); return; }
+    this.#bootstrap = this.#blob(this.#payload(source, url, sources));
+    // A classic bootstrap can import worker-local module blobs even on file:
+    // origins, where native module-worker construction rejects parent blobs.
+    this.#worker = new NativeWorker(this.#bootstrap, {...this.#options, type: "classic"});
+    this.#worker.onmessage = event => {
+      if (event.data?.sandstone_worker === this.#token) {
+        if (event.data.type === "closed") this.terminate();
+        else if (event.data.type === "error") {
+          this.#error(Object.assign(new Error(event.data.message), {name: event.data.name, stack: event.data.stack}));
+          this.terminate();
+        }
+        return;
+      }
+      this.dispatchEvent(new MessageEvent("message", {data: event.data, ports: [...event.ports]}));
+    };
+    this.#worker.onmessageerror = event => this.dispatchEvent(new MessageEvent("messageerror", {data: event.data}));
+    this.#worker.onerror = event => { event.preventDefault(); this.#error(event.error || new Error(event.message)); };
+    const channel = new MessageChannel();
+    rpc.attach_host(channel.port1);
+    rpc.set_host(this.#worker, channel.port2);
+    this.#worker.postMessage({sandstone_worker: this.#token, type: "connect"}, [this.#receiver]);
+    this.#receiver = null;
   }
 
   postMessage(message, transfer) {
-    if (this.#worker == null) 
-      this.#msg_queue.push([message, transfer]);
-    else
-      this.#worker.postMessage(message, transfer)
+    if (!this.#terminated) this.#port.postMessage(message, transfer);
+  }
+
+  #unregister() {
+    if (!this.#registered) return;
+    this.#registered = false;
+    rpc.create_rpc_wrapper(rpc.host, "frame_unregister")(this.#id).catch(() => {});
   }
 
   terminate() {
-    if (this.#worker)
-      this.#worker.terminate();
+    if (this.#terminated) return;
     this.#terminated = true;
+    this.#controller.abort();
+    this.#worker?.terminate();
+    this.#port.close();
+    this.#receiver?.close();
+    this.#unregister();
+    if (this.#bootstrap) URL.revokeObjectURL(this.#bootstrap);
+    globalThis.removeEventListener("beforeunload", this.#unload);
   }
+  get [Symbol.toStringTag]() { return "Worker"; }
 }

@@ -11,6 +11,8 @@ const moduleTest = await readFile(new URL("modules.playwright.js", import.meta.u
 const verifyModules = runInThisContext(`(${moduleTest})`);
 const resourceTest = await readFile(new URL("resources.playwright.js", import.meta.url), "utf8");
 const verifyResources = runInThisContext(`(${resourceTest})`);
+const workerTest = await readFile(new URL("workers.playwright.js", import.meta.url), "utf8");
+const verifyWorkers = runInThisContext(`(${workerTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 async function timed(operation, label) {
@@ -38,6 +40,7 @@ try {
     const moduleResults = await timed(verifyModules(page), "Module fixture");
     result.passed.push(...moduleResults);
     result.passed.push(...await timed(verifyResources(page), "Resource fixture"));
+    result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
     await page.evaluate(source => main_frame.eval_js(source), dexieSource);
     const dexieResult = await page.evaluate(() => main_frame.eval_js(`(async () => {
       const database = new Dexie('browser-dexie');

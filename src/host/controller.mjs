@@ -63,6 +63,7 @@ function get_frame_bundle() {
 }
 
 export class ProxyFrame {
+  get origin() { return this.url?.origin; }
   constructor() {
     this.url = null;
     this.is_navigating = false;
@@ -227,12 +228,13 @@ rpc.rpc_handlers["cookie_set"] = async (frame_id, value) => {
   if (frame) site_data.setCookie(frame.url.href, value, false);
 };
 
-rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url) => {
+rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) => {
   const parent = iframes[parent_id];
   if (!parent || iframes[child_id]) throw new TypeError("Invalid child frame");
   const root = iframes[parent.root_id];
   const child = {
     id: child_id, parent_id, root_id: root.id, url: new URL(url),
+    origin: options.worker ? new URL(url).protocol === "data:" ? "null" : parent.origin || parent.url.origin : new URL(url).origin,
     session_storage: parent.session_storage,
     async navigate_to(url, form_data) {
       child.url = new URL(url, child.url);
@@ -243,15 +245,18 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url) => {
   };
   iframes[child_id] = child;
   return {
-    local_storage: site_data.local[child.url.origin],
-    session_storage: child.session_storage[child.url.origin],
-    cookies: site_data.documentCookies(child.url.href)
+    local_storage: site_data.local[child.origin],
+    session_storage: child.session_storage[child.origin],
+    cookies: site_data.documentCookies(child.origin === "null" ? child.url.href : child.origin + "/")
   };
 };
 
 rpc.rpc_handlers["frame_unregister"] = child_id => {
   const child = iframes[child_id];
   if (!child?.parent_id) return;
+  for (const frame of Object.values(iframes)) {
+    if (frame.parent_id === child_id) rpc.rpc_handlers["frame_unregister"](frame.id);
+  }
   indexed_db.disconnect(child_id);
   network.clean_ws_connections(child_id);
   delete iframes[child_id];

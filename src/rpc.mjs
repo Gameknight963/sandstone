@@ -173,7 +173,7 @@ function host_set_handler(event) {
   if (!msg || typeof msg !== "object") return;
   let msg_port = event.ports[0];
 
-  if (msg.type === "ping") {
+  if (msg.type === "ping" && event.source) {
     let msg = {
       type: "pong",
       id: Math.random() + ""

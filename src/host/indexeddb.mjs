@@ -18,7 +18,7 @@ export const indexed_db = new IndexedDBService(factory, {
 });
 
 function origin(id) {
-  const value = iframes[id]?.url?.origin;
+  const value = iframes[id]?.origin || iframes[id]?.url?.origin;
   if (!value || value === "null") throw new DOMException("Database origin is unavailable", "SecurityError");
   return value;
 }

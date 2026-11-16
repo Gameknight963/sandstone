@@ -2,6 +2,17 @@ import * as loader from "../loader.mjs";
 
 export let internal = null;
 
+export class FakeWorkerLocation {
+  constructor() {
+    const url = new URL(loader.url);
+    for (const key of ["href", "origin", "protocol", "host", "hostname", "port", "pathname", "search", "hash"]) {
+      Object.defineProperty(this, key, {enumerable: true, get: () => key === "origin" ? loader.worker_origin || url.origin : url[key]});
+    }
+  }
+  toString() { return this.href; }
+  get [Symbol.toStringTag]() { return "WorkerLocation"; }
+}
+
 export class FakeLocation {
   constructor() {
     internal = new URL(loader.url);

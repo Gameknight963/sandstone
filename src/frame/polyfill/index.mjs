@@ -1,8 +1,8 @@
-export { FakeLocation } from "./location.mjs";
+export { FakeLocation, FakeWorkerLocation } from "./location.mjs";
 export { FakeURL } from "./url.mjs";
 export { FakeHistory } from "./history.mjs";
 export { FakeStorage } from "./storage.mjs";
-export { fakeImportScripts, FakeWorker } from "./worker.mjs";
+export { fakeImportScripts, FakeWorker, mark_worker_started } from "./worker.mjs";
 
 export { fetch } from "./fetch.mjs";
 export { FakeXMLHttpRequest } from "./xhr.mjs";

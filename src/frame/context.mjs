@@ -88,15 +88,17 @@ export class CustomCTX {
   set globalThis(value) {internal.globalThis = value}
   get globalThis() {return internal.globalThis}
 
-  get window() {return this.__proxy__}
+  get window() {return is_worker ? undefined : this.__proxy__}
   get origin() {return this.location.origin}
   get document() {return is_worker ? undefined : intercept.document.__proxy__}
   get parent() {
+    if (is_worker) return undefined;
     if (loader.is_iframe)
       return globalThis.parent;
     return this.__proxy__;
   }
   get top() {
+    if (is_worker) return undefined;
     if (loader.is_iframe)
       return globalThis.parent;
     return this.__proxy__;
@@ -132,6 +134,7 @@ export class CustomCTX {
   __import__(referrer, specifier, options) { return modules.import(specifier, referrer, options); }
   __module_meta__(url) { return modules.meta(url); }
   __json_module__(source) { return parse_json(source); }
+  __worker_module_started__() { polyfill.mark_worker_started(); }
 
   __get_this__(this_obj) {
     if (this_obj === globalThis)
@@ -202,16 +205,19 @@ export function wrap_obj(wrapper, target) {
 }
 
 export function update_ctx(options = {}) {
-  internal.location = new polyfill.FakeLocation();
+  internal.location = is_worker ? new polyfill.FakeWorkerLocation() : new polyfill.FakeLocation();
   internal.self = ctx.__proxy__;
   internal.globalThis = ctx.__proxy__;
-  internal.history = new polyfill.FakeHistory();
+  internal.history = is_worker ? undefined : new polyfill.FakeHistory();
+  if (is_worker) { internal.localStorage = undefined; internal.sessionStorage = undefined; }
+  if (!is_worker) {
   internal.localStorage = new polyfill.FakeStorage(options.local_storage, entries => {
     loader.local_storage(loader.frame_id, entries).catch(console.error);
   });
   internal.sessionStorage = new polyfill.FakeStorage(options.session_storage, entries => {
     loader.session_storage(loader.frame_id, entries).catch(console.error);
   });
+  }
   delete globalThis.caches;
   // These APIs would bypass the relay and contact destination peers directly.
   for (const key of ["RTCPeerConnection", "webkitRTCPeerConnection"]) {

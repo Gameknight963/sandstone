@@ -31,7 +31,9 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options) {
   requests.set(key, request);
   let response;
   try {
-    response = await fetch(url, {...options, signal: request.controller.signal}, {url: frame.url.href});
+    response = await fetch(url, {...options, signal: request.controller.signal}, {
+      url: frame.url.origin === "null" && frame.origin && frame.origin !== "null" ? frame.origin + "/" : frame.url.href
+    });
     request.reader = response.body?.getReader();
   } catch (error) {
     requests.delete(key);

@@ -83,6 +83,7 @@ export class ModuleLoader {
     this.tail = Promise.resolve();
     this.inline_id = 0;
     this.module_id = 0;
+    this.preamble = "";
   }
 
   record(key, type = "javascript", credentials = "same-origin") {
@@ -140,12 +141,16 @@ export class ModuleLoader {
       } catch (error) { record.error = error; throw error; }
     }
     const compile = record => {
-      const source = record.type === "json" ? `export default __ctx__.__json_module__(${JSON.stringify(record.source)});` : this.rewrite(record.source, {
+      let source = record.type === "json" ? `export default __ctx__.__json_module__(${JSON.stringify(record.source)});` : this.rewrite(record.source, {
         module: true, url: record.url, stripAttributes: true, resolve: specifier => {
           const dependency = this.records.get(this.map.resolve(specifier, record.url));
           return dependency.blob || dependency.nativeKey;
         }
       });
+      if (this.preamble) {
+        const offset = source.startsWith("#!") ? source.indexOf("\n") + 1 || source.length : 0;
+        source = source.slice(0, offset) + "\n" + this.preamble + source.slice(offset);
+      }
       record.blob = this.createURL(source, "text/javascript", record.url);
     };
     // DAGs need no import map at all. This also supports dynamic chunk loading in

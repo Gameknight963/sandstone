@@ -12,7 +12,10 @@ export const navigate = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export const local_storage = rpc.create_rpc_wrapper(rpc.host, "local_storage");
 export const session_storage = rpc.create_rpc_wrapper(rpc.host, "session_storage");
 
-export const runtime_src = self.document?.currentScript?.innerHTML;
+export let runtime_src = self.document?.currentScript?.innerHTML;
+export let worker_type;
+export let worker_origin;
+export let worker_probe = false;
 export let url; //the proxied page url
 export let frame_id; //the current frame id
 export let frame_html; //the html for the frame runtime
@@ -69,6 +72,17 @@ export function set_frame_id(id) {
 }
 export function set_url(_url) {
   url = _url;
+}
+
+export function set_worker_context(options) {
+  url = options.url;
+  base_url = options.url;
+  frame_id = options.frame_id;
+  worker_type = options.type;
+  worker_origin = options.origin;
+  worker_probe = !!options.probe;
+  runtime_src = options.runtime_src;
+  is_loaded = true;
 }
 
 function get_frame_html() {
