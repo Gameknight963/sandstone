@@ -174,12 +174,14 @@ export class ProxyFrame {
     this.rpc_target.set_target(msg_channel.port1);
     msg_channel.port1.start();
     await rpc.set_host(this.iframe, msg_channel.port2);
+    const beacon_context = network.beacons.register(this.id, {url: this.url.href, top_url: this.url.href});
 
     try {
       await this.send_page({
         url: this.url.href,
         html: html, 
         frame_id: this.id,
+        beacon_context,
         error: error,
         settings: settings,
         default_settings: this.default_settings,
@@ -196,6 +198,7 @@ export class ProxyFrame {
         url: this.url.href,
         html: html, 
         frame_id: this.id,
+        beacon_context,
         error: error_msg,
         settings: settings,
         default_settings: this.default_settings,
@@ -284,6 +287,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   iframes[child_id] = child;
   child.history.navigate(url, {mode: saved?.navigation?.history_mode || "push"});
   return {
+    beacon_context: network.beacons.register(child_id, {url: child.url.href, top_url: root.url.href}),
     local_storage: site_data.local[child.origin],
     session_storage: child.session_storage[child.origin],
     cookies: site_data.documentCookies(child.origin === "null" ? child.url.href : child.origin + "/"),

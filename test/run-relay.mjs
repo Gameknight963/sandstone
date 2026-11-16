@@ -10,10 +10,26 @@ import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
 // relay binds only loopback and permits connections only to this test's port.
 const held=new Map(),requests=[],closed=[],sockets=new Set(),timers=new Set();
 const authRequests=[];
+const beaconRequests=[],heldBeacons=new Map();
 const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
 const server=createServer({shouldUpgradeCallback:request=>request.headers.upgrade?.toLowerCase()==='websocket'},(request,response)=>{
   const url=new URL(request.url,'http://localhost');
   const client=url.searchParams.get('client');
+  if(url.pathname==='/beacon'){
+    const chunks=[];
+    request.on('data',chunk=>chunks.push(chunk));
+    request.on('end',()=>{
+      beaconRequests.push({client,name:url.searchParams.get('name'),body:Buffer.concat(chunks),type:request.headers['content-type']||'',cookie:request.headers.cookie||'',origin:request.headers.origin});
+      if(url.searchParams.has('hold'))heldBeacons.set(client,response);
+      else {response.writeHead(204,{'Set-Cookie':'beacon=visible; Path=/'});response.end();}
+    });return;
+  }
+  if(url.pathname==='/beacon-child'){
+    response.writeHead(200,{'Content-Type':'text/html'});
+    const ready='/beacon?client='+encodeURIComponent(client)+'&name=ready';
+    const unload='/beacon?client='+encodeURIComponent(client)+'&name=unload&hold=1';
+    response.end('<!doctype html><script>navigator.sendBeacon('+JSON.stringify(ready)+',"child ready");addEventListener("unload",()=>navigator.sendBeacon('+JSON.stringify(unload)+',"child unload"));</script>');return;
+  }
   if(url.pathname==='/ws-login'){
     response.writeHead(200,{'Set-Cookie':[
       'auth_session=token; HttpOnly; SameSite=Strict; Path=/ws-auth',
@@ -128,6 +144,37 @@ const authenticatedScript=`(async()=>{
   const auth=value=>value.split('; ').filter(cookie=>cookie.startsWith('auth_')).sort();
   return JSON.stringify({visible:auth(visible),sent:auth(sent)});
 })()`;
+const beaconScript=client=>`(()=>{
+  const target=${JSON.stringify(origin+'/beacon?client='+client+'&name=')};
+  const form=new FormData();form.append('message','one\\ntwo');form.append('file',new Blob(['file contents'],{type:'text/plain'}),'hello.txt');
+  const bytes=new Uint8Array([0,2,3,0]);
+  const values=[navigator.sendBeacon(target+'text','saved €'),navigator.sendBeacon(target+'params',new URLSearchParams({q:'a b'})),
+    navigator.sendBeacon(target+'blob',new Blob(['{"saved":true}'],{type:'application/json'})),
+    navigator.sendBeacon(target+'binary',new DataView(bytes.buffer,1,2)),navigator.sendBeacon(target+'form',form),navigator.sendBeacon(target+'empty')];
+  bytes.fill(9);form.set('message','changed');
+  values.push(navigator.sendBeacon(target+'oversized',new Blob([new Uint8Array(65537)])));
+  for(const invoke of [()=>navigator.sendBeacon(),()=>navigator.sendBeacon('file:///local'),()=>navigator.sendBeacon(target+'stream',new ReadableStream())]){
+    try{invoke();values.push('no exception');}catch(error){values.push(error.name);}
+  }
+  return JSON.stringify(values);
+})()`;
+async function waitBeacons(client,count){
+  const deadline=Date.now()+10000;
+  while(beaconRequests.filter(value=>value.client===client).length<count){
+    if(Date.now()>deadline)throw new Error('Beacon delivery timed out: '+client+' '+JSON.stringify(beaconRequests.map(({client,name})=>({client,name}))));
+    await new Promise(resolve=>setTimeout(resolve,10));
+  }
+}
+async function beaconBodies(client){
+  return Promise.all(beaconRequests.filter(value=>value.client===client).map(async value=>{
+    let body=value.body.toString('hex'),type=value.type.toLowerCase();
+    if(type.startsWith('multipart/form-data')){
+      const data=await new Response(value.body,{headers:{'Content-Type':value.type}}).formData();
+      body=await Promise.all([...data].map(async([name,item])=>[name,typeof item==='string'?item:{name:item.name,type:item.type,text:await item.text()}]));type='multipart/form-data';
+    }
+    return {name:value.name,type,body,origin:value.origin};
+  })).then(values=>values.sort((a,b)=>a.name.localeCompare(b.name)));
+}
 try{
   browser=await chromium.launch({channel:channel==='headless'?undefined:channel,headless:true});
   const nativeContext=await browser.newContext(),nativePage=await nativeContext.newPage();
@@ -135,6 +182,9 @@ try{
   const baseline=JSON.parse(await nativePage.evaluate(source=>eval(source),sourceScript('native')).catch(error=>{console.error(JSON.stringify({requests,held:[...held.keys()]}));throw error;}));
   const authBaseline=JSON.parse(await nativePage.evaluate(source=>eval(source),authenticatedScript));
   assert.deepEqual(authBaseline,{visible:['auth_login=visible','auth_visible=handshake'],sent:['auth_hidden=secret','auth_login=visible','auth_visible=handshake']});
+  const beaconBaseline=JSON.parse(await nativePage.evaluate(source=>eval(source),beaconScript('native')));
+  assert.deepEqual(beaconBaseline,[true,true,true,true,true,true,false,'TypeError','TypeError','TypeError']);
+  await waitBeacons('native',6);const nativeBeaconBodies=await beaconBodies('native');
   await nativeContext.close();
   for(const storageDenied of [false,true]){
   const client='proxy-'+storageDenied,workerClient='worker-'+storageDenied;
@@ -157,6 +207,11 @@ try{
   },origin);
   const authResult=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),authenticatedScript));
   assert.deepEqual(authResult,authBaseline,'WebSocket login/handshake cookie behavior differs from the native browser');
+  const beaconClient='beacon-'+storageDenied;
+  const beaconResult=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),beaconScript(beaconClient)));
+  assert.deepEqual(beaconResult,beaconBaseline,'sendBeacon synchronous behavior differs from native Chromium');
+  await waitBeacons(beaconClient,6);
+  assert.deepEqual(await beaconBodies(beaconClient),nativeBeaconBodies,'Beacon payloads differ from native Chromium');
   const echoed=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),websocketScript));
   assert.deepEqual(echoed,{values:[[98,108,111,98,32,102,105,114,115,116],'text second',[2,3],'last'],state:3,buffered:0});
   const workerEcho=JSON.parse(await page.evaluate(source=>main_frame.eval_js(`new Promise((resolve,reject)=>{
@@ -232,11 +287,30 @@ try{
   })`),origin);
   assert.deepEqual(JSON.parse(cleared),{failed:true,cookies:''},'Per-site clearing did not remove WebSocket credentials');
   assert.equal(authRequests.at(-1).cookie,'');
+  const heldClient='held-'+storageDenied,unloadClient='unload-'+storageDenied,childClient='child-beacon-'+storageDenied;
+  await page.evaluate(({origin,heldClient,unloadClient})=>{
+    sandstone.controller.site_data.setCookie(origin+'/','beacon_session=secret; HttpOnly; SameSite=Strict; Path=/');
+    return main_frame.eval_js('navigator.sendBeacon('+JSON.stringify(origin+'/beacon?client='+heldClient+'&hold=1')+',"accepted before navigation");addEventListener("unload",()=>navigator.sendBeacon('+JSON.stringify(origin+'/beacon?client='+unloadClient+'&hold=1')+',"sent during unload"));true');
+  },{origin,heldClient,unloadClient});
+  await waitBeacons(heldClient,1);
+  await page.evaluate(url=>main_frame.eval_js('const child=document.createElement("iframe");child.src='+JSON.stringify(url)+';document.body.append(child);true'),origin+'/beacon-child?client='+childClient);
+  await waitBeacons(childClient,1);
+  const nextOrigin=origin.replace('127.0.0.1','localhost');
+  await page.evaluate(async url=>{main_frame.special_pages[url]='<!doctype html><body>Beacon navigation destination</body>';await main_frame.navigate_to(url);},nextOrigin+'/next');
+  await waitBeacons(unloadClient,1);
+  await waitBeacons(childClient,2);
+  for(const client of [heldClient,unloadClient,childClient]){
+    const value=beaconRequests.filter(value=>value.client===client).at(-1);
+    assert.equal(value.origin,origin);assert.ok(value.cookie.includes('beacon_session=secret'));
+    const response=heldBeacons.get(client);assert.ok(response&&!response.destroyed,'An accepted beacon was aborted by navigation');
+    response.writeHead(204);response.end();heldBeacons.delete(client);
+  }
+  await page.waitForFunction(()=>sandstone.network.beacons.pending.size===0);
   await page.waitForFunction(()=>sandstone.network.session.active_requests===0 && sandstone.network.session.requests_list.length===0 && Object.keys(sandstone.network.session.request_callbacks).length===0);
   assert.deepEqual(direct,[],'A relayed connection made a direct HTTP request');
   assert.deepEqual(errors,[],'A relayed connection produced a browser error');
   assert.ok(closed.some(value=>value.client===client&&value.count===3));
-    console.log(JSON.stringify({storageDenied,passed:['WebSocket echo/protocol/binary ordering','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','native request cleanup'],events:proxied,direct}));
+    console.log(JSON.stringify({storageDenied,passed:['native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','native request cleanup'],events:proxied,direct}));
   await context.close();
   }
 }finally{

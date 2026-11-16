@@ -6,9 +6,12 @@ import { fetch_with_cookies } from "./request.mjs";
 import { requests, request_key, cancel_requests } from "./streams.mjs";
 import { streaming_http_session } from "./http_session.mjs";
 import { relay_websocket_class, websocket_options } from "./websocket.mjs";
+import { BeaconQueue } from './beacon.mjs';
 
 export const ws_connections = {};
 export let session = null;
+export const beacons = new BeaconQueue({fetch: (...args) => fetch(...args), cookies: url => site_data.documentCookies(url)});
+rpc_handlers.beacon = (context, url, body) => beacons.send(context, url, body);
 
 export async function fetch(url, options, context) {
   return fetch_with_cookies((url, init) => session.fetch(url, init), site_data, url, options, context);
@@ -154,6 +157,7 @@ rpc_handlers["ws_close"] = function (frame_id, ws_id) {
 
 //when navigating to a new page we need to close unused connections
 export function clean_ws_connections(id_to_clean) {
+  beacons.retire(id_to_clean);
   cancel_requests(id_to_clean);
   let frame_ids = Object.keys(iframes);
   

@@ -18,6 +18,7 @@ export let worker_origin;
 export let worker_probe = false;
 export let url; //the proxied page url
 export let frame_id; //the current frame id
+export let beacon_context;
 export let frame_html; //the html for the frame runtime
 export let version; //the sandstone version
 export let is_loaded = false;
@@ -92,6 +93,7 @@ function get_frame_html() {
 }
 
 async function load_html(options) {
+  beacon_context = options.beacon_context;
   version = options.version;
   is_iframe = options.is_iframe || false;
   default_settings = options.default_settings;
