@@ -1,5 +1,5 @@
 import * as rewrite from "../rewrite/index.mjs";
-import { proxy_function } from "../context.mjs";
+import { proxy_function, get_dom_property } from "../context.mjs";
 import * as loader from "../loader.mjs";
 
 function prepare(node) {
@@ -9,8 +9,8 @@ function prepare(node) {
 
 function execute(node) {
   if (!loader.is_loaded) return;
-  node?.__sandstone_execute__?.();
-  for (const child of node?.children || []) execute(child);
+  if (typeof node?.__sandstone_execute__ === "function") node.__sandstone_execute__();
+  for (const child of get_dom_property(node, "children") || []) execute(child);
 }
 
 function intercept(target, key, first_only = false) {

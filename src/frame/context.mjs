@@ -260,3 +260,14 @@ export function intercept_property(target, key, handler) {
   Object.defineProperty(target, key, {configurable: true, enumerable: descriptor.enumerable, ...handler});
   return descriptor;
 }
+
+// HTMLFormElement named controls override instance properties, including DOM
+// accessors such as children and attributes. Internal traversal must bypass them.
+export function get_dom_property(target, key) {
+  let prototype = target && Object.getPrototypeOf(target);
+  while (prototype) {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
+    if (descriptor) return descriptor.get ? descriptor.get.call(target) : descriptor.value;
+    prototype = Object.getPrototypeOf(prototype);
+  }
+}

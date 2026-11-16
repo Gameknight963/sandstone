@@ -1,15 +1,18 @@
 import * as rewrite from "./index.mjs";
 
 import { parse_css } from "./css.mjs";
-import { ctx, run_script } from "../context.mjs";
+import { ctx, run_script, get_dom_property } from "../context.mjs";
+
+const rewritten_elements = new WeakSet();
 
 //non-recursive element rewrite
 function rewrite_element_single(element) {
+  const tag = get_dom_property(element, "tagName");
   //handlers for specific tags
   let promise;
-  if (element.tagName === "NOSCRIPT")
+  if (tag === "NOSCRIPT")
     promise = rewrite.noscript(element);
-  else if (element.matches("img, source, video, audio, input[type='image'], track"))
+  else if (Element.prototype.matches.call(element, "img, source, video, audio, input[type='image'], track"))
     promise = rewrite.media(element);
   else if (element instanceof HTMLLinkElement && element.rel !== "stylesheet")
     promise = rewrite.link(element);
@@ -21,42 +24,41 @@ function rewrite_element_single(element) {
     promise = rewrite.style(element);
   else if (element instanceof HTMLScriptElement)
     promise = rewrite.script(element);
-  else if (element instanceof HTMLFormElement)
-    promise = rewrite.form(element);
   else if (element instanceof HTMLIFrameElement)
     promise = rewrite.iframe(element);
   let promises = [promise];
 
   //patch event handler attributes for all tags
-  for (let j = 0; j < element.attributes.length; j++) {
-    let attribute = element.attributes[j].name;
+  for (const item of [...get_dom_property(element, "attributes")]) {
+    let attribute = item.name;
     if (!attribute.startsWith("on")) continue;
-    let handler_script = element.getAttribute(attribute);
+    let handler_script = Element.prototype.getAttribute.call(element, attribute);
     let event_name = attribute.substring(2);
 
-    element.setAttribute("__" + attribute, handler_script);
-    element.removeAttribute(attribute);
-    element.addEventListener(event_name, () => {
+    Element.prototype.setAttribute.call(element, "__" + attribute, handler_script);
+    Element.prototype.removeAttribute.call(element, attribute);
+    EventTarget.prototype.addEventListener.call(element, event_name, () => {
       run_script(handler_script, element);
     });
   }
 
   //rewrite inline styles
-  let inline_style = element.getAttribute("style");
+  let inline_style = Element.prototype.getAttribute.call(element, "style");
   if (inline_style) {
-    element.style.cssText = "";
+    const style = get_dom_property(element, "style");
+    style.cssText = "";
     let new_css = parse_css(inline_style, ctx.document.baseURI)
     if (typeof new_css === "string") {
-      element.style.cssText = new_css;
+      style.cssText = new_css;
     }
     else {
       promises.push((async () => {
-        element.style.cssText = await new_css;
+        style.cssText = await new_css;
       })());
     }
   }
 
-  element.addEventListener("focus", () => {
+  EventTarget.prototype.addEventListener.call(element, "focus", () => {
     ctx.document.activeElement = element;
   })
 
@@ -65,20 +67,20 @@ function rewrite_element_single(element) {
 
 //a recursive wrapper for rewriting an element and its descendants
 export function rewrite_element(element) {
-  if (element?.nodeType === 11 || element?.nodeType === 9) {
-    return Promise.all([...element.children].map(child => rewrite_element(child)));
+  if (element instanceof DocumentFragment || element instanceof Document) {
+    return Promise.all([...get_dom_property(element, "children")].map(child => rewrite_element(child)));
   }
   if (!(element instanceof Element))
     return;
 
   let promises = [];
-  if (!element.__rewritten__) {
-    element.__rewritten__ = true;
+  if (!rewritten_elements.has(element) && (element instanceof HTMLFormElement || element.__rewritten__ !== true)) {
+    rewritten_elements.add(element);
     promises = rewrite_element_single(element);
   }
   
   //recursively rewrite children
-  let children = [...element.children];
+  let children = [...get_dom_property(element, "children")];
   for (let child of children) {
     promises.push(rewrite_element(child));
   }
