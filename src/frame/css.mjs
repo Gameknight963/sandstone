@@ -137,12 +137,47 @@ export function css_references(source) {
 
 const empty_resource = "data:application/octet-stream,";
 const empty_stylesheet = "data:text/css,";
-export function rewrite_css(source, base, {fetch, createURL, supports}, ancestors = new Set()) {
-  source = String(source);
-  const references = css_references(source).filter(reference => {
+export function css_resource_references(source) {
+  return css_references(String(source)).filter(reference => {
     if (!reference.url || reference.url.startsWith("#")) return false;
     return reference.imported || !/^(data|blob):/i.test(reference.url);
   });
+}
+
+// Synchronous CSSOM operations need valid, local placeholders until the relay
+// finishes. Preserve token boundaries so comments, strings and data URLs survive.
+export function prepare_css(source, prefix, supports) {
+  source = String(source);
+  const markers = new Map();
+  const edits = [];
+  for (const reference of css_resource_references(source)) {
+    let url;
+    if (reference.condition && supports && !supports(reference.condition)) url = empty_stylesheet;
+    else {
+      url = (reference.imported ? 'data:text/css,/*' : empty_resource) + prefix + markers.size + (reference.imported ? '*/' : '');
+      markers.set(url, reference.url);
+      if (reference.condition && supports) edits.push({start: reference.condition_start, end: reference.condition_end, value: ''});
+    }
+    edits.push({start: reference.start, end: reference.end, value: reference.quoted ? JSON.stringify(url) : `url(${JSON.stringify(url)})`});
+  }
+  for (const {start, end, value} of edits.sort((a, b) => b.start - a.start)) source = source.slice(0, start) + value + source.slice(end);
+  return {css: source, markers};
+}
+
+export function restore_css(source, markers) {
+  const references = css_references(source);
+  for (let index = references.length - 1; index >= 0; index--) {
+    const {start, end, url, quoted} = references[index];
+    if (!markers.has(url)) continue;
+    const value = JSON.stringify(markers.get(url));
+    source = source.slice(0, start) + (quoted ? value : `url(${value})`) + source.slice(end);
+  }
+  return source;
+}
+
+export function rewrite_css(source, base, {fetch, createURL, supports}, ancestors = new Set()) {
+  source = String(source);
+  const references = css_resource_references(source);
   if (!references.length) return source;
   const pending = new Map();
   const replacements = references.map(reference => {

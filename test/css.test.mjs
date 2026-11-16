@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { css_references, decode_css, rewrite_css } from '../src/frame/css.mjs';
+import { css_references, decode_css, rewrite_css, prepare_css, restore_css } from '../src/frame/css.mjs';
 
 test('CSS resource tokens respect comments, strings, escapes and image-set type hints', () => {
   const source = String.raw`/* url(ignore.png) */
@@ -90,4 +90,17 @@ test('Conditional imports can be evaluated without relying on native import supp
     supports:()=>true, async fetch(url){assert.equal(url,'https://site.test/yes.css');return new Response('.x{}');}, createURL(){return 'blob:query';}
   });
   assert.equal(query,'@import "blob:query" ;');
+});
+
+test('Synchronous CSS placeholders retain syntax and restore only resource tokens', () => {
+  const source='@import "theme.css" layer(theme) supports(display:grid); .x{background:url(a.png);content:"url(a.png)";mask:url(#id)}';
+  const prepared=prepare_css(source,'pending-',()=>true);
+  assert.doesNotMatch(prepared.css, /supports\(display:grid\)/);
+  assert.equal(prepared.markers.size,2);
+  assert.match(prepared.css, /data:text\/css,\/\*pending-0\*\//);
+  assert.match(prepared.css, /data:application\/octet-stream,pending-1/);
+  const restored=restore_css(prepared.css,prepared.markers);
+  assert.deepEqual(css_references(restored).map(reference=>reference.url),['theme.css','a.png','#id']);
+  assert.match(restored,/layer\(theme\)/);
+  assert.match(restored,/content:"url\(a.png\)"/);
 });

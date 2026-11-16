@@ -96,6 +96,7 @@ export class CustomCTX {
   get XMLHttpRequest() {return polyfill.FakeXMLHttpRequest}
   get XMLHttpRequestUpload() {return polyfill.FakeXMLHttpRequest.Upload}
   get XMLHttpRequestEventTarget() {return polyfill.FakeXMLHttpRequest.EventTarget}
+  get CSSStyleSheet() {return intercept.FakeCSSStyleSheet}
   get history() {return internal.history}
 
   get localStorage() {return internal.localStorage}

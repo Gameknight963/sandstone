@@ -24,6 +24,8 @@ const formTest = await readFile(new URL("forms.playwright.js", import.meta.url),
 const verifyForms = runInThisContext(`(${formTest})`);
 const xhrTest = await readFile(new URL("xhr.playwright.js", import.meta.url), "utf8");
 const verifyXHR = runInThisContext(`(${xhrTest})`);
+const cssomTest = await readFile(new URL("cssom.playwright.js", import.meta.url), "utf8");
+const verifyCSSOM = runInThisContext(`(${cssomTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 async function timed(operation, label) {
@@ -31,7 +33,8 @@ async function timed(operation, label) {
   try { return await Promise.race([operation, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label + " timed out")), 30000); })]); }
   finally { clearTimeout(timer); }
 }
-const browser = await chromium.launch({channel: process.env.BROWSER_CHANNEL || "chrome", headless: true});
+const browserChannel = process.env.BROWSER_CHANNEL || "chrome";
+const browser = await chromium.launch({channel: browserChannel === "headless" ? undefined : browserChannel, headless: true});
 try {
   for (const storageDenied of [false, true]) {
     const context = await browser.newContext();
@@ -78,6 +81,7 @@ try {
     assert.deepEqual(axiosResult,{json:42,text:'A€B',progress:[5,5],upload:3,
       failures:{missing:'ERR_BAD_REQUEST',broken:'ERR_NETWORK',delay:'ECONNABORTED',cancel:'ERR_CANCELED'}});
     result.passed.push('Axios XHR adapter JSON/progress/errors/cancellation');
+    result.passed.push(...await timed(verifyCSSOM(page), "CSSOM fixture"));
     await page.evaluate(source => main_frame.eval_js(source), dexieSource);
     const dexieResult = await page.evaluate(() => main_frame.eval_js(`(async () => {
       const database = new Dexie('browser-dexie');
