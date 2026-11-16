@@ -5,6 +5,7 @@ import { site_data } from "./site_data.mjs";
 import { fetch_with_cookies } from "./request.mjs";
 import { requests, request_key, cancel_requests } from "./streams.mjs";
 import { streaming_http_session } from "./http_session.mjs";
+import { relay_websocket_class } from "./websocket.mjs";
 
 export const ws_connections = {};
 export let session = null;
@@ -84,7 +85,9 @@ rpc_handlers["fetch_abort"] = function(frame_id, request_id) {
 //handle websocket creation 
 rpc_handlers["ws_new"] = function (frame_id, url, protocols, options) {
   let ws_id = Math.random() + "";
-  let ws = new libcurl.CurlWebSocket(url, protocols, options);
+  if (!iframes[frame_id]) throw new TypeError('Unknown frame');
+  const RelayWebSocket = relay_websocket_class(libcurl.CurlWebSocket);
+  let ws = new RelayWebSocket(url, protocols, options);
   let ws_events = [];
 
   if (!ws_connections[frame_id]) ws_connections[frame_id] = {};
@@ -98,18 +101,13 @@ rpc_handlers["ws_new"] = function (frame_id, url, protocols, options) {
   //set up event listeners to forward to the frame
   for (let event_name of ["open", "message", "close", "error"]) {
     ws["on" + event_name] = (data) => {
+      if (event_name === 'open') data = {protocol: ws.protocol || ''};
+      if (event_name === 'close' || event_name === 'error') ws_info.ended = true;
       ws_info.events.push([event_name, data]);
       ws_info.callback?.();
     }
   }
 
-  //make sure ws is closed automatically
-  let close_callback = ws.onclose;
-  ws.onclose = (reason) => {
-    close_callback(reason);
-    ws.close();
-  }
-  
   return ws_id;
 }
 
@@ -120,6 +118,7 @@ rpc_handlers["ws_event"] = function (frame_id, ws_id) {
   if (ws_info.events.length > 0) {
     let ws_events = ws_info.events;
     ws_info.events = [];
+    if (ws_info.ended) delete ws_connections[frame_id][ws_id];
     return ws_events;
   }
     
@@ -128,6 +127,7 @@ rpc_handlers["ws_event"] = function (frame_id, ws_id) {
       resolve(ws_info.events);
       ws_info.events = [];
       ws_info.callback = null;
+      if (ws_info.ended) delete ws_connections[frame_id][ws_id];
     }
   })
 }
@@ -143,6 +143,7 @@ rpc_handlers["ws_close"] = function (frame_id, ws_id) {
   if (!ws_info) return;
   delete ws_connections[frame_id][ws_id];
   ws_info.ws.close();
+  ws_info.callback?.();
 }
 
 //when navigating to a new page we need to close unused connections
@@ -156,6 +157,7 @@ export function clean_ws_connections(id_to_clean) {
     for (let [ws_id, ws_info] of Object.entries(frame_websockets)) {
       delete ws_connections[frame_id][ws_id];
       ws_info.ws.close();
+      ws_info.callback?.();
     }
     
     delete ws_connections[frame_id];

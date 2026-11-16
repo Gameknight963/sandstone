@@ -50,7 +50,7 @@ jobs:
           BROWSER_CHANNEL: chromium
         run: npm run test:browser
 
-      - name: Test real relay streaming
+      - name: Test real relay networking
         env:
           BROWSER_CHANNEL: chromium
         run: npm run test:relay

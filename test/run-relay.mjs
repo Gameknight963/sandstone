@@ -4,6 +4,7 @@ import {pathToFileURL, fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright-core';
 import {server as wisp} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
+import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -42,7 +43,17 @@ const server=createServer({shouldUpgradeCallback:request=>request.headers.upgrad
   response.writeHead(200,{'Content-Type':'text/html'});response.end('<!doctype html><body>Native SSE baseline</body>');
 });
 server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));});
-server.on('upgrade',(request,socket,head)=>wisp.routeRequest(request,socket,head));
+const echoes = new WebSocketServer({noServer: true, handleProtocols: protocols => protocols.has('second') ? 'second' : false});
+echoes.on('connection', (socket, request) => {
+  if (request.url === '/ws-close') { socket.close(4001, 'server finished'); return; }
+  socket.on('message', (data, isBinary) => socket.send(data, {binary: isBinary}));
+});
+server.on('upgrade',(request,socket,head)=>{
+  if (request.url === '/echo' || request.url === '/ws-close') echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
+  else if (request.url === '/ws-pending') server.emit('ws-pending',socket);
+  else if (request.url === '/ws-refused') socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');
+  else wisp.routeRequest(request,socket,head);
+});
 server.listen(0,'127.0.0.1');await once(server,'listening');
 const origin=`http://127.0.0.1:${server.address().port}`;
 wisp.options.allow_loopback_ips=true;wisp.options.port_whitelist=[server.address().port];
@@ -59,6 +70,24 @@ const sourceScript=(client,redirect=false)=>`new Promise((resolve,reject)=>{
     if(event.data==='final'){source.close();clearTimeout(timeout);resolve(JSON.stringify(events));}
   };
   source.addEventListener('update',message);source.onmessage=message;
+})`;
+const websocketScript = `new Promise((resolve,reject)=>{
+  const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/echo')},['first','second']);
+  const values=[];
+  const timeout=setTimeout(()=>{socket.close();reject(new Error('WebSocket echo timeout: '+JSON.stringify(values)));},10000);
+  socket.binaryType='arraybuffer';
+  socket.onerror=()=>reject(new Error('WebSocket echo failed'));
+  socket.onopen=function(event){
+    if(this!==socket || event.target!==socket || socket.protocol!=='second') {reject(new Error('WebSocket open metadata'));return;}
+    socket.send(new Blob(['blob first'])); socket.send('text second');
+    const bytes=new Uint8Array([0,2,3,0]);socket.send(new DataView(bytes.buffer,1,2));bytes.fill(9);
+    socket.send('last');
+  };
+  socket.onmessage=event=>{
+    values.push(typeof event.data==='string'?event.data:Array.from(new Uint8Array(event.data)));
+    if(values.length===4)socket.close();
+  };
+  socket.onclose=()=>{clearTimeout(timeout);resolve(JSON.stringify({values,state:socket.readyState,buffered:socket.bufferedAmount}));};
 })`;
 try{
   browser=await chromium.launch({channel:channel==='headless'?undefined:channel,headless:true});
@@ -85,6 +114,31 @@ try{
     main_frame.special_pages[origin+'/page']='<!doctype html><body>Relay SSE fixture</body>';
     await main_frame.navigate_to(origin+'/page');
   },origin);
+  const echoed=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),websocketScript));
+  assert.deepEqual(echoed,{values:[[98,108,111,98,32,102,105,114,115,116],'text second',[2,3],'last'],state:3,buffered:0});
+  const workerEcho=JSON.parse(await page.evaluate(source=>main_frame.eval_js(`new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(new Blob(['onmessage=async()=>postMessage(await ('+${JSON.stringify(source)}+'));'],{type:'text/javascript'}));
+    const worker=new Worker(url);
+    worker.onmessage=event=>{worker.terminate();URL.revokeObjectURL(url);resolve(event.data);};
+    worker.onerror=event=>{event.preventDefault();reject(new Error(event.message));};worker.postMessage('start');
+  })`),websocketScript));
+  assert.deepEqual(workerEcho,echoed);
+  const serverClosed=await page.evaluate(origin=>main_frame.eval_js(`new Promise(resolve=>{
+    const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-close')},['second']);
+    socket.onclose=()=>resolve(socket.readyState);
+  })`),origin);
+  assert.equal(serverClosed,3);
+  const pendingSocket=once(server,'ws-pending',{signal:AbortSignal.timeout(5000)});
+  await page.evaluate(origin=>main_frame.eval_js(`window.pendingSocket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-pending')}); true`),origin);
+  const [heldSocket]=await pendingSocket;
+  const socketCancelled=once(heldSocket,'close',{signal:AbortSignal.timeout(5000)});
+  heldSocket.on('end',()=>heldSocket.end());
+  heldSocket.resume();
+  const cancelledStates=await page.evaluate(()=>main_frame.eval_js(`new Promise(resolve=>{const states=[];pendingSocket.onerror=()=>states.push('error');pendingSocket.onclose=()=>resolve(JSON.stringify([...states,pendingSocket.readyState]));pendingSocket.close();})`));
+  await socketCancelled;assert.deepEqual(JSON.parse(cancelledStates),['error',3]);
+  const refused=await page.evaluate(origin=>main_frame.eval_js(`new Promise(resolve=>{const states=[];const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-refused')});socket.onerror=()=>states.push('error');socket.onclose=()=>resolve(JSON.stringify([...states,socket.readyState]));})`),origin);
+  assert.deepEqual(JSON.parse(refused),['error',3]);
+  assert.equal(await page.evaluate(()=>Object.values(sandstone.network.ws_connections).flatMap(Object.values).length),0);
   const proxied=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),sourceScript(client,true)).catch(async error=>{
     console.error(JSON.stringify({requests,errors}));throw error;
   }));
@@ -123,7 +177,7 @@ try{
   assert.deepEqual(direct,[],'A relayed EventSource made a direct HTTP request');
   assert.deepEqual(errors,[],'A relayed EventSource produced a browser error');
   assert.ok(closed.some(value=>value.client===client&&value.count===3));
-  console.log(JSON.stringify({storageDenied,passed:['native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','native request cleanup'],events:proxied,direct}));
+    console.log(JSON.stringify({storageDenied,passed:['WebSocket echo/protocol/binary ordering','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','native request cleanup'],events:proxied,direct}));
   await context.close();
   }
 }finally{

@@ -1,6 +1,6 @@
 import * as rpc from "../rpc.mjs";
 import * as loader from "./loader.mjs";
-import * as util from "../util.mjs";
+import { create_websocket_class } from "./websocket.mjs";
 import { ctx } from "./context.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
 
@@ -98,114 +98,12 @@ export function create_blob_url(blob, target_url = null) {
   return url;
 }
 
-export class WebSocket extends EventTarget {
-  #ws_id;
-
-  constructor(url, protocols=[]) {
-    super();
-
-    let url_obj = new URL(url, ctx.location.href);
-    url_obj.protocol = url_obj.protocol.replace("http", "ws");
-    this.url = url_obj.href;
-    this.protocols = protocols;
-    this.binaryType = "blob";
-    this.bufferedAmount = 0;
-
-    //legacy event handlers
-    this.onopen = () => {};
-    this.onerror = () => {};
-    this.onmessage = () => {};
-    this.onclose = () => {};
-
-    this.CONNECTING = 0;
-    this.OPEN = 1;
-    this.CLOSING = 2;
-    this.CLOSED = 3;
-    this.readyState = this.CONNECTING;
-
-    this.#ws_id = null;
-    this.#connect();
-  }
-
-  async #connect() {
-    this.#ws_id = await rpc_ws_new(loader.frame_id, this.url, this.protocols, {
-      headers: {
-        "Origin": ctx.location.origin,
-        "User-Agent": navigator.userAgent,
-      }
-    });
-    this.#event_loop();
-  }
-
-  async #event_loop() {
-    while (true) {
-      let events = await rpc_ws_event(loader.frame_id, this.#ws_id);
-      if (!events) break;
-      for (let [event_name, data] of events) {
-        this.#forward_event(event_name, data);
-      }
-    }
-  }
-
-  #forward_event(event_name, data) {
-    if (event_name === "open") {
-      this.readyState = this.OPEN;
-      this.#dispatch_event(new Event("open"));
-    }
-    else if (event_name === "close") {
-      this.readyState = this.CLOSED;
-      this.#dispatch_event(new CloseEvent("close"));
-    }
-    else if (event_name === "message") {
-      let converted;
-      if (typeof data === "string")
-        converted = data;
-      else if (this.binaryType == "arraybuffer") 
-        converted = data.buffer;
-      else 
-        converted = new Blob([data]);
-      this.#dispatch_event(new MessageEvent("message", {data: converted}));
-    }
-    else if (event_name === "error") {
-      this.#dispatch_event(new Event("error"));
-    }
-  }
-
-  #dispatch_event(event) {
-    try {
-      this["on" + event.type](event);
-    }
-    catch (e) {
-      console.error(e);
-    }
-    this.dispatchEvent(event);
-  }
-
-  send(data) {
-    if (this.readyState === this.CONNECTING) {
-      throw new DOMException("Websocket not ready yet.");
-    }
-    if (this.readyState === this.CLOSED) {
-      return;
-    }
-
-    if (data instanceof Blob) {
-      (async () => {
-        let array_buffer = await data.arrayBuffer();
-        this.send(new Uint8Array(array_buffer));
-      })();
-    }
-    else if (typeof data === "string") {
-      rpc_ws_send(loader.frame_id, this.#ws_id, data);
-    }
-    else {
-      let converted = util.data_to_array(data);
-      rpc_ws_send(loader.frame_id, this.#ws_id, converted);
-    }
-  }
-
-  close() {
-    this.readyState = this.CLOSING;
-    rpc_ws_close(loader.frame_id, this.#ws_id);
-  }
-}
+export const WebSocket = create_websocket_class({
+  base: () => ctx.document?.baseURI || ctx.location.href,
+  connect: (url, protocols) => rpc_ws_new(loader.frame_id, url, protocols, {
+    headers: {Origin: ctx.location.origin, 'User-Agent': navigator.userAgent}
+  }),
+  events: id => rpc_ws_event(loader.frame_id, id),
+  send: (id, data) => rpc_ws_send(loader.frame_id, id, data),
+  close: id => rpc_ws_close(loader.frame_id, id)
+});
