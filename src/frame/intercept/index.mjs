@@ -4,4 +4,5 @@ export * as dom from "./dom.mjs";
 export * as navigator from "./navigator.mjs";
 export * as mutation_observer from "./mutation_observer.mjs";
 export * as function from "./function.mjs";
+import './crypto.mjs';
 export { FakeCSSStyleSheet } from "./cssom.mjs";

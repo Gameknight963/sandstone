@@ -59,6 +59,9 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
     };
     await main_frame.navigate_to('https://fixture.test/');
   });
+  const uuids=JSON.parse(await page.evaluate(()=>main_frame.eval_js(`JSON.stringify(Array.from({length:32},()=>crypto.randomUUID()))`)));
+  assert.equal(new Set(uuids).size,32);
+  for(const uuid of uuids)assert.match(uuid,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   const external_deadline = Date.now() + 10000;
   while (!JSON.parse(await page.evaluate(() => main_frame.eval_js('JSON.stringify(window.fixtureResult)'))).includes('external')) {
     if (Date.now() > external_deadline) throw new Error('External script did not execute');
@@ -192,5 +195,5 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
   await page.locator('#show_ui_button').evaluate(button => button.click());
   assert.equal(await page.locator('#address_bar').isVisible(), true);
   assert.deepEqual(errors, []);
-  return {url, passed: ['dynamic scripts', 'fragments', 'inert innerHTML', 'cookies', 'localStorage', 'sessionStorage', 'streaming', 'response cloning', 'multipart forms', 'IndexedDB indexes/cursors/binary data', 'IndexedDB navigation persistence', 'dark mode', 'per-site database clearing', 'hide/show UI', 'WebRTC disabled']};
+  return {url, passed: ['dynamic scripts', 'fragments', 'inert innerHTML', 'cookies', 'localStorage', 'sessionStorage', 'streaming', 'response cloning', 'multipart forms', 'IndexedDB indexes/cursors/binary data', 'IndexedDB navigation persistence', 'dark mode', 'per-site database clearing', 'hide/show UI', 'WebRTC disabled', 'secure random UUIDs in opaque sandbox origins']};
 }

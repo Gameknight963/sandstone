@@ -11,7 +11,7 @@ async page => {
           postMessage({bytes: Array.from(event.data.bytes), order: self.importOrder,
             imported: importedValue, count: self.runCount, href: location.href, origin: location.origin,
             windowType: typeof window, documentType: typeof document, storageType: typeof localStorage,
-            historyType: typeof history}, [event.data.bytes.buffer]);
+            historyType: typeof history,uuid:crypto.randomUUID()}, [event.data.bytes.buffer]);
         };
       `,
       '/workers/lib/first.js': "self.importOrder=['first']; importScripts('./second.js'); self.importOrder.push('after-second'); var importedValue=42;",
@@ -59,6 +59,8 @@ async page => {
   const expected = {bytes:[7,8,9],order:['first','second','after-second'],imported:42,count:1,
     href:'https://fixture.test/workers/classic.js',origin:'https://fixture.test',
     windowType:'undefined',documentType:'undefined',storageType:'undefined',historyType:'undefined',detached:true};
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(classic.uuid))throw new Error('Worker UUID is unavailable or invalid');
+  delete classic.uuid;
   if (JSON.stringify(classic)!==JSON.stringify(expected)) throw new Error('Classic worker failed: '+JSON.stringify(classic));
   const computed = JSON.parse(await page.evaluate(() => main_frame.eval_js(`new Promise((resolve,reject) => {
     const worker=new Worker('/workers/computed.js');
