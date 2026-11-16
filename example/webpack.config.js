@@ -7,7 +7,7 @@ module.exports = {
   module: {
     rules: [
       {
-        resource: /resources\/.+\.html$/,
+        resource: /resources[\\/].+\.html$/,
         type: "asset/source"
       },
     ],

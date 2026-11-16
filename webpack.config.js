@@ -56,7 +56,7 @@ const bundles = [
     module: {
       rules: [
         {
-          resource: /dist\/sandstone_frame\.js$/,
+          resource: /dist[\\/]sandstone_frame\.js$/,
           type: "asset/source"
         },
       ],

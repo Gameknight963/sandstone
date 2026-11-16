@@ -7,7 +7,7 @@
     "start": "node server.mjs",
     "dev": "npx webpack --watch",
     "build": "npx webpack",
-    "build:prod": "npx webpack --mode=production; node inline.mjs"
+    "build:prod": "webpack --mode=production && node inline.mjs"
   },
   "dependencies": {
     "@mercuryworkshop/wisp-js": "^0.3.3",
