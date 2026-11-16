@@ -193,6 +193,7 @@ export class ProxyFrame {
       });
     }
     catch (e) {
+      if (navigation_id !== this.navigation_id) return;
       let error_msg = util.format_error(e);
       await this.send_page({
         url: this.url.href,
@@ -206,6 +207,7 @@ export class ProxyFrame {
         version: version
       });
     }
+    if (navigation_id !== this.navigation_id) return;
     this.iframe.style.backgroundColor = "unset";
     this.is_navigating = false;
     this.on_load();

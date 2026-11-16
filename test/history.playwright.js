@@ -114,5 +114,40 @@ async page => {
   child=await findChild('/history/grandchild?one');
   equal(JSON.parse(await childEval('JSON.stringify(history.state)')), {child:2});
   equal(await read('instance'),restored);
-  return ['History state cloning and URL validation', 'Same-document traversal and fragment events', 'Cross-document history restoration', 'Nested iframe navigation and history'];
+  for(const fail of [false,true]){
+    await page.evaluate(fail=>{
+      const send=main_frame.send_page,fetch=sandstone.network.session.fetch,onLoad=main_frame.on_load;
+      const first='https://fixture.test/navigation-race/first',next='https://fixture.test/navigation-race/next';
+      globalThis.navigationRace={first,next,loads:[],errors:[],calls:[],restore(){main_frame.send_page=send;sandstone.network.session.fetch=fetch;main_frame.on_load=onLoad;}};
+      main_frame.special_pages[first]='<!doctype html><title>First document</title><body>First document</body>';
+      main_frame.on_load=()=>navigationRace.loads.push(main_frame.url.href);
+      main_frame.send_page=async options=>{
+        navigationRace.calls.push({url:options.url,error:!!options.error});
+        const result=await send(options);
+        if(options.url===first){
+          navigationRace.arrived=true;await new Promise(resolve=>navigationRace.releaseOld=resolve);
+          if(fail)throw new Error('Superseded document failed');
+        }
+        return result;
+      };
+      sandstone.network.session.fetch=async(url,options)=>{
+        if(url!==next)return fetch(url,options);
+        navigationRace.waiting=true;await new Promise(resolve=>navigationRace.releaseNext=resolve);
+        return new Response('<!doctype html><title>Current document</title><body>Current document</body>',{headers:{'Content-Type':'text/html'}});
+      };
+      main_frame.navigate_to(first).then(()=>navigationRace.oldDone=true).catch(error=>navigationRace.errors.push(error.message));
+    },fail);
+    await page.waitForFunction(()=>navigationRace.arrived);
+    await page.evaluate(()=>{main_frame.navigate_to(navigationRace.next).catch(error=>navigationRace.errors.push(error.message));});
+    await page.waitForFunction(()=>navigationRace.waiting);
+    await page.evaluate(()=>navigationRace.releaseOld());
+    await page.waitForFunction(()=>navigationRace.oldDone);
+    equal(await page.evaluate(()=>({loading:main_frame.is_navigating,loads:navigationRace.loads,calls:navigationRace.calls.length,errors:navigationRace.errors})),{loading:true,loads:[],calls:1,errors:[]});
+    await page.evaluate(()=>navigationRace.releaseNext());
+    await page.waitForFunction(()=>!main_frame.is_navigating&&navigationRace.loads.length===1);
+    equal(await read('document.title'),'Current document');
+    equal(await page.evaluate(()=>navigationRace.calls),[{url:'https://fixture.test/navigation-race/first',error:false},{url:'https://fixture.test/navigation-race/next',error:false}]);
+    await page.evaluate(()=>navigationRace.restore());
+  }
+  return ['History state cloning and URL validation', 'Same-document traversal and fragment events', 'Cross-document history restoration', 'Nested iframe navigation and history', 'Superseded document replies cannot finish or overwrite a newer navigation'];
 }
