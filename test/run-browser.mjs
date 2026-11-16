@@ -5,6 +5,7 @@ import { runInThisContext } from "node:vm";
 import assert from "node:assert/strict";
 
 const testSource = await readFile(new URL("browser.playwright.js", import.meta.url), "utf8");
+const dexieSource = await readFile(new URL("../node_modules/dexie/dist/dexie.js", import.meta.url), "utf8");
 const verify = runInThisContext(`(${testSource})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
@@ -14,13 +15,45 @@ try {
     const context = await browser.newContext();
     if (storageDenied) await context.addInitScript(() => {
       Object.defineProperty(window, "localStorage", {get() { throw new DOMException("Storage denied", "SecurityError"); }});
+      Object.defineProperty(window, "indexedDB", {get() { throw new DOMException("Storage denied", "SecurityError"); }});
     });
     const page = await context.newPage();
     const requests = [];
     page.on("request", request => requests.push(request.url()));
     const result = await verify(page, target);
+    await page.evaluate(source => main_frame.eval_js(source), dexieSource);
+    const dexieResult = await page.evaluate(() => main_frame.eval_js(`(async () => {
+      const database = new Dexie('browser-dexie');
+      database.version(1).stores({items: '++id,&name'});
+      await database.open();
+      await database.items.bulkPut([{id: 1, name: 'alpha'}, {id: 2, name: 'beta'}]);
+      const values = await database.items.orderBy('name').toArray();
+      database.close();
+      return JSON.stringify(values.map(value => value.name));
+    })()`));
+    assert.deepEqual(JSON.parse(dexieResult), ['alpha', 'beta']);
+    await page.reload();
+    await page.waitForFunction(() => globalThis.main_frame && !main_frame.is_navigating);
+    await page.evaluate(async () => {
+      main_frame.on_load = () => {};
+      main_frame.special_pages['https://fixture.test/database-only'] = '<!doctype html><body>Database persistence fixture</body>';
+      await main_frame.navigate_to('https://fixture.test/database-only');
+    });
+    const reloaded = JSON.parse(await page.evaluate(() => main_frame.eval_js(`(async () => {
+      const done = request => new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+      let existed = true;
+      const request = indexedDB.open('fixture-idb');
+      request.onupgradeneeded = () => { existed = false; };
+      const database = await done(request);
+      const value = existed ? await done(database.transaction('records').objectStore('records').get(1)) : null;
+      database.close();
+      return JSON.stringify({existed, name: value?.name ?? null});
+    })()`)));
+    const survivedReload = reloaded.existed;
+    assert.equal(survivedReload, !storageDenied, "IndexedDB persistence did not match the storage capability");
+    assert.equal(reloaded.name, storageDenied ? null : 'alpha');
     if (target.startsWith("file:")) assert.deepEqual(requests.filter(url => /^https?:/.test(url)), [], "The standalone fixture made a direct HTTP request");
-    console.log(JSON.stringify({storageDenied, ...result}));
+    console.log(JSON.stringify({storageDenied, survivedReload, ...result}));
     await context.close();
   }
 } finally { await browser.close(); }

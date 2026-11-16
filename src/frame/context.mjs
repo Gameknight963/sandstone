@@ -110,6 +110,18 @@ export class CustomCTX {
   get localStorage() {return internal.localStorage}
   get sessionStorage() {return internal.sessionStorage}
   get WebSocket() {return network.WebSocket}
+  get indexedDB() {return polyfill.idb.indexedDB}
+  get IDBFactory() {return polyfill.idb.IDBFactory}
+  get IDBDatabase() {return polyfill.idb.IDBDatabase}
+  get IDBTransaction() {return polyfill.idb.IDBTransaction}
+  get IDBObjectStore() {return polyfill.idb.IDBObjectStore}
+  get IDBIndex() {return polyfill.idb.IDBIndex}
+  get IDBRequest() {return polyfill.idb.IDBRequest}
+  get IDBOpenDBRequest() {return polyfill.idb.IDBOpenDBRequest}
+  get IDBCursor() {return polyfill.idb.IDBCursor}
+  get IDBCursorWithValue() {return polyfill.idb.IDBCursorWithValue}
+  get IDBKeyRange() {return polyfill.idb.IDBKeyRange}
+  get IDBVersionChangeEvent() {return polyfill.idb.IDBVersionChangeEvent}
 
   eval(js) {
     return run_script(String(js));

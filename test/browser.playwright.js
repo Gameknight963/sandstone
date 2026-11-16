@@ -98,9 +98,54 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
   })()`)));
   assert.deepEqual(response, {status: 404, ok: false, url: 'https://fixture.test/status', text: 'missing', original: 'missing', secret: null});
 
+  const databaseResult = JSON.parse(await page.evaluate(() => main_frame.eval_js(`(async () => {
+    const done = request => new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const open = indexedDB.open('fixture-idb', 1);
+    open.onupgradeneeded = () => {
+      const store = open.result.createObjectStore('records', {keyPath: 'id', autoIncrement: true});
+      store.createIndex('byName', 'name', {unique: true});
+    };
+    const database = await done(open);
+    const transaction = database.transaction('records', 'readwrite');
+    const committed = new Promise((resolve, reject) => {
+      transaction.oncomplete = resolve; transaction.onabort = () => reject(transaction.error);
+    });
+    const store = transaction.objectStore('records');
+    const request = store.put({name: 'alpha', bytes: new Uint8Array([2, 3, 4]), blob: new Blob(['contents'])});
+    const key = await done(request);
+    const value = await done(store.index('byName').get(IDBKeyRange.only('alpha')));
+    const rows = [];
+    const cursor = store.openCursor();
+    await new Promise((resolve, reject) => {
+      cursor.onerror = () => reject(cursor.error);
+      cursor.onsuccess = () => {
+        if (!cursor.result) return resolve();
+        rows.push(cursor.result.primaryKey); cursor.result.continue();
+      };
+    });
+    await committed;
+    const blob = await value.blob.text();
+    const result = {key, rows, name: value.name, bytes: Array.from(value.bytes), blob,
+      databaseBrand: database instanceof IDBDatabase, requestBrand: request instanceof IDBRequest,
+      stores: Array.from(database.objectStoreNames)};
+    database.close();
+    return JSON.stringify(result);
+  })()`)));
+  assert.deepEqual(databaseResult, {key: 1, rows: [1], name: 'alpha', bytes: [2, 3, 4], blob: 'contents', databaseBrand: true, requestBrand: true, stores: ['records']});
+
   await page.evaluate(() => main_frame.navigate_to('https://fixture.test/again'));
   const restored = JSON.parse(await page.evaluate(() => main_frame.eval_js('JSON.stringify({local: localStorage.value, session: sessionStorage.value})')));
   assert.deepEqual(restored, {local: 'persisted', session: 'session'});
+  const savedDatabase = JSON.parse(await page.evaluate(() => main_frame.eval_js(`(async () => {
+    const done = request => new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    const database = await done(indexedDB.open('fixture-idb'));
+    const record = await done(database.transaction('records').objectStore('records').get(1));
+    database.close(); return JSON.stringify({name: record.name});
+  })()`)));
+  assert.deepEqual(savedDatabase, {name: 'alpha'});
 
   await page.evaluate(() => main_frame.eval_js("document.querySelector('button').click()"));
   await page.waitForFunction(() => main_frame.url.pathname === '/upload');
@@ -110,6 +155,18 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
   const uploadBody = new TextDecoder().decode(new Uint8Array(upload.body));
   assert.match(uploadBody, /name="field"/);
   assert.match(uploadBody, /name="send"/);
+
+  await page.evaluate(async () => {
+    main_frame.special_pages['https://inactive.test/'] = '<!doctype html><body>Inactive database fixture</body>';
+    await main_frame.navigate_to('https://inactive.test/');
+  });
+  await page.evaluate(() => main_frame.eval_js(`new Promise((resolve, reject) => {
+    const request = indexedDB.open('discard');
+    request.onupgradeneeded = () => request.result.createObjectStore('items');
+    request.onsuccess = () => { request.result.close(); resolve(true); };
+    request.onerror = () => reject(request.error);
+  })`));
+  await page.evaluate(() => main_frame.navigate_to('https://fixture.test/upload'));
 
   await page.getByRole('button', {name: 'Options', exact: true}).evaluate(button => button.click());
   await page.locator('#theme_select').selectOption('dark');
@@ -121,7 +178,11 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
     document.getElementById('site_data_details').open = true;
   });
   const storedSite = page.locator('.site_data_row').filter({hasText: 'inactive.test'});
-  await storedSite.getByRole('button', {name: 'Clear both', exact: true}).evaluate(button => button.click());
+  await storedSite.getByRole('button', {name: 'Clear IndexedDB', exact: true}).evaluate(button => button.click());
+  await page.waitForFunction(() => sandstone.controller.site_data.list().find(site => site.hostname === 'inactive.test')?.indexedDB === 0);
+  assert.deepEqual(await page.evaluate(() => sandstone.controller.indexed_db.databases('https://inactive.test')), []);
+  await storedSite.getByRole('button', {name: 'Clear all', exact: true}).evaluate(button => button.click());
+  await page.waitForFunction(() => !sandstone.controller.site_data.list().some(site => site.hostname === 'inactive.test'));
   assert.equal(await page.evaluate(() => sandstone.controller.site_data.list().some(site => site.hostname === 'inactive.test')), false);
   await page.locator('#close_options_button').evaluate(button => button.click());
   await page.locator('#hide_ui_button').evaluate(button => button.click());
@@ -130,5 +191,5 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
   await page.locator('#show_ui_button').evaluate(button => button.click());
   assert.equal(await page.locator('#address_bar').isVisible(), true);
   assert.deepEqual(errors, []);
-  return {url, passed: ['dynamic scripts', 'fragments', 'inert innerHTML', 'cookies', 'localStorage', 'sessionStorage', 'streaming', 'response cloning', 'multipart forms', 'dark mode', 'per-site clearing', 'hide/show UI', 'WebRTC disabled']};
+  return {url, passed: ['dynamic scripts', 'fragments', 'inert innerHTML', 'cookies', 'localStorage', 'sessionStorage', 'streaming', 'response cloning', 'multipart forms', 'IndexedDB indexes/cursors/binary data', 'IndexedDB navigation persistence', 'dark mode', 'per-site database clearing', 'hide/show UI', 'WebRTC disabled']};
 }

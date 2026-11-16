@@ -2,7 +2,9 @@ import * as rpc from "../rpc.mjs";
 import * as util from "../util.mjs";
 import * as network from "./network.mjs";
 import { site_data } from "./site_data.mjs";
+import { indexed_db } from "./indexeddb.mjs";
 export { site_data } from "./site_data.mjs";
+export { indexed_db } from "./indexeddb.mjs";
 
 import { version } from "./index.mjs";
 
@@ -112,9 +114,11 @@ export class ProxyFrame {
     this.iframe.style.backgroundColor = "#222222";
     this.on_navigate();
     this.iframe.src = get_frame_bundle();
+    indexed_db.disconnect(this.id);
     network.clean_ws_connections(this.id);
     for (const [id, frame] of Object.entries(iframes)) {
       if (frame.root_id === this.id && id !== this.id) {
+        indexed_db.disconnect(id);
         network.clean_ws_connections(id);
         delete iframes[id];
       }
@@ -248,6 +252,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url) => {
 rpc.rpc_handlers["frame_unregister"] = child_id => {
   const child = iframes[child_id];
   if (!child?.parent_id) return;
+  indexed_db.disconnect(child_id);
   network.clean_ws_connections(child_id);
   delete iframes[child_id];
 };

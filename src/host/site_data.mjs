@@ -8,6 +8,7 @@ export class SiteDataStore {
     this.storage = storage;
     this.local = Object.create(null);
     this.cookies = new CookieJar();
+    this.indexed = [];
     this.persistent = false;
     this.load();
   }
@@ -22,6 +23,7 @@ export class SiteDataStore {
         }
       }
       if (saved?.cookies) this.cookies = CookieJar.deserializeSync(saved.cookies);
+      if (Array.isArray(saved?.indexed)) this.indexed = saved.indexed;
       this.persist();
     } catch {
       // Retain a usable in-memory session if storage is unavailable or corrupt.
@@ -35,7 +37,7 @@ export class SiteDataStore {
       // Session cookies live until this HTML document is closed.
       cookies.cookies = cookies.cookies.filter(cookie =>
         (cookie.expires && cookie.expires !== "Infinity") || typeof cookie.maxAge === "number");
-      this.storage.setItem(storage_key, JSON.stringify({local: this.local, cookies}));
+      this.storage.setItem(storage_key, JSON.stringify({local: this.local, cookies, indexed: this.indexed}));
       this.persistent = true;
     } catch {
       this.persistent = false;
@@ -67,7 +69,7 @@ export class SiteDataStore {
     const sites = new Map();
     for (const [origin, entries] of Object.entries(this.local)) {
       const hostname = new URL(origin).hostname;
-      if (!sites.has(hostname)) sites.set(hostname, {hostname, origins: [], cookies: 0, localStorage: 0});
+      if (!sites.has(hostname)) sites.set(hostname, {hostname, origins: [], cookies: 0, localStorage: 0, indexedDB: 0});
       const site = sites.get(hostname);
       site.origins.push(origin);
       site.localStorage += entries.length;
@@ -76,8 +78,15 @@ export class SiteDataStore {
       const cookie = Cookie.fromJSON(data);
       if (cookie.expiryTime() <= Date.now()) continue;
       const hostname = cookie.domain;
-      if (!sites.has(hostname)) sites.set(hostname, {hostname, origins: [], cookies: 0, localStorage: 0});
+      if (!sites.has(hostname)) sites.set(hostname, {hostname, origins: [], cookies: 0, localStorage: 0, indexedDB: 0});
       sites.get(hostname).cookies++;
+    }
+    for (const database of this.indexed) {
+      const hostname = new URL(database.origin).hostname;
+      if (!sites.has(hostname)) sites.set(hostname, {hostname, origins: [], cookies: 0, localStorage: 0, indexedDB: 0});
+      const site = sites.get(hostname);
+      if (!site.origins.includes(database.origin)) site.origins.push(database.origin);
+      site.indexedDB++;
     }
     return [...sites.values()].sort((a, b) => a.hostname.localeCompare(b.hostname));
   }

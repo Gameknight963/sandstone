@@ -6,3 +6,4 @@ export { fakeImportScripts, FakeWorker } from "./worker.mjs";
 
 export { fetch } from "./fetch.mjs";
 export { FakeXMLHttpRequest } from "./xhr.mjs";
+export * as idb from "./indexeddb.mjs";
