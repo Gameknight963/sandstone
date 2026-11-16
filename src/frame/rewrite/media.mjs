@@ -1,75 +1,162 @@
-import { ctx, convert_url, intercept_property, proxy_function } from "../context.mjs";
+import { ctx, intercept_property, proxy_function } from "../context.mjs";
 import * as network from "../network.mjs";
-import * as util from "../../util.mjs";
+import { rewrite_srcset } from "../srcset.mjs";
 
-export function rewrite_media(media_element) {
-  let media_src = media_element.src;
-  
-  //ensure there is only one source element in a video tag
-  if (media_element instanceof HTMLVideoElement) {
-    let source = media_element.querySelector("source[src]");
-    while (media_element.lastChild !== source) 
-      media_element.lastChild.remove();
-  }
+const prepared = new WeakSet();
+const source_loads = new WeakMap();
 
-  let media_url = "";
-  let fetch_src = async (value) => {
-    media_element.setAttribute("__src", value);
-    media_url = convert_url(value, ctx.location.href);
-    let response = await network.fetch(media_url);
-    let media_blob = await response.blob();
-    let blob_url = URL.createObjectURL(media_blob);
-    media_element.src = blob_url;
-
-    //if this is a source element for a media element, we should load the video
-    if (media_element instanceof HTMLSourceElement) {
-      let parent = media_element.parentNode;
-      while (parent && !(parent instanceof HTMLVideoElement))
-        parent = parent.parentNode;
-      if (!parent) 
-        return;
-
-      parent.load();
-      if (!parent.autoplay) return
-      parent.play();
-    }
+function source_pending(element) {
+  const parent = element.parentElement;
+  if (!(element instanceof HTMLSourceElement) || !(parent instanceof HTMLMediaElement)) return () => {};
+  const state = source_loads.get(parent) || {pending: 0, revision: 0};
+  source_loads.set(parent, state);
+  state.pending++;
+  state.revision++;
+  return () => {
+    state.pending--;
+    const revision = ++state.revision;
+    queueMicrotask(() => {
+      if (!state.pending && state.revision === revision && parent.isConnected) parent.load();
+    });
   };
-  let src_descriptor = intercept_property(media_element, "src", {
-    get() {
-      return media_url || src_descriptor.get.call(media_element);
-    },
-    set(value) {
-      if (!util.url_is_http(value) || !value)
-        src_descriptor.set.call(media_element, value);
-      else {
-        media_element.src = "";
-        fetch_src(value);
+}
+
+export function rewrite_media(element) {
+  if (prepared.has(element)) return;
+  prepared.add(element);
+  const get = element.getAttribute.bind(element);
+  const remove = element.removeAttribute.bind(element);
+  const properties = ["src", "srcset", "poster"].filter(key => key in element);
+  const authored = new Map(properties.map(key => [key, get(key)]));
+  const states = new Map();
+  // Clear every source before starting asynchronous work, including picture sources.
+  for (const key of properties) remove(key);
+  const base = () => ctx.document.baseURI;
+
+  for (const key of properties) {
+    const state = {generation: 0, urls: [], controller: null};
+    states.set(key, state);
+    const release = urls => {
+      for (const url of urls) { URL.revokeObjectURL(url); delete network.known_urls[url]; }
+    };
+    let descriptor;
+    function update(value) {
+      value = String(value);
+      authored.set(key, value);
+      const generation = ++state.generation;
+      state.controller?.abort();
+      const controller = state.controller = new AbortController();
+      remove(key);
+      release(state.urls);
+      state.urls = [];
+      const urls = [];
+      const resources = new Map();
+      const done = key === "src" ? source_pending(element) : () => {};
+      const resource = async source => {
+        if (!source) return source;
+        const url = new URL(source, base());
+        if (["data:", "blob:"].includes(url.protocol)) return url.href;
+        if (!resources.has(url.href)) resources.set(url.href, (async () => {
+          const response = await network.fetch(url.href, {
+            signal: controller.signal, credentials: element.crossOrigin === "anonymous" ? "same-origin" : "include"
+          });
+          if (!response.ok) throw new TypeError(`Media request failed: ${response.status}`);
+          const blob = await response.blob();
+          controller.signal.throwIfAborted();
+          const local = network.create_blob_url(blob, url.href);
+          urls.push(local);
+          return local;
+        })());
+        return resources.get(url.href);
+      };
+      // Local sources retain their synchronous property behavior.
+      if (key !== "srcset" && (!value || /^(data|blob):/i.test(value))) {
+        descriptor.set.call(element, value);
+        done();
+        return;
       }
+      (async () => {
+        try {
+          const rewritten = key === "srcset" ? await rewrite_srcset(value, async source => {
+            try { return await resource(source); }
+            catch (error) { if (controller.signal.aborted) throw error; return "data:application/octet-stream,"; }
+          }) : await resource(value);
+          if (generation !== state.generation) { release(urls); return; }
+          state.urls = urls;
+          descriptor.set.call(element, rewritten);
+        } catch (error) {
+          release(urls);
+          if (generation === state.generation && !controller.signal.aborted) element.dispatchEvent(new Event("error"));
+        } finally { done(); }
+      })();
     }
+    descriptor = intercept_property(element, key, {
+      get() {
+        const value = authored.get(key);
+        if (value === null || value === undefined) return descriptor.get.call(element);
+        if (key === "srcset") return value;
+        try { return new URL(value, base()).href; } catch { return value; }
+      },
+      set: update
+    });
+    state.update = update;
+    state.release = release;
+  }
+
+  if ("currentSrc" in element) {
+    let current = intercept_property(element, "currentSrc", {
+      get() {
+        const value = current.get.call(element);
+        return network.known_urls[value] || value;
+      }
+    });
+  }
+  proxy_function(element, "getAttribute", (target, receiver, args) => {
+    const key = String(args[0]).toLowerCase();
+    return authored.has(key) ? authored.get(key) : Reflect.apply(target, receiver, args);
   });
-
-  media_element.addEventListener("error", (event) =>  {
-    if (!src_descriptor || src_descriptor.get.call(media_element) === "") {
-      event.stopImmediatePropagation();
+  proxy_function(element, "hasAttribute", (target, receiver, args) => {
+    const key = String(args[0]).toLowerCase();
+    return authored.has(key) ? authored.get(key) !== null : Reflect.apply(target, receiver, args);
+  });
+  proxy_function(element, "setAttribute", (target, receiver, args) => {
+    const state = states.get(String(args[0]).toLowerCase());
+    if (state) { state.update(args[1]); return; }
+    return Reflect.apply(target, receiver, args);
+  });
+  proxy_function(element, "removeAttribute", (target, receiver, args) => {
+    const key = String(args[0]).toLowerCase();
+    const state = states.get(key);
+    if (state) {
+      authored.set(key, null);
+      state.generation++;
+      state.controller?.abort();
+      state.release(state.urls);
+      state.urls = [];
     }
+    return Reflect.apply(target, receiver, args);
+  });
+  proxy_function(element, "toggleAttribute", (target, receiver, args) => {
+    const key = String(args[0]).toLowerCase();
+    if (!states.has(key)) return Reflect.apply(target, receiver, args);
+    const exists = element.hasAttribute(key);
+    const wanted = args.length > 1 ? Boolean(args[1]) : !exists;
+    if (wanted && !exists) element.setAttribute(key, "");
+    if (!wanted && exists) element.removeAttribute(key);
+    return wanted;
+  });
+  for (const method of ["setAttributeNS", "getAttributeNS", "hasAttributeNS", "removeAttributeNS"]) {
+    proxy_function(element, method, (target, receiver, args) => {
+      if (args[0] === null || args[0] === "") {
+        return element[method.replace("NS", "")](...args.slice(1));
+      }
+      return Reflect.apply(target, receiver, args);
+    });
+  }
+  // Removing a temporary source can produce a native empty-source error.
+  element.addEventListener("error", event => {
+    if (!event.isTrusted) return;
+    if (properties.every(key => !get(key))) event.stopImmediatePropagation();
   }, true);
-
-  proxy_function(media_element, "setAttribute", (target, this_arg, args) => {
-    if (args[0] === "src")  {
-      media_element.src = args[1];
-      return;
-    }
-    return Reflect.apply(target, this_arg, args);
-  })
-  
-  //to lazy to parse srcset, so i'll just ignore it
-  if (media_element.getAttribute("srcset")) {
-    media_element.setAttribute("srcset", "");
-  }
-
-  if (!media_src || media_src.startsWith("data:") || media_src.startsWith("blob:")) {
-    return;
-  }
-  
-  media_element.src = media_src;
+  for (const [key, value] of authored) if (value !== null) states.get(key).update(value);
 }

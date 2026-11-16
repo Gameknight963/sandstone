@@ -1,6 +1,12 @@
 import { ctx, get_handler_keys, create_obj_proxy, intercept_property, proxy_function } from "../context.mjs";
 import { get_cookie, set_cookie } from "../polyfill/cookie.mjs";
 import * as loader from "../loader.mjs";
+import { rewrite_media } from "../rewrite/media.mjs";
+
+function prepare_media(element) {
+  if (element.matches("img, source, video, audio, input, track")) rewrite_media(element);
+  return element;
+}
 
 const internal = {
   currentScript: null,
@@ -36,7 +42,11 @@ class CustomDocument {
   set activeElement(value) {internal.activeElement = value;}
 
   createElement(tag_name, options) {
-    return this.__target__.createElement(tag_name, options);
+    return prepare_media(this.__target__.createElement(tag_name, options));
+  }
+
+  createElementNS(namespace, qualified_name, options) {
+    return prepare_media(this.__target__.createElementNS(namespace, qualified_name, options));
   }
 
   createTreeWalker(root, whatToShow, filter) {

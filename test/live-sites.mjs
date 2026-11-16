@@ -42,6 +42,7 @@ try {
       result.document = JSON.parse(await timed(page.evaluate(() => main_frame.eval_js(`JSON.stringify({
         title: document.title, url: location.href, readyState: document.readyState,
         text: document.body.innerText.slice(0, 800), images: document.images.length,
+        loadedImages: Array.from(document.images).filter(image => image.complete && image.naturalWidth > 0).length,
         scripts: document.scripts.length, error: document.getElementById('error_msg')?.innerText,
         headings: Array.from(document.querySelectorAll('h1,h2')).slice(0, 5).map(element => ({
           text: element.textContent.trim().slice(0, 80), opacity: getComputedStyle(element).opacity,
