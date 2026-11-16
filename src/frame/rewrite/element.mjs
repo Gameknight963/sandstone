@@ -65,6 +65,9 @@ function rewrite_element_single(element) {
 
 //a recursive wrapper for rewriting an element and its descendants
 export function rewrite_element(element) {
+  if (element?.nodeType === 11 || element?.nodeType === 9) {
+    return Promise.all([...element.children].map(child => rewrite_element(child)));
+  }
   if (!(element instanceof Element))
     return;
 
@@ -82,7 +85,7 @@ export function rewrite_element(element) {
 
   //if nothing returned a promise - then return synchronously
   promises = promises.filter((promise) => promise);
-  if (!promises)
+  if (!promises.length)
     return undefined;
   //otherwise we can let the caller wait for all promises to resolve
   return Promise.all(promises);

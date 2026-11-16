@@ -1,4 +1,5 @@
 import { ctx, get_handler_keys, create_obj_proxy } from "../context.mjs";
+import { get_cookie, set_cookie } from "../polyfill/cookie.mjs";
 
 const internal = {
   currentScript: null,
@@ -14,8 +15,8 @@ class CustomDocument {
     }   
   }
 
-  get cookie() {return ""}
-  set cookie(value) {}
+  get cookie() {return get_cookie()}
+  set cookie(value) {set_cookie(value)}
   get body() {return this.__target__.body}
   get location() {return ctx.location}
   get URL() {return ctx.location.href}

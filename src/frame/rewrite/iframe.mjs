@@ -5,10 +5,15 @@ import * as util from "../../util.mjs";
 import * as rpc from "../../rpc.mjs";
 
 export function rewrite_iframe(iframe_element) {
+  const frame_id = Math.random() + "";
+  const register = rpc.create_rpc_wrapper(rpc.host, "frame_register");
+  const unregister = rpc.create_rpc_wrapper(rpc.host, "frame_unregister");
+  let registered = false;
   let iframe_src = iframe_element.src;
   let iframe_url = "";
 
   let fetch_src = async (value) => {
+    if (registered) await unregister(frame_id);
     //download the proxied html
     iframe_element.setAttribute("__src", value);
     iframe_url = convert_url(value, ctx.location.href);
@@ -54,18 +59,20 @@ export function rewrite_iframe(iframe_element) {
     if (iframe_origin === ctx.location.origin)
       local_storage = ctx.localStorage._get_entries();
 
-    let frame_id = Math.random() + "";
+    const state = await register(loader.frame_id, frame_id, final_url);
+    registered = true;
+    loader.child_navigators.set(frame_id, fetch_src);
     try {
       await send_page({
         url: final_url,
         html: html, 
         frame_id: frame_id,
         error: error,
-        local_storage: local_storage,
+        ...state,
         settings: {},
         default_settings: loader.default_settings,
         version: loader.version,
-        iframe: true
+        is_iframe: true
       });
     }
     catch (error) {

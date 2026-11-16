@@ -78,8 +78,7 @@ function handle_procedure_reply(msg) {
 export async function message_listener(event, target) {
   let msg = event.data;
   let source = event.source || event.currentTarget;
-  if (typeof msg.type === "undefined") return;
-  console.log(`RPC ${role} got`, msg);
+  if (!msg || typeof msg !== "object" || typeof msg.type === "undefined") return;
 
   if (msg.type === "procedure") {
     let output = await handle_procedure_call(msg);
@@ -120,7 +119,6 @@ export async function call_procedure(target, procedure, args) {
       if (reply.success) resolve(reply.value);
       else reject(reply.value);
     }
-    console.log(`RPC ${role} sending`, msg);
     target.postMessage(msg, {targetOrigin: "*"});  
   });
 }
@@ -172,6 +170,7 @@ export async function wait_on_frame(frame) {
 //handle the initial set_host message from the host
 function host_set_handler(event) {
   let msg = event.data;
+  if (!msg || typeof msg !== "object") return;
   let msg_port = event.ports[0];
 
   if (msg.type === "ping") {

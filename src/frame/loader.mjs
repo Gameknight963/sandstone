@@ -5,9 +5,11 @@ import * as parser from "./parser.mjs";
 
 import { update_ctx, run_script, run_script_safe, ctx, convert_url } from "./context.mjs";
 import { pending_scripts } from "./rewrite/script.mjs";
+import { load_cookies } from "./polyfill/cookie.mjs";
 
 export const navigate = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export const local_storage = rpc.create_rpc_wrapper(rpc.host, "local_storage");
+export const session_storage = rpc.create_rpc_wrapper(rpc.host, "session_storage");
 
 export const runtime_src = self.document?.currentScript?.innerHTML;
 export let url; //the proxied page url
@@ -18,8 +20,10 @@ export let is_loaded = false;
 export let is_iframe = false;
 export let site_settings = {};
 export let default_settings = {};
+export const child_navigators = new Map();
+rpc.rpc_handlers["child_navigate"] = (id, url, form_data) => child_navigators.get(id)?.(url, form_data);
 
-function eval_script(script_element, script_text) {
+export function eval_script(script_element, script_text) {
   ctx.document.currentScript = script_element;
   let script = document.createElement("script");
   script.__rewritten__ = true;
@@ -39,18 +43,19 @@ function eval_script(script_element, script_text) {
 function evaluate_scripts() {
   pending_scripts.sort((a, b) => a[0] - b[0]);
   let deferred = [];
-  for (let [num, script_element, script_text] of pending_scripts) {
+  const initial = pending_scripts.splice(0).sort((a, b) => a[0] - b[0]);
+  for (let [num, script_element] of initial) {
     if (script_element.defer || script_element.async) {
-      deferred.push([script_element, script_text])
+      deferred.push(script_element)
     }
     else {
-      eval_script(script_element, script_text);
+      script_element.__sandstone_execute__();
     }
   }
   pending_scripts.length = 0;
 
-  for (let [script_element, script_text] of deferred) {
-    eval_script(script_element, script_text);
+  for (let script_element of deferred) {
+    script_element.__sandstone_execute__();
   }
 }
 
@@ -78,7 +83,8 @@ async function load_html(options) {
   set_url(options.url);
   set_frame_id(options.frame_id);
   get_frame_html();
-  update_ctx();
+  update_ctx(options);
+  load_cookies(options.cookies);
 
   if (options.error) {
     document.getElementById("loading_text").style.display = "none";
@@ -86,13 +92,6 @@ async function load_html(options) {
     document.getElementById("error_msg").innerText = options.error;
     document.getElementById("version_text").innerText = `Sandstone v${version.ver} (${version.hash})`;
     return;
-  }
-
-  //load local storage
-  if (options.local_storage) {
-    for (let [key, value] of options.local_storage) {
-      ctx.localStorage.setItem(key, value);
-    }
   }
 
   let parser = new DOMParser();
@@ -142,6 +141,7 @@ async function load_html(options) {
   //apply the rewritten html
   console.log("done downloading page");
   document.documentElement.replaceWith(html.documentElement);
+  is_loaded = true;
   if (site_settings.allow_js) {
     evaluate_scripts();
   }

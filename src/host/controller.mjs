@@ -1,6 +1,8 @@
 import * as rpc from "../rpc.mjs";
 import * as util from "../util.mjs";
 import * as network from "./network.mjs";
+import { site_data } from "./site_data.mjs";
+export { site_data } from "./site_data.mjs";
 
 import { version } from "./index.mjs";
 
@@ -48,10 +50,7 @@ let frame_html = `
 export const iframes = {};
 export const persist_storage_key = "proxy_local_storage";
 export let local_storage = {};
-try {
-  local_storage = JSON.parse(localStorage.getItem(persist_storage_key)) || {};
-}
-catch {}
+local_storage = site_data.local;
 
 function get_frame_bundle() {
   if (!frame_url) {
@@ -64,7 +63,11 @@ function get_frame_bundle() {
 export class ProxyFrame {
   constructor() {
     this.url = null;
+    this.is_navigating = false;
+    this.navigation_id = 0;
+    this.session_storage = Object.create(null);
     this.id = Math.random() + "";
+    this.root_id = this.id;
     this.iframe = document.createElement("iframe");
     this.iframe.sandbox = "allow-scripts allow-forms allow-modals allow-pointer-lock";
     this.iframe.allowFullscreen = true;
@@ -94,18 +97,28 @@ export class ProxyFrame {
   }
 
   async navigate_to(url, form_data=null) {
+    const navigation_id = ++this.navigation_id;
+    this.is_navigating = true;
     await this.wait_for_libcurl();
+    if (navigation_id !== this.navigation_id) return;
     if (!util.is_valid_url(url)) {
       throw TypeError("Invalid URL");
     }
 
     console.log("navigating to", url);
+    if (navigation_id !== this.navigation_id) return;
     this.url = new URL(url);
     
     this.iframe.style.backgroundColor = "#222222";
     this.on_navigate();
     this.iframe.src = get_frame_bundle();
     network.clean_ws_connections(this.id);
+    for (const [id, frame] of Object.entries(iframes)) {
+      if (frame.root_id === this.id && id !== this.id) {
+        network.clean_ws_connections(id);
+        delete iframes[id];
+      }
+    }
 
     let html = null;
     let error = false;
@@ -120,11 +133,11 @@ export class ProxyFrame {
           console.log("placing post request:", form_data);
           options = {
             method: "POST",
-            headers: {"Content-Type": form_data.enctype},
+            headers: form_data.headers || {"Content-Type": form_data.enctype},
             body: form_data.body
           }
         }
-        let response = await network.session.fetch(url, options);
+        let response = await network.fetch(url, options, {url, navigation: true});
         html = await response.text();
         url = response.url;
       }
@@ -132,6 +145,7 @@ export class ProxyFrame {
         error = util.format_error(e);
       }  
     }
+    if (navigation_id !== this.navigation_id) return;
     this.url = new URL(url);
     
     let settings = this.site_settings.find((item) => {
@@ -141,6 +155,7 @@ export class ProxyFrame {
     console.log("site settings:", settings);
 
     await rpc.wait_on_frame(this.iframe);
+    if (navigation_id !== this.navigation_id) return;
     let msg_channel = new MessageChannel();
     this.rpc_target.set_target(msg_channel.port1);
     msg_channel.port1.start();
@@ -155,6 +170,8 @@ export class ProxyFrame {
         settings: settings,
         default_settings: this.default_settings,
         local_storage: local_storage[this.url.origin],
+        session_storage: this.session_storage[this.url.origin],
+        cookies: site_data.documentCookies(this.url.href),
         version: version
       });
     }
@@ -172,6 +189,7 @@ export class ProxyFrame {
       });
     }
     this.iframe.style.backgroundColor = "unset";
+    this.is_navigating = false;
     this.on_load();
   }
 }
@@ -192,11 +210,46 @@ rpc.rpc_handlers["navigate"] = async (frame_id, url, reload=true, form_data=null
 rpc.rpc_handlers["local_storage"] = async (frame_id, entries) => {
   let frame = iframes[frame_id];
   if (!frame) return;
-  local_storage[frame.url.origin] = entries;
-  if (window.origin) {
-    localStorage.setItem(persist_storage_key, JSON.stringify(local_storage));
-  }
+  site_data.setLocal(frame.url.origin, entries);
 }
 
-//this is for getting navigation events from form submission handlers
-window.addEventListener("message", rpc.message_listener);
+rpc.rpc_handlers["session_storage"] = async (frame_id, entries) => {
+  const frame = iframes[frame_id];
+  if (frame) frame.session_storage[frame.url.origin] = entries;
+};
+
+rpc.rpc_handlers["cookie_set"] = async (frame_id, value) => {
+  const frame = iframes[frame_id];
+  if (frame) site_data.setCookie(frame.url.href, value, false);
+};
+
+rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url) => {
+  const parent = iframes[parent_id];
+  if (!parent || iframes[child_id]) throw new TypeError("Invalid child frame");
+  const root = iframes[parent.root_id];
+  const child = {
+    id: child_id, parent_id, root_id: root.id, url: new URL(url),
+    session_storage: parent.session_storage,
+    async navigate_to(url, form_data) {
+      child.url = new URL(url, child.url);
+      const ports = [root.rpc_target.target, ...root.rpc_target.extra_targets];
+      await Promise.all(ports.map(port => rpc.call_procedure(port, "child_navigate", [child_id, child.url.href, form_data])));
+    },
+    on_url_change() {}
+  };
+  iframes[child_id] = child;
+  return {
+    local_storage: site_data.local[child.url.origin],
+    session_storage: child.session_storage[child.url.origin],
+    cookies: site_data.documentCookies(child.url.href)
+  };
+};
+
+rpc.rpc_handlers["frame_unregister"] = child_id => {
+  const child = iframes[child_id];
+  if (!child?.parent_id) return;
+  network.clean_ws_connections(child_id);
+  delete iframes[child_id];
+};
+
+// Page procedures travel over the established MessagePorts, never a public window listener.

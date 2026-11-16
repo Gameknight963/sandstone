@@ -49,7 +49,7 @@ export function data_to_array(data) {
 
   //dataview objects or any other typedarray
   else if (ArrayBuffer.isView(data)) {
-    return new Uint8Array(data.buffer);
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   }
 
   throw new TypeError("invalid data type to be sent");

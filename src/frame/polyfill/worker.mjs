@@ -58,9 +58,12 @@ export class FakeWorker extends EventTarget {
     let response = await network.fetch(this.#url);
     let worker_js = JSON.stringify(await response.text());
     let worker_id = "" + Math.random();
+    const worker_url = response.url || convert_url(this.#url, loader.url);
+    const register = rpc.create_rpc_wrapper(rpc.host, "frame_register");
+    await register(loader.frame_id, worker_id, worker_url);
     let temp_script = `
       ${loader.runtime_src}
-      sandstone_frame.loader.set_url("${loader.url}");
+      sandstone_frame.loader.set_url(${JSON.stringify(worker_url)});
       sandstone_frame.loader.set_frame_id("${worker_id}");
       sandstone_frame.context.update_ctx();
       sandstone_frame.rpc.set_on_attach(() => {
@@ -115,7 +118,7 @@ export class FakeWorker extends EventTarget {
     let real_script = `
       ${loader.runtime_src}
       ${cache_substr}
-      sandstone_frame.loader.set_url(${JSON.stringify(loader.url)});
+      sandstone_frame.loader.set_url(${JSON.stringify(worker_url)});
       sandstone_frame.loader.set_frame_id("${worker_id}");
       sandstone_frame.network.enable_network();
       sandstone_frame.context.update_ctx();

@@ -183,14 +183,22 @@ export function wrap_obj(wrapper, target) {
   }
 }
 
-export function update_ctx() {
+export function update_ctx(options = {}) {
   internal.location = new polyfill.FakeLocation();
   internal.self = ctx.__proxy__;
   internal.globalThis = ctx.__proxy__;
   internal.history = new polyfill.FakeHistory();
-  internal.localStorage = new polyfill.FakeStorage("local");
-  internal.sessionStorage = new polyfill.FakeStorage("session");
+  internal.localStorage = new polyfill.FakeStorage(options.local_storage, entries => {
+    loader.local_storage(loader.frame_id, entries).catch(console.error);
+  });
+  internal.sessionStorage = new polyfill.FakeStorage(options.session_storage, entries => {
+    loader.session_storage(loader.frame_id, entries).catch(console.error);
+  });
   delete globalThis.caches;
+  // These APIs would bypass the relay and contact destination peers directly.
+  for (const key of ["RTCPeerConnection", "webkitRTCPeerConnection"]) {
+    try { Object.defineProperty(globalThis, key, {value: undefined, configurable: true}); } catch {}
+  }
 
   globalThis.__ctx__ = ctx.__proxy__;
   globalThis.__get_this__ = ctx.__get_this__;

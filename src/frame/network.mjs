@@ -2,8 +2,11 @@ import * as rpc from "../rpc.mjs";
 import * as loader from "./loader.mjs";
 import * as util from "../util.mjs";
 import { ctx } from "./context.mjs";
+import { load_cookies } from "./polyfill/cookie.mjs";
 
 export const rpc_fetch = rpc.create_rpc_wrapper(rpc.host, "fetch");
+const rpc_fetch_read = rpc.create_rpc_wrapper(rpc.host, "fetch_read");
+const rpc_fetch_abort = rpc.create_rpc_wrapper(rpc.host, "fetch_abort");
 export const rpc_ws_new = rpc.create_rpc_wrapper(rpc.host, "ws_new");
 export const rpc_ws_event = rpc.create_rpc_wrapper(rpc.host, "ws_event");
 export const rpc_ws_send = rpc.create_rpc_wrapper(rpc.host, "ws_send");
@@ -33,24 +36,60 @@ export async function fetch(url, options) {
     throw TypeError("Invalid URL");
   }
 
-  let fetch_data = await rpc_fetch(url.href, options);
-  let response = new Response(fetch_data.body);
-  for (let key in fetch_data.items) {
-    Object.defineProperty(response, key, {
-      value: fetch_data.items[key]
-    });
-  }
-
-  let headers = new Headers();
-  for (let [key, value] of fetch_data.headers) {
-    headers.append(key, value)
-  }
-  Object.defineProperty(response, "headers", {
-    value: headers
-  });
-
-  return response;
+  const params = {...options};
+  const signal = params.signal;
+  delete params.signal;
+  signal?.throwIfAborted();
+  const request_id = Math.random() + "";
+  let stream_controller;
+  const cleanup = () => signal?.removeEventListener("abort", abort);
+  const abort = () => {
+    rpc_fetch_abort(loader.frame_id, request_id).catch(() => {});
+    stream_controller?.error(signal.reason);
+    cleanup();
+  };
+  signal?.addEventListener("abort", abort, {once: true});
+  try {
+    const pending = rpc_fetch(loader.frame_id, request_id, url.href, params);
+    const fetch_data = signal ? await new Promise((resolve, reject) => {
+      const reject_abort = () => reject(signal.reason);
+      signal.addEventListener("abort", reject_abort, {once: true});
+      pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", reject_abort));
+    }) : await pending;
+    signal?.throwIfAborted();
+    load_cookies(fetch_data.cookies);
+    const body = fetch_data.has_body ? new ReadableStream({
+      start(controller) { stream_controller = controller; },
+      async pull(controller) {
+        try {
+          const chunk = await rpc_fetch_read(loader.frame_id, request_id);
+          if (chunk.done) { cleanup(); controller.close(); }
+          else controller.enqueue(chunk.value);
+        } catch (error) { cleanup(); controller.error(error); }
+      },
+      cancel() { cleanup(); return rpc_fetch_abort(loader.frame_id, request_id); }
+    }) : null;
+    if (!body) { cleanup(); await rpc_fetch_abort(loader.frame_id, request_id); }
+    return restore_response({...fetch_data, body});
+  } catch (error) { cleanup(); throw error; }
 };
+
+function restore_response(data) {
+  const {status, statusText, url, redirected, type} = data.items;
+  const response = new Response([101, 204, 205, 304].includes(status) ? null : data.body, {
+    status: status >= 200 && status <= 599 ? status : 200,
+    statusText, headers: data.headers
+  });
+  for (const [key, value] of Object.entries({url, redirected, type})) {
+    Object.defineProperty(response, key, {value});
+  }
+  const clone = response.clone.bind(response);
+  Object.defineProperty(response, "clone", {value: () => {
+    const copy = clone();
+    return restore_response({...data, body: copy.body});
+  }});
+  return response;
+}
 
 export function create_blob_url(blob, target_url = null) {
   let url = URL.createObjectURL(blob);
