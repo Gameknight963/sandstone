@@ -11,6 +11,7 @@
   "main": "dist/sandstone.mjs",
   "scripts": {
     "test": "node --test test/*.test.mjs",
+    "test:browser": "node test/run-browser.mjs",
     "build": "npx webpack",
     "build:prod": "npx webpack --mode=production",
     "dev": "npx webpack --watch",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
+    "playwright-core": "^1.65.1",
     "terser-webpack-plugin": "^5.3.11",
     "webpack": "^5.97.1",
     "webpack-cli": "^6.0.1"

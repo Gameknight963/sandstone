@@ -100,5 +100,5 @@ export class SiteDataStore {
 }
 
 let browser_storage;
-try { browser_storage = globalThis.localStorage; } catch {}
+try { if (typeof window !== "undefined") browser_storage = globalThis.localStorage; } catch {}
 export const site_data = new SiteDataStore(browser_storage);

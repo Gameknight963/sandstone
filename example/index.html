@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Sandstone</title>
     <link rel="icon" type="image/png" href="resources/logo_128.png">
     <link rel="stylesheet" href="resources/main.css">
@@ -14,7 +16,9 @@
       <input id="url_box" type="text" placeholder="Enter URL here..." value="sandstone://home">
       <button id="navigate_button">Submit</button>
       <button id="options_button">Options</button>
+      <button id="hide_ui_button" title="Hide controls">Hide</button>
     </div>
+    <button id="show_ui_button" hidden title="Show controls">Show UI</button>
     <div id="frame_container"></div>
 
     <div id="options_div" style="display: none;">
@@ -29,6 +33,21 @@
         <input id="wisp_url_input" type="text" style="flex-grow: 1">
       </div>
       
+      <div style="display: flex; gap: 8px;">
+        <label for="theme_select">Theme:</label>
+        <select id="theme_select">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+
+      <details id="site_data_details">
+        <summary>Stored site data</summary>
+        <p id="storage_status" role="status"></p>
+        <div id="site_data_list"></div>
+      </details>
+
       <div style="display: flex; gap: 8px;">
         <p style="font-size: 16px;">Eval JS:</p>
         <div style="flex-grow: 1"></div>

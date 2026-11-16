@@ -15,6 +15,59 @@ const wisp_url_input = from_id("wisp_url_input");
 const close_options_button = from_id("close_options_button");
 const eval_js_input = from_id("eval_js_input");
 const eval_js_button = from_id("eval_js_button");
+const theme_select = from_id("theme_select");
+const site_data = sandstone.controller.site_data;
+let favicon_blob_url;
+
+function apply_theme(value) {
+  theme_select.value = value;
+  if (value === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = value;
+  try { localStorage.setItem("sandstone_theme", value); } catch {}
+}
+
+function set_ui_hidden(hidden) {
+  from_id("address_bar").hidden = hidden;
+  from_id("show_ui_button").hidden = !hidden;
+  if (hidden && options_div.style.display !== "none") toggle_options();
+  if (!hidden) url_box.focus();
+}
+
+function render_site_data() {
+  const list = from_id("site_data_list");
+  list.replaceChildren();
+  from_id("storage_status").textContent = site_data.persistent ?
+    "Site data is saved in this browser. Session cookies expire when this file is closed." :
+    "Browser storage is unavailable. Site data lasts until this file is closed.";
+  const sites = site_data.list();
+  if (!sites.length) list.textContent = "No stored site data.";
+  for (const site of sites) {
+    const row = document.createElement("div");
+    row.className = "site_data_row";
+    const label = document.createElement("span");
+    label.textContent = `${site.hostname}: ${site.cookies} cookies, ${site.localStorage} local storage entries`;
+    row.append(label);
+    for (const [text, selection] of [
+      ["Clear cookies", {cookies: true, localStorage: false}],
+      ["Clear local storage", {cookies: false, localStorage: true}],
+      ["Clear both", {cookies: true, localStorage: true}]
+    ]) {
+      const button = document.createElement("button");
+      button.textContent = text;
+      button.onclick = async () => {
+        // Discard the current runtime before deletion so it cannot write stale data back.
+        const current = main_frame.url;
+        const affects_current = current && (current.hostname === site.hostname || current.hostname.endsWith("." + site.hostname));
+        if (affects_current) main_frame.iframe.src = "about:blank";
+        site_data.clear(site.hostname, selection);
+        render_site_data();
+        if (affects_current) await main_frame.navigate_to(current.href);
+      };
+      row.append(button);
+    }
+    list.append(row);
+  }
+}
 
 const main_frame = new sandstone.controller.ProxyFrame();
 globalThis.sandstone = sandstone;
@@ -34,10 +87,11 @@ main_frame.on_load = async () => {
   url_box.value = main_frame.url.href;
   let favicon_url = await main_frame.get_favicon();
   if (!favicon_url.startsWith("data:")) {
-    let response = await sandstone.libcurl.fetch(favicon_url);
+    let response = await sandstone.network.fetch(favicon_url);
     if (!response.ok) return;
     let favicon = await response.blob();
-    favicon_url = URL.createObjectURL(favicon);
+    if (favicon_blob_url) URL.revokeObjectURL(favicon_blob_url);
+    favicon_url = favicon_blob_url = URL.createObjectURL(favicon);
   }
   favicon_img.src = favicon_url;
   favicon_img.style.display = "initial";
@@ -61,6 +115,7 @@ function toggle_options() {
   
   //apply options
   sandstone.libcurl.set_websocket(wisp_url_input.value);
+  if (options_div.style.display !== "none") render_site_data();
 }
 
 async function create_homepage() {
@@ -89,6 +144,13 @@ async function create_homepage() {
 }
 
 async function main() {
+  let theme = "system";
+  try { theme = localStorage.getItem("sandstone_theme") || theme; } catch {}
+  apply_theme(["system", "light", "dark"].includes(theme) ? theme : "system");
+  theme_select.onchange = () => apply_theme(theme_select.value);
+  from_id("hide_ui_button").onclick = () => set_ui_hidden(true);
+  from_id("show_ui_button").onclick = () => set_ui_hidden(false);
+  from_id("site_data_details").ontoggle = render_site_data;
   if (location.hash)
     url_box.value = location.hash.substring(1);
 
