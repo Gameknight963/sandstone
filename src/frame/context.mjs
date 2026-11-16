@@ -3,6 +3,7 @@ import * as polyfill from "./polyfill/index.mjs";
 import * as intercept from "./intercept/index.mjs";
 import * as parser from "./parser.mjs";
 import * as loader from "./loader.mjs";
+import { modules } from "./polyfill/module.mjs";
 
 export const is_worker = typeof importScripts === "function";
 export const ctx_vars = [];
@@ -127,6 +128,9 @@ export class CustomCTX {
     return run_script(String(js));
   }
 
+  __import__(referrer, specifier, options) { return modules.import(specifier, referrer, options); }
+  __module_meta__(url) { return modules.meta(url); }
+
   __get_this__(this_obj) {
     if (this_obj === globalThis)
       return ctx.__proxy__;
@@ -233,7 +237,7 @@ export function run_script_safe(js) {
 
 export function run_script(js) {
   //indirect eval preserves global variables
-  let rewritten_js = parser.rewrite_js(js);
+  let rewritten_js = parser.rewrite_js(js, {url: loader.url});
   return eval?.(rewritten_js);
 }
 

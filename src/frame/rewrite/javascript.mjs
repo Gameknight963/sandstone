@@ -15,7 +15,7 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false} = {}) {
+export function rewrite_source(source, globals, {module = false, url, resolve} = {}) {
   const ast = parse(source, {ranges: true, webcompat: true, module, next: true});
   const scopes = new WeakMap();
   const bindings = new WeakSet();
@@ -58,6 +58,16 @@ export function rewrite_source(source, globals, {module = false} = {}) {
 
   function visit(node, parent, key) {
     if (node.type === "BlockStatement" && node.body[0]?.directive === "use asm") return;
+    if (resolve && ["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type) && node.source) {
+      edits.push([node.source.start, node.source.end, JSON.stringify(resolve(node.source.value))]);
+    }
+    if (url && node.type === "ImportExpression") {
+      edits.push([node.start, node.start + 6, `__ctx__.__import__.bind(null,${JSON.stringify(url)})`]);
+    }
+    if (url && node.type === "MetaProperty" && node.meta.name === "import") {
+      edits.push([node.start, node.end, `__ctx__.__module_meta__(${JSON.stringify(url)})`]);
+      return;
+    }
     if (node.type === "ThisExpression") {
       edits.push([node.start, node.end, "(__get_this__(this))"]);
     } else if (node.type === "Identifier" && names.has(node.name) && !bindings.has(node) && !scopes.get(node).has(node.name)) {

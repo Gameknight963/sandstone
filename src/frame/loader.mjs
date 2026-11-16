@@ -17,6 +17,8 @@ export let frame_id; //the current frame id
 export let frame_html; //the html for the frame runtime
 export let version; //the sandstone version
 export let is_loaded = false;
+export let ready_state = "loading";
+export let base_url;
 export let is_iframe = false;
 export let site_settings = {};
 export let default_settings = {};
@@ -28,7 +30,7 @@ export function eval_script(script_element, script_text) {
   let script = document.createElement("script");
   script.__rewritten__ = true;
   try {
-    let rewritten_js = parser.rewrite_js(script_text);
+    let rewritten_js = parser.rewrite_js(script_text, {url: script_element.__sandstone_url__ || ctx.document.baseURI});
     script.innerHTML = rewritten_js;
     document.body.append(script);
   }
@@ -40,12 +42,12 @@ export function eval_script(script_element, script_text) {
   script_element.dispatchEvent(new Event("load"));
 }
 
-function evaluate_scripts() {
+async function evaluate_scripts() {
   pending_scripts.sort((a, b) => a[0] - b[0]);
   let deferred = [];
   const initial = pending_scripts.splice(0).sort((a, b) => a[0] - b[0]);
   for (let [num, script_element] of initial) {
-    if (script_element.defer || script_element.async) {
+    if (script_element.defer || script_element.async || script_element.__sandstone_module__) {
       deferred.push(script_element)
     }
     else {
@@ -53,9 +55,11 @@ function evaluate_scripts() {
     }
   }
   pending_scripts.length = 0;
+  ready_state = "interactive";
+  ctx.document.dispatchEvent(new Event("readystatechange"));
 
   for (let script_element of deferred) {
-    script_element.__sandstone_execute__();
+    await script_element.__sandstone_execute__();
   }
 }
 
@@ -81,6 +85,7 @@ async function load_html(options) {
   network.enable_network();
 
   set_url(options.url);
+  base_url = options.url;
   set_frame_id(options.frame_id);
   get_frame_html();
   update_ctx(options);
@@ -96,6 +101,10 @@ async function load_html(options) {
 
   let parser = new DOMParser();
   let html = parser.parseFromString(options.html, "text/html");  
+  const base_href = html.querySelector("base[href]")?.getAttribute("href");
+  if (base_href !== undefined && base_href !== null) {
+    try { base_url = new URL(base_href, options.url).href; } catch {}
+  }
   
   //rewrite all html elements
   await rewrite.element(html.documentElement);
@@ -143,12 +152,14 @@ async function load_html(options) {
   document.documentElement.replaceWith(html.documentElement);
   is_loaded = true;
   if (site_settings.allow_js) {
-    evaluate_scripts();
+    await evaluate_scripts();
   }
 
   //trigger load events
   is_loaded = true;
-  ctx.document.dispatchEvent(new Event("DOMContentLoaded"));
+  ctx.document.dispatchEvent(new Event("DOMContentLoaded", {bubbles: true}));
+  await Promise.resolve();
+  ready_state = "complete";
   ctx.document.dispatchEvent(new Event("readystatechange"));
   ctx.document.dispatchEvent(new Event("load"));
   ctx.window.dispatchEvent(new Event("load"));

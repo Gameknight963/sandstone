@@ -59,10 +59,11 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
     };
     await main_frame.navigate_to('https://fixture.test/');
   });
-  await page.waitForFunction(async () => {
-    const result = await main_frame.eval_js('JSON.stringify(window.fixtureResult)');
-    return JSON.parse(result).includes('external');
-  });
+  const external_deadline = Date.now() + 10000;
+  while (!JSON.parse(await page.evaluate(() => main_frame.eval_js('JSON.stringify(window.fixtureResult)'))).includes('external')) {
+    if (Date.now() > external_deadline) throw new Error('External script did not execute');
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
   const runtime = await page.evaluate(() => main_frame.eval_js(`JSON.stringify({
     result: window.fixtureResult,
     cookies: document.cookie,

@@ -7,8 +7,15 @@ import assert from "node:assert/strict";
 const testSource = await readFile(new URL("browser.playwright.js", import.meta.url), "utf8");
 const dexieSource = await readFile(new URL("../node_modules/dexie/dist/dexie.js", import.meta.url), "utf8");
 const verify = runInThisContext(`(${testSource})`);
+const moduleTest = await readFile(new URL("modules.playwright.js", import.meta.url), "utf8");
+const verifyModules = runInThisContext(`(${moduleTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
+async function timed(operation, label) {
+  let timer;
+  try { return await Promise.race([operation, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label + " timed out")), 30000); })]); }
+  finally { clearTimeout(timer); }
+}
 const browser = await chromium.launch({channel: process.env.BROWSER_CHANNEL || "chrome", headless: true});
 try {
   for (const storageDenied of [false, true]) {
@@ -18,9 +25,13 @@ try {
       Object.defineProperty(window, "indexedDB", {get() { throw new DOMException("Storage denied", "SecurityError"); }});
     });
     const page = await context.newPage();
+    page.on("pageerror", error => console.error("Browser error:", error.message));
+    page.on("console", message => { if (message.type() === "error") console.error("Browser console:", message.text()); });
     const requests = [];
     page.on("request", request => requests.push(request.url()));
-    const result = await verify(page, target);
+    const result = await timed(verify(page, target), "Browser compatibility fixture");
+    const moduleResults = await timed(verifyModules(page), "Module fixture");
+    result.passed.push(...moduleResults);
     await page.evaluate(source => main_frame.eval_js(source), dexieSource);
     const dexieResult = await page.evaluate(() => main_frame.eval_js(`(async () => {
       const database = new Dexie('browser-dexie');
