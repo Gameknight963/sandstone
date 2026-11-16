@@ -6,4 +6,5 @@ export { fakeImportScripts, FakeWorker, mark_worker_started } from "./worker.mjs
 
 export { fetch } from "./fetch.mjs";
 export { FakeXMLHttpRequest } from "./xhr.mjs";
+export { FakeEventSource } from "./event_source.mjs";
 export * as idb from "./indexeddb.mjs";

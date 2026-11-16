@@ -4,6 +4,7 @@ import { libcurl } from "libcurl.js/bundled";
 import { site_data } from "./site_data.mjs";
 import { fetch_with_cookies } from "./request.mjs";
 import { requests, request_key, cancel_requests } from "./streams.mjs";
+import { streaming_http_session } from "./http_session.mjs";
 
 export const ws_connections = {};
 export let session = null;
@@ -163,5 +164,6 @@ export function clean_ws_connections(id_to_clean) {
 
 libcurl.events.addEventListener("libcurl_load", () => {
   console.log(`libcurl.js v${libcurl.version.lib} loaded`);
-  session = new libcurl.HTTPSession({enable_cookies: false})
+  const HTTPSession = streaming_http_session(libcurl.HTTPSession);
+  session = new HTTPSession({enable_cookies: false})
 });

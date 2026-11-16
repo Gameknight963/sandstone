@@ -1,4 +1,5 @@
 import { serialize_request } from './polyfill/request.mjs';
+import { define_event_handlers as handlers } from './event_handlers.mjs';
 
 const progress_types = ['loadstart', 'progress', 'abort', 'error', 'load', 'timeout', 'loadend'];
 const forbidden_headers = /^(accept-charset|accept-encoding|access-control-request-headers|access-control-request-method|connection|content-length|cookie2?|date|dnt|expect|host|keep-alive|origin|referer|set-cookie|te|trailer|transfer-encoding|upgrade|via|proxy-.*|sec-.*)$/i;
@@ -11,24 +12,6 @@ function progress(type, loaded = 0, total = 0) {
   const event = new Event(type);
   for (const [key, value] of Object.entries(properties)) Object.defineProperty(event, key, {value});
   return event;
-}
-
-function handlers(prototype, types) {
-  for (const type of types) {
-    const slots = new WeakMap();
-    Object.defineProperty(prototype, 'on' + type, {
-      enumerable: true, configurable: true,
-      get() { return slots.get(this)?.value || null; },
-      set(value) {
-        const slot = slots.get(this) || {value: null, listener: event => slots.get(this)?.value?.call(this, event)};
-        slots.set(this, slot);
-        value = typeof value === 'function' ? value : null;
-        if (!slot.value && value) EventTarget.prototype.addEventListener.call(this, type, slot.listener);
-        if (slot.value && !value) EventTarget.prototype.removeEventListener.call(this, type, slot.listener);
-        slot.value = value;
-      }
-    });
-  }
 }
 
 function charset(mime) {

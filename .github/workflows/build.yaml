@@ -50,6 +50,11 @@ jobs:
           BROWSER_CHANNEL: chromium
         run: npm run test:browser
 
+      - name: Test real relay streaming
+        env:
+          BROWSER_CHANNEL: chromium
+        run: npm run test:relay
+
       - name: Prepare download
         run: cp example/bundled.html example/dist/sandstone.html
 

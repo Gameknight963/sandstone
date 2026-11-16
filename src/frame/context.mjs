@@ -94,6 +94,7 @@ export class CustomCTX {
   get Worker() {return polyfill.FakeWorker}
   get importScripts() {return is_worker ? polyfill.fakeImportScripts : undefined}
   get XMLHttpRequest() {return polyfill.FakeXMLHttpRequest}
+  get EventSource() {return polyfill.FakeEventSource}
   get XMLHttpRequestUpload() {return polyfill.FakeXMLHttpRequest.Upload}
   get XMLHttpRequestEventTarget() {return polyfill.FakeXMLHttpRequest.EventTarget}
   get CSSStyleSheet() {return intercept.FakeCSSStyleSheet}
