@@ -1,35 +1,69 @@
-name: build
-on: [push]
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    permissions:
-      contents: write
-
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - name: download repo
-        uses: actions/checkout@v4
-      
-      - name: run build
-        run: |
-          npm i
-          npm run build:prod
-          cd example
-          npm i
-          npm run build:prod
-          mv bundled.html dist/sandstone.html
+      - name: Check out source
+        uses: actions/checkout@v7
 
-      - name: upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            example/package-lock.json
+
+      - name: Install locked dependencies
+        run: |
+          npm ci
+          npm ci --prefix example
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build standalone HTML
+        run: |
+          npm run build:prod
+          npm run build:prod --prefix example
+
+      - name: Install test browser
+        run: npx --no-install playwright-core install --with-deps chromium
+
+      - name: Test the standalone file
+        env:
+          BROWSER_CHANNEL: chromium
+        run: npm run test:browser
+
+      - name: Prepare download
+        run: cp example/bundled.html example/dist/sandstone.html
+
+      - name: Upload HTML artifact
+        uses: actions/upload-artifact@v7
         with:
           name: sandstone
           path: example/dist/sandstone.html
+          if-no-files-found: error
           compression-level: 9
-  
-      - name: create release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          draft: true
-          files: example/dist/sandstone.html
+          retention-days: 90
+          archive: true
+
+      - name: Link latest download
+        env:
+          NIGHTLY_URL: https://nightly.link/${{ github.repository }}/workflows/build.yaml/${{ github.event.repository.default_branch }}/sandstone.zip
+        run: printf '[Download the latest successful default-branch build](%s)\n' "$NIGHTLY_URL" >> "$GITHUB_STEP_SUMMARY"
