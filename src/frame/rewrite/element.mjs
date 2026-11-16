@@ -45,7 +45,7 @@ function rewrite_element_single(element) {
   let inline_style = element.getAttribute("style");
   if (inline_style) {
     element.style.cssText = "";
-    let new_css = parse_css(inline_style, ctx.location.href)
+    let new_css = parse_css(inline_style, ctx.document.baseURI)
     if (typeof new_css === "string") {
       element.style.cssText = new_css;
     }
