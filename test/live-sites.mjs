@@ -8,7 +8,8 @@ if (!sites.length) sites.push("https://example.com/", "https://docs.python.org/3
 const artifact = pathToFileURL(fileURLToPath(new URL("../example/bundled.html", import.meta.url))).href;
 const output = new URL("../.temp/live-sites/", import.meta.url);
 await mkdir(output, {recursive: true});
-const browser = await chromium.launch({channel: process.env.BROWSER_CHANNEL || "chrome", headless: true});
+const channel = process.env.BROWSER_CHANNEL || 'chrome';
+const browser = await chromium.launch({channel: channel === 'headless' ? undefined : channel, headless: true});
 const report = [];
 
 async function timed(operation, timeout = 45000) {
@@ -35,7 +36,11 @@ try {
         main_frame.on_load = () => {};
       }, process.env.WISP_URL || "ws://127.0.0.1:5001/");
       const started = Date.now();
-      await timed(page.evaluate(url => main_frame.navigate_to(url), url));
+      // A script redirect can destroy the first document while its HTML RPC is
+      // still pending. Follow the host's current navigation, not that old reply.
+      const previous = await page.evaluate(() => main_frame.navigation_id);
+      await page.evaluate(url => {main_frame.navigate_to(url).catch(console.error);}, url);
+      await page.waitForFunction(previous => main_frame.navigation_id > previous && !main_frame.is_navigating, previous, {timeout:45000});
       // Let startup animations and dynamically inserted resources settle before capture.
       await new Promise(resolve => setTimeout(resolve, Number(process.env.LIVE_SETTLE_MS || 1500)));
       result.elapsed = Date.now() - started;
@@ -50,7 +55,10 @@ try {
         }))
       })`)), 5000));
       await page.screenshot({path: fileURLToPath(new URL(encodeURIComponent(new URL(url).hostname) + ".png", output))});
-    } catch (error) { result.failure = error.message; }
+    } catch (error) {
+      result.failure = error.message;
+      result.navigation = await page.evaluate(() => ({url:globalThis.main_frame?.url?.href,loading:globalThis.main_frame?.is_navigating})).catch(() => null);
+    }
     finally { await context.close(); }
     report.push(result);
     console.log(JSON.stringify(result));

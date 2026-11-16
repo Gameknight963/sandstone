@@ -1,4 +1,4 @@
-import {createServer} from 'node:http';
+import {create_relay_server} from '../example/http.mjs';
 import {once} from 'node:events';
 import {pathToFileURL, fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
@@ -12,7 +12,7 @@ const held=new Map(),requests=[],closed=[],sockets=new Set(),timers=new Set();
 const authRequests=[];
 const beaconRequests=[],heldBeacons=new Map();
 const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
-const server=createServer({shouldUpgradeCallback:request=>request.headers.upgrade?.toLowerCase()==='websocket'},(request,response)=>{
+const server=create_relay_server((request,response)=>{
   const url=new URL(request.url,'http://localhost');
   const client=url.searchParams.get('client');
   if(url.pathname==='/beacon'){

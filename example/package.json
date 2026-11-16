@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "description": "",
   "main": "server.mjs",
+  "engines": {"node": "^22.21.0 || >=24.9.0"},
   "scripts": {
     "start": "node server.mjs",
     "dev": "npx webpack --watch",
