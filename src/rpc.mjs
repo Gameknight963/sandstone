@@ -69,7 +69,8 @@ async function handle_procedure_call(msg) {
     };
   }
   catch (e) {
-    console.error(e);
+    // The caller receives this rejection and may handle it (for example XHR
+    // aborts/timeouts). Logging here would report handled API errors as uncaught.
     output = {
       value: e,
       success: false

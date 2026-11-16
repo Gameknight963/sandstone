@@ -4,6 +4,7 @@ import * as intercept from "./intercept/index.mjs";
 import * as parser from "./parser.mjs";
 import * as loader from "./loader.mjs";
 import { modules } from "./polyfill/module.mjs";
+import { bind_global_function } from "./global_functions.mjs";
 const parse_json = JSON.parse;
 
 export const is_worker = typeof importScripts === "function";
@@ -22,23 +23,6 @@ const internal = {
   sessionStorage: null
 };
 
-function create_func_proxy(target, func) {
-  let proxy = new Proxy(func, {
-    apply: function(func_target, this_arg, args) {
-      return Reflect.apply(func_target, target, args);
-    }
-  });
-  proxy.apply = function(this_arg, args) {
-    if (this_arg) this_arg = target;
-    return Reflect.apply(func, this_arg, args);
-  }
-  proxy.call = function(this_arg, ...args) {
-    if (this_arg) this_arg = target;
-    return Reflect.apply(func, this_arg, args);
-  }
-  return proxy;
-}
-
 export function get_handler_keys(obj) {
   let keys = [];
   let own_keys = Reflect.ownKeys(Object.getPrototypeOf(obj));
@@ -53,13 +37,13 @@ export function get_handler_keys(obj) {
 export function create_obj_proxy(obj, ctx_vars, target) {
   let proxies = new Map();
 
-  return new Proxy(target, {
+  const proxy = new Proxy(target, {
     get: (_, key) => {
       if (typeof obj[key] !== "undefined")
         return obj[key];
       if (typeof target[key] === "function" && !target[key].prototype) {
         if (!proxies.has(key)) 
-          proxies.set(key, create_func_proxy(target, target[key]))
+          proxies.set(key, bind_global_function(target, target[key], proxy))
         return proxies.get(key)
       }
       return target[key];
@@ -72,6 +56,7 @@ export function create_obj_proxy(obj, ctx_vars, target) {
       return true;
     }
   });
+  return proxy;
 }
 
 export class CustomCTX {
@@ -109,6 +94,8 @@ export class CustomCTX {
   get Worker() {return polyfill.FakeWorker}
   get importScripts() {return is_worker ? polyfill.fakeImportScripts : undefined}
   get XMLHttpRequest() {return polyfill.FakeXMLHttpRequest}
+  get XMLHttpRequestUpload() {return polyfill.FakeXMLHttpRequest.Upload}
+  get XMLHttpRequestEventTarget() {return polyfill.FakeXMLHttpRequest.EventTarget}
   get history() {return internal.history}
 
   get localStorage() {return internal.localStorage}
