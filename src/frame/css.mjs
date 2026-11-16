@@ -27,7 +27,7 @@ function string_end(source, index) {
     if (/[\n\r\f]/.test(source[index])) return index;
     index = source[index] === "\\" ? escape_end(source, index) : index + 1;
   }
-  return index;
+  return Math.min(index, source.length);
 }
 
 function skip_space(source, index) {
@@ -84,8 +84,10 @@ export function css_references(source) {
     if (character === '"' || character === "'") {
       const end = string_end(source, index);
       const image = ["image-set", "-webkit-image-set"].includes(functions.at(-1));
-      if ((imported || image) && source[end - 1] === character) {
-        references.push({start: index, end, url: decode_css(source.slice(index + 1, end - 1)), imported, quoted: true,
+      const closed = source[end - 1] === character;
+      if ((imported || image) && (closed || end === source.length)) {
+        references.push({start: index, end, url: decode_css(source.slice(index + 1, closed ? end - 1 : end)), imported, quoted: true,
+          ...(!closed ? {ending: 'quote'} : {}),
           ...(imported ? import_supports(source, end) : {})});
       }
       imported = false;
@@ -104,11 +106,14 @@ export function css_references(source) {
       const url_start = skip_space(source, index + 1);
       let end = url_start;
       let url;
+      let ending, trailing = '';
       if (source[end] === '"' || source[end] === "'") {
         const string_start = end;
         end = string_end(source, end);
-        if (source[end - 1] === source[string_start]) url = decode_css(source.slice(string_start + 1, end - 1));
+        const closed = source[end - 1] === source[string_start];
+        if (closed || end === source.length) url = decode_css(source.slice(string_start + 1, closed ? end - 1 : end));
         end = skip_space(source, end);
+        if (end === source.length) ending = closed ? 'parenthesis' : 'string';
       } else {
         while (end < source.length && source[end] !== ")" && !whitespace(source[end])) {
           if (source[end] === "\\") end = escape_end(source, end);
@@ -116,9 +121,12 @@ export function css_references(source) {
           else end++;
         }
         url = decode_css(source.slice(url_start, end));
+        const token_end = end;
         end = skip_space(source, end);
+        if (end >= source.length) { ending = 'unquoted'; trailing = source.slice(token_end, end); }
       }
-      if (!namespace && source[end] === ")" && url !== undefined) references.push({start, end: end + 1, url, imported, quoted: false,
+      if (!namespace && (source[end] === ")" || ending) && url !== undefined) references.push({start, end: Math.min(end + 1, source.length), url, imported, quoted: false,
+        ...(ending ? {ending, trailing} : {}),
         ...(imported ? import_supports(source, end + 1) : {})});
       imported = false;
       index = end + Number(source[end] === ")");
@@ -137,6 +145,14 @@ export function css_references(source) {
 
 const empty_resource = "data:application/octet-stream,";
 const empty_stylesheet = "data:text/css,";
+function resource_token(reference, url) {
+  const value = JSON.stringify(url);
+  if (reference.quoted) return reference.ending === 'quote' ? value.slice(0, -1) : value;
+  if (reference.ending === 'unquoted') return 'url(' + url.replace(/[\s"'()\\]/g, character => '\\' + character.charCodeAt(0).toString(16) + ' ') + (reference.trailing || '');
+  if (reference.ending === 'string') return 'url(' + value.slice(0, -1);
+  if (reference.ending === 'parenthesis') return 'url(' + value;
+  return `url(${value})`;
+}
 export function css_resource_references(source) {
   return css_references(String(source)).filter(reference => {
     if (!reference.url || reference.url.startsWith("#")) return false;
@@ -158,27 +174,59 @@ export function prepare_css(source, prefix, supports) {
       markers.set(url, reference.url);
       if (reference.condition && supports) edits.push({start: reference.condition_start, end: reference.condition_end, value: ''});
     }
-    edits.push({start: reference.start, end: reference.end, value: reference.quoted ? JSON.stringify(url) : `url(${JSON.stringify(url)})`});
+    edits.push({start: reference.start, end: reference.end, value: resource_token(reference, url)});
   }
   for (const {start, end, value} of edits.sort((a, b) => b.start - a.start)) source = source.slice(0, start) + value + source.slice(end);
-  return {css: source, markers};
+  return {css: source, markers, edits};
 }
 
-export function restore_css(source, markers) {
+export function restore_css(source, markers, transform, prefixes = false) {
   const references = css_references(source);
+  const edits = [];
   for (let index = references.length - 1; index >= 0; index--) {
-    const {start, end, url, quoted} = references[index];
-    if (!markers.has(url)) continue;
-    const value = JSON.stringify(markers.get(url));
-    source = source.slice(0, start) + (quoted ? value : `url(${value})`) + source.slice(end);
+    const reference = references[index], {start, end, url} = reference;
+    const key = markers.has(url) ? url : prefixes ? [...markers.keys()].find(key => url.startsWith(key)) : undefined;
+    if (key === undefined) continue;
+    const replacement = resource_token(reference, markers.get(key) + url.slice(key.length));
+    edits.push({start, end, value: replacement});
+    source = source.slice(0, start) + replacement + source.slice(end);
   }
-  return source;
+  return transform ? transform(edits) : source;
 }
 
-export function rewrite_css(source, base, {fetch, createURL, supports}, ancestors = new Set()) {
+// Keep unaffected prefixes/suffixes in their original text nodes. A token
+// replacement belongs to the node containing its first character.
+export function edit_css_parts(parts, edits) {
+  const offsets = [0];
+  for (const part of parts) offsets.push(offsets.at(-1) + part.length);
+  const output = parts.map(() => '');
+  let cursor = 0, index = 0;
+  const seek = position => {
+    while (index < parts.length - 1 && offsets[index + 1] <= position) index++;
+  };
+  const copy = end => {
+    seek(cursor);
+    while (cursor < end && index < parts.length) {
+      const last = Math.min(end, offsets[index + 1]);
+      output[index] += parts[index].slice(cursor - offsets[index], last - offsets[index]);
+      cursor = last;
+      if (cursor < end) index++;
+    }
+    seek(end);
+  };
+  for (const edit of [...edits].sort((a, b) => a.start - b.start)) {
+    copy(edit.start);
+    if (parts.length) output[index] += edit.value;
+    cursor = edit.end;
+  }
+  copy(offsets.at(-1));
+  return output;
+}
+
+export function rewrite_css(source, base, {fetch, createURL, supports, transform}, ancestors = new Set()) {
   source = String(source);
   const references = css_resource_references(source);
-  if (!references.length) return source;
+  if (!references.length) return transform ? transform(source, []) : source;
   const pending = new Map();
   const replacements = references.map(reference => {
     if (reference.condition && supports) {
@@ -211,11 +259,11 @@ export function rewrite_css(source, base, {fetch, createURL, supports}, ancestor
   return Promise.all(replacements).then(values => {
     const edits = [];
     for (let index = 0; index < references.length; index++) {
-      const {start, end, quoted} = references[index];
-      const value = JSON.stringify(values[index]);
-      edits.push({start, end, value: quoted ? value : `url(${value})`});
+      const {start, end} = references[index];
+      edits.push({start, end, value: resource_token(references[index], values[index])});
       if (references[index].supported) edits.push({start: references[index].condition_start, end: references[index].condition_end, value: ""});
     }
+    if (transform) return transform(source, edits);
     for (const {start, end, value} of edits.sort((a, b) => b.start - a.start)) source = source.slice(0, start) + value + source.slice(end);
     return source;
   });

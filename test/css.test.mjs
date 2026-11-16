@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { css_references, decode_css, rewrite_css, prepare_css, restore_css } from '../src/frame/css.mjs';
+import { css_references, decode_css, rewrite_css, prepare_css, restore_css, edit_css_parts } from '../src/frame/css.mjs';
 
 test('CSS resource tokens respect comments, strings, escapes and image-set type hints', () => {
   const source = String.raw`/* url(ignore.png) */
@@ -103,4 +103,47 @@ test('Synchronous CSS placeholders retain syntax and restore only resource token
   assert.deepEqual(css_references(restored).map(reference=>reference.url),['theme.css','a.png','#id']);
   assert.match(restored,/layer\(theme\)/);
   assert.match(restored,/content:"url\(a.png\)"/);
+});
+
+test('CSS token edits preserve text node boundaries even when URLs cross every split', async () => {
+  const source='@import "theme.css" supports(display:grid); .x {background:url("one.svg"); color:red}';
+  for (let split=0; split<=source.length; split++) {
+    const parts=[source.slice(0,split),'',source.slice(split)];
+    const prepared=prepare_css(source,'parts-',()=>true);
+    const safe=edit_css_parts(parts,prepared.edits);
+    assert.equal(safe.join(''),prepared.css);
+    const restored=restore_css(safe.join(''),prepared.markers,edits=>edit_css_parts(safe,edits));
+    assert.equal(restored.length,parts.length);
+    assert.equal(restored.join(''),restore_css(prepared.css,prepared.markers));
+    const resolved=await rewrite_css(source,'https://site.test/',{
+      supports:()=>true,fetch:async()=>new Response(''),createURL:()=> 'blob:local',
+      transform:(source,edits)=>edit_css_parts(parts,edits)
+    });
+    assert.equal(resolved.length,parts.length);
+    assert.equal(resolved.join(''),'@import "blob:local" ; .x {background:url("blob:local"); color:red}');
+  }
+});
+
+test('CSS URLs accepted at EOF stay on the relay and retain their unfinished syntax', async () => {
+  const cases = ['.x{background:url(one.svg', '.x{background:url("one.svg',
+    '.x{background:url("one.svg"', '.x{background:url(one.svg  ',
+    '@import "one.svg', '@import url(one.svg'];
+  for (const source of cases) {
+    const references = css_references(source);
+    assert.equal(references.length, 1); assert.equal(references[0].url, 'one.svg');
+    const prepared = prepare_css(source, 'eof-');
+    assert.equal(restore_css(prepared.css, prepared.markers), source);
+    const requested = [];
+    const resolved = await rewrite_css(source, 'https://site.test/', {
+      async fetch(url) { requested.push(url); return new Response(''); }, createURL: () => 'blob:local'
+    });
+    assert.deepEqual(requested, ['https://site.test/one.svg']);
+    assert.equal(css_references(resolved)[0].url, 'blob:local');
+    assert.equal(css_references(resolved)[0].ending, references[0].ending);
+  }
+  const partial = '.x{background:url("partial';
+  const prepared = prepare_css(partial, 'continuation-');
+  const continued = prepared.css + '.svg")}';
+  assert.equal(restore_css(continued, prepared.markers, undefined, true), '.x{background:url("partial.svg")}');
+  assert.equal(css_references('.x{background:url("bad\nstring.svg")}').length, 0);
 });
