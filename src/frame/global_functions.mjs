@@ -1,6 +1,19 @@
 // Binding a global method must not write .call/.apply onto the original function:
 // window.addEventListener can share that function with EventTarget.prototype.
 const native_targets=new WeakMap();
+// Bare globals must use the same receiver adapter as window.method. Frameworks
+// commonly save a native method with .bind(globalThis), whose virtual Window
+// does not satisfy the browser's native receiver checks.
+export function global_method_names(target){
+  const names=new Set();
+  for(let object=target;object&&object!==Object.prototype;object=Object.getPrototypeOf(object)){
+    for(const [name,descriptor] of Object.entries(Object.getOwnPropertyDescriptors(object))){
+      const value=descriptor.value;
+      if(name!=='constructor'&&!name.startsWith('__')&&typeof value==='function'&&!value.prototype)names.add(name);
+    }
+  }
+  return [...names];
+}
 export function unwrap_global_target(value){return native_targets.get(value)||value;}
 export function bind_global_function(target, method, virtual_target) {
   return new Proxy(method, {

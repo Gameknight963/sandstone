@@ -15,7 +15,8 @@ const sites=[
   {id:'github',url:'https://github.com/octocat/Hello-World'},
   {id:'react',url:'https://react.dev/learn'},
   {id:'vue',url:'https://vuejs.org/guide/introduction.html'},
-  {id:'svelte',url:'https://svelte.dev/docs/svelte/overview'}
+  {id:'svelte',url:'https://svelte.dev/docs/svelte/overview'},
+  {id:'angular',url:'https://angular.dev/overview'}
 ];
 const selected=process.argv.slice(2);
 for(const id of selected)if(!sites.some(site=>site.id===id))throw new Error('Unknown live site: '+id+'; choose '+sites.map(site=>site.id).join(', '));
@@ -50,11 +51,29 @@ async function wait(page,proxy,expression){
     }catch(error){lastError=error;}
     await page.waitForTimeout(100);
   }
-  throw new Error('Condition timed out: '+expression+(lastError?' ('+lastError.message+')':''));
+  let state;
+  try{state=await deadline(read(page,proxy,'({url:location.href,heading:document.querySelector("h1")?.textContent.trim(),readyState:document.readyState})'),'Timeout diagnostics',2000);}catch{}
+  throw new Error('Condition timed out: '+expression+(state?' '+JSON.stringify(state):'')+(lastError?' ('+lastError.message+')':''));
 }
 const summary=(page,proxy)=>read(page,proxy,'({title:document.title,heading:document.querySelector("h1")?.textContent.trim()||"",links:document.links.length})');
 async function interact(page,proxy,site){
   const surface=proxy?page.frameLocator('iframe[frame-id]'):page;
+  if(site.id==='angular'){
+    const theme=surface.getByRole('button',{name:/^Change theme\. Current theme:/});
+    await theme.click();
+    await surface.getByRole('menuitemradio',{name:'Set dark theme',exact:true}).click();
+    await wait(page,proxy,'document.querySelector(\'button[aria-label^="Change theme. Current theme:"]\')?.getAttribute("aria-label")==="Change theme. Current theme: dark"');
+    await (proxy?page.evaluate(()=>main_frame.eval_js('window.liveNavigationMarker="persisted"')):page.evaluate(()=>window.liveNavigationMarker='persisted'));
+    await surface.locator('a[href="essentials/components"]:visible').first().click();
+    await wait(page,proxy,'location.pathname==="/essentials/components"&&document.querySelector("h1")?.textContent.trim()==="Components"');
+    await (proxy?page.evaluate(()=>main_frame.eval_js('history.back();true')):page.evaluate(()=>history.back()));
+    await wait(page,proxy,'location.pathname==="/overview"&&document.querySelector("h1")?.textContent.trim()==="What is Angular?"');
+    await (proxy?page.evaluate(()=>main_frame.eval_js('history.forward();true')):page.evaluate(()=>history.forward()));
+    await wait(page,proxy,'location.pathname==="/essentials/components"&&document.querySelector("h1")?.textContent.trim()==="Components"');
+    const result=await read(page,proxy,'({path:location.pathname,heading:document.querySelector("h1").textContent.trim(),clientNavigation:window.liveNavigationMarker==="persisted",theme:document.querySelector(\'button[aria-label^="Change theme. Current theme:"]\').getAttribute("aria-label")})');
+    assert.equal(result.clientNavigation,true,'Angular navigation reloaded the document');
+    return result;
+  }
   if(site.id==='svelte'){
     // Current Svelte stores delegated handlers under a symbol on the element.
     // SSR paints this button before hydration installs its click handler.

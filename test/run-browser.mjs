@@ -120,6 +120,17 @@ try {
     })()`)));
     assert.deepEqual(globalPatch, {stable:true, restored:true, calls:['patched','callback','restored']});
     result.passed.push('Global function instrumentation and restoration');
+    const schedulers=JSON.parse(await timed(page.evaluate(()=>main_frame.eval_js(`(async()=>{
+      const idle=requestIdleCallback.bind(globalThis),cancel=cancelIdleCallback.bind(window);
+      let cancelled=false;
+      const handle=idle(()=>{cancelled=true;});cancel(handle);
+      const deadline=await new Promise(resolve=>idle(resolve,{timeout:1000}));
+      const timestamp=await new Promise(resolve=>requestAnimationFrame.bind(self)(resolve));
+      return JSON.stringify({cancelled,idle:typeof deadline.timeRemaining()==='number',animation:typeof timestamp==='number',identity:requestIdleCallback===window.requestIdleCallback});
+    })()`)),'Bound global schedulers'));
+    assert.deepEqual(schedulers,{cancelled:false,idle:true,animation:true,identity:true});
+    result.passed.push('Bare native schedulers bind to virtual window, self and globalThis');
+    assert.equal(await page.evaluate(()=>main_frame.eval_js('typeof navigation==="undefined"&&typeof window.navigation==="undefined"&&typeof NavigationPrecommitController==="undefined"')),true,'Native Navigation must not target the physical sandbox document');
     const moduleResults = await timed(verifyModules(page), "Module fixture");
     result.passed.push(...moduleResults);
     result.passed.push(...await timed(verifyResources(page), "Resource fixture"));

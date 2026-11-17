@@ -4,7 +4,7 @@ import * as intercept from "./intercept/index.mjs";
 import * as parser from "./parser.mjs";
 import * as loader from "./loader.mjs";
 import { modules } from "./polyfill/module.mjs";
-import { create_obj_proxy } from "./global_functions.mjs";
+import { create_obj_proxy, global_method_names } from "./global_functions.mjs";
 import {parent_message_window,self_post_message} from './window_messages.mjs';
 import {create_document_storage} from './storage_sync.mjs';
 const parse_json = JSON.parse;
@@ -38,7 +38,7 @@ export function get_handler_keys(obj) {
 
 export class CustomCTX {
   constructor() {
-    ctx_vars.push(...get_handler_keys(this));
+    ctx_vars.push(...new Set([...get_handler_keys(this),...global_method_names(globalThis)]));
     this.__proxy__ = create_obj_proxy(this, ctx_vars, globalThis);
   }
 
@@ -186,8 +186,10 @@ export function update_ctx(options = {}) {
     storageReady=stores.ready.then(snapshot=>{internal.storage_unavailable=!!snapshot.opaque;});
   }
   delete globalThis.caches;
-  // These APIs would bypass the relay and contact destination peers directly.
-  for (const key of ["RTCPeerConnection", "webkitRTCPeerConnection"]) {
+  // Native Navigation targets the physical sandbox document. Hide its feature
+  // flags until it can use virtual history, so routers use their History fallback.
+  // Peer connections would also bypass the relay entirely.
+  for (const key of ["navigation", "NavigationPrecommitController", "RTCPeerConnection", "webkitRTCPeerConnection"]) {
     try { Object.defineProperty(globalThis, key, {value: undefined, configurable: true}); } catch {}
   }
 

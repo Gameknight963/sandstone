@@ -1,6 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {bind_global_function, create_obj_proxy} from '../src/frame/global_functions.mjs';
+import {bind_global_function, create_obj_proxy, global_method_names} from '../src/frame/global_functions.mjs';
+
+test('Native method discovery includes inherited methods without invoking global getters or constructors',()=>{
+  let reads=0;
+  class Constructor {}
+  const prototype={inherited(){}};
+  const target=Object.assign(Object.create(prototype),{own(){},Constructor});
+  Object.defineProperty(target,'unavailable',{get(){reads++;throw new Error('Unavailable');}});
+  const names=global_method_names(target);
+  assert.ok(names.includes('own'));assert.ok(names.includes('inherited'));
+  assert.ok(!names.includes('Constructor'));assert.ok(!names.includes('unavailable'));
+  assert.equal(reads,0);
+});
 
 test('Global method binding preserves native call/apply and borrowed EventTarget methods', () => {
   const target=new EventTarget(),virtual={},other=new EventTarget();
