@@ -4,6 +4,7 @@ import * as loader from "../loader.mjs";
 import {mutate_styles as mutate_style_sources} from '../rewrite/style.mjs';
 import {mutate_document_base} from '../document_base.mjs';
 import {reconcile_iframes} from '../iframe_lifecycle.mjs';
+import {html_fragment} from '../html_fragments.mjs';
 const mutate_styles=(nodes,operation)=>mutate_document_base(()=>mutate_style_sources(nodes,operation));
 
 function prepare(node) {
@@ -76,32 +77,72 @@ if (globalThis.Node) {
   }
 
   const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+  const outer = Object.getOwnPropertyDescriptor(Element.prototype, 'outerHTML');
+  const adjacent = Element.prototype.insertAdjacentHTML;
+  const namespace=Object.getOwnPropertyDescriptor(Element.prototype,'namespaceURI').get;
+  const parent=Object.getOwnPropertyDescriptor(Node.prototype,'parentNode').get;
+  const stringify=String;
+  const markup_string=value=>{
+    if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');
+    return stringify(value);
+  };
   const replace = Element.prototype.replaceChildren;
-  function fragment(value) {
-    const template = document.createElement("template");
-    descriptor.set.call(template, value);
-    for (const script of template.content.querySelectorAll("script")) script.__sandstone_inert__ = true;
-    prepare(template.content);
-    return template.content;
+  const before=Element.prototype.before,after=Element.prototype.after,prepend=Element.prototype.prepend,append=Element.prototype.append;
+  function fragment(context,value,operation,position) {
+    const content=html_fragment(context,value,operation,position);
+    prepare(content);
+    return content;
   }
   Object.defineProperty(Element.prototype, "innerHTML", {
     ...descriptor,
     set(value) {
+      namespace.call(this);
+      if(!arguments.length)return descriptor.set.call(this);
+      value=value===null?'':markup_string(value);
       if (["SCRIPT", "STYLE", "TEXTAREA", "TEMPLATE"].includes(this.tagName)) {
         mutate_styles([this], () => descriptor.set.call(this, value));
         return;
       }
-      const content = fragment(value);
+      const content = fragment(this,value);
       Reflect.apply(replace, this, [content]);
     }
   });
+  Object.defineProperty(Element.prototype,'outerHTML',{...outer,set(value){
+    namespace.call(this);
+    if(!arguments.length)return outer.set.call(this);
+    value=value===null?'':markup_string(value);
+    const container=parent.call(this);
+    if(!container||container instanceof Document)return outer.set.call(this,value);
+    const content=fragment(this,value,'outer');
+    // Use the intercepted insertion path for resource preparation, stylesheet
+    // bookkeeping and iframe lifecycle handling.
+    Element.prototype.replaceWith.call(this,content);
+  }});
+  if(globalThis.ShadowRoot){
+    const shadow=Object.getOwnPropertyDescriptor(ShadowRoot.prototype,'innerHTML');
+    const host=Object.getOwnPropertyDescriptor(ShadowRoot.prototype,'host').get;
+    const replace_shadow=DocumentFragment.prototype.replaceChildren;
+    Object.defineProperty(ShadowRoot.prototype,'innerHTML',{...shadow,set(value){
+      const context=host.call(this);
+      if(!arguments.length)return shadow.set.call(this);
+      value=value===null?'':markup_string(value);
+      Reflect.apply(replace_shadow,this,[fragment(context,value)]);
+    }});
+  }
   Element.prototype.insertAdjacentHTML = function(position, value) {
-    const content = fragment(value);
-    switch (String(position).toLowerCase()) {
-      case "beforebegin": this.before(content); break;
-      case "afterbegin": this.prepend(content); break;
-      case "beforeend": this.append(content); break;
-      case "afterend": this.after(content); break;
+    namespace.call(this);
+    if(arguments.length<2)return Reflect.apply(adjacent,this,arguments);
+    position=markup_string(position);value=markup_string(value);
+    const normalized=position.toLowerCase();
+    if(!['beforebegin','afterbegin','beforeend','afterend'].includes(normalized))throw new DOMException('Invalid position','SyntaxError');
+    const container=parent.call(this);
+    if(['beforebegin','afterend'].includes(normalized)&&(!container||container instanceof Document))return adjacent.call(this,position,value);
+    const content = fragment(this,value,'adjacent',normalized);
+    switch (normalized) {
+      case "beforebegin": before.call(this,content); break;
+      case "afterbegin": prepend.call(this,content); break;
+      case "beforeend": append.call(this,content); break;
+      case "afterend": after.call(this,content); break;
       default: throw new DOMException("Invalid position", "SyntaxError");
     }
   };

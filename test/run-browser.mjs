@@ -21,6 +21,8 @@ const linkTest=await readFile(new URL('links.playwright.js',import.meta.url),'ut
 const verifyLinks=runInThisContext(`(${linkTest})`);
 const hyperlinkTest=await readFile(new URL('hyperlinks.playwright.js',import.meta.url),'utf8');
 const verifyHyperlinks=runInThisContext(`(${hyperlinkTest})`);
+const htmlInsertionTest=await readFile(new URL('html-insertion.playwright.js',import.meta.url),'utf8');
+const verifyHTMLInsertion=runInThisContext(`(${htmlInsertionTest})`);
 const baseTest=await readFile(new URL('base.playwright.js',import.meta.url),'utf8');
 const verifyBase=runInThisContext(`(${baseTest})`);
 const attributeTest=await readFile(new URL('event-attributes.playwright.js',import.meta.url),'utf8');
@@ -172,6 +174,7 @@ try {
     result.passed.push(...await timed(verifyLinks(page), 'Link event fixture'));
     result.passed.push(...await timed(verifyAttributes(page), 'Event attribute fixture'));
     result.passed.push(...await timed(verifyHyperlinks(page), 'Hyperlink URL fixture'));
+    result.passed.push(...await timed(verifyHTMLInsertion(page), 'HTML insertion fixture'));
     result.passed.push(...await timed(verifyCSS(page), "CSS fixture"));
     result.passed.push(...await timed(verifyMedia(page), "Media fixture"));
     result.passed.push(...await timed(verifyForms(page), "Form fixture"));
