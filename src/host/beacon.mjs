@@ -25,12 +25,21 @@ export class BeaconQueue {
     }
   }
 
-  async send(id, url, body, options = {}) {
+  reserve(id, size) {
     const entry = this.contexts.get(id);
-    if (!entry || !(body instanceof Blob) || entry.queued + body.size > 65536) return false;
+    if (!entry || !Number.isSafeInteger(size) || size < 0 || entry.queued + size > 65536) return null;
+    entry.queued += size;
+    let released = false;
+    return {entry, release() { if (!released) { released = true; entry.queued -= size; } }};
+  }
+
+  async send(id, url, body, options = {}) {
+    if (!(body instanceof Blob)) return false;
     const target = new URL(url);
     if (!['http:', 'https:'].includes(target.protocol)) return false;
-    entry.queued += body.size;
+    const lease = this.reserve(id,body.size);
+    if (!lease) return false;
+    const {entry} = lease;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout);
     timer.unref?.();
@@ -50,7 +59,7 @@ export class BeaconQueue {
     } finally {
       clearTimeout(timer);
       this.pending.delete(request);
-      entry.queued -= body.size;
+      lease.release();
     }
     return {cookies: this.cookies(entry.context.url)};
   }

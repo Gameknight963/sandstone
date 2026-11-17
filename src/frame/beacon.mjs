@@ -25,18 +25,17 @@ export function beacon_body(value) {
   return new Blob([String(value)], {type: 'text/plain;charset=UTF-8'});
 }
 
-export function create_beacon_sender({base, dispatch, limit = 65536}) {
-  let queued = 0;
+export function create_beacon_sender({base, dispatch, limit = 65536, budget = {queued:0}}) {
   return function sendBeacon(url, data) {
     if (!arguments.length) throw new TypeError('sendBeacon requires a URL');
     const target = new URL(url, base());
     if (!['http:', 'https:'].includes(target.protocol)) throw new TypeError('Beacon URL must use HTTP or HTTPS');
     const body = beacon_body(data);
-    if (queued + body.size > limit) return false;
-    queued += body.size;
+    if (budget.queued + body.size > limit) return false;
+    budget.queued += body.size;
     try {
-      Promise.resolve(dispatch(target.href, body)).catch(() => {}).finally(() => { queued -= body.size; });
+      Promise.resolve(dispatch(target.href, body)).catch(() => {}).finally(() => { budget.queued -= body.size; });
       return true;
-    } catch { queued -= body.size; return false; }
+    } catch { budget.queued -= body.size; return false; }
   };
 }

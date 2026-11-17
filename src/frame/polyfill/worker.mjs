@@ -226,10 +226,10 @@ export class FakeWorker extends EventTarget {
     }
     if (this.#terminated) return;
     const register = rpc.create_rpc_wrapper(rpc.host, "frame_register");
-    await register(loader.frame_id, this.#id, url, {worker: true});
+    const registration = await register(loader.frame_id, this.#id, url, {worker: true});
     this.#registered = true;
     if (this.#terminated) { this.#unregister(); return; }
-    this.#bootstrap = this.#blob(this.#payload(source, url, sources));
+    this.#bootstrap = this.#blob({...this.#payload(source, url, sources),beacon_context:registration.beacon_context});
     // A classic bootstrap can import worker-local module blobs even on file:
     // origins, where native module-worker construction rejects parent blobs.
     this.#worker = new NativeWorker(this.#bootstrap, {...this.#options, type: "classic"});

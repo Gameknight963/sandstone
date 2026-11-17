@@ -1,7 +1,23 @@
 // Normalize with the browser's Request implementation, retaining generated body headers.
-export async function serialize_request(resource, init, base, source_url = base) {
+import {beacon_body} from '../beacon.mjs';
+
+export async function serialize_request(resource, init, base, source_url = base, reserve) {
   const input = resource instanceof Request ? resource : new URL(resource, base).href;
   const options = {...init};
+  const keepalive = options.keepalive ?? (resource instanceof Request && resource.keepalive);
+  const no_body = options.body == null && !(resource instanceof Request);
+  // A Blob snapshot can cross RPC during unload without waiting for body-stream
+  // reads in the departing realm. Use its own multipart boundary consistently.
+  const snapshot = keepalive && options.body != null ? beacon_body(options.body) : null;
+  if (snapshot) {
+    const source_body = options.body;
+    options.body = snapshot;
+    if (!(source_body instanceof Blob || source_body instanceof ArrayBuffer || ArrayBuffer.isView(source_body) || typeof FormData !== 'undefined' && source_body instanceof FormData)) {
+      const headers = new Headers(options.headers === undefined && resource instanceof Request ? resource.headers : options.headers);
+      if (!headers.has('content-type')) headers.set('content-type',source_body instanceof URLSearchParams ? 'application/x-www-form-urlencoded;charset=UTF-8' : 'text/plain;charset=UTF-8');
+      options.headers = headers;
+    }
+  }
   const initial_referrer = options.referrer !== undefined ? options.referrer : resource instanceof Request ? resource.referrer : 'about:client';
   delete options.referrer;
   let referrer = initial_referrer;
@@ -12,8 +28,16 @@ export async function serialize_request(resource, init, base, source_url = base)
   if (options.body instanceof ReadableStream) options.duplex = "half";
   const request = new Request(input, options);
   request.signal.throwIfAborted();
+  const reserved = request.keepalive && (snapshot !== null || no_body);
+  if (reserved) reserve?.(snapshot?.size || 0);
   // Firefox may expose a null .body for FormData while arrayBuffer() still contains it.
-  const body = /^(GET|HEAD)$/.test(request.method) ? undefined : await request.arrayBuffer();
+  let body;
+  if (!/^(GET|HEAD)$/.test(request.method)) {
+    if (snapshot) body = snapshot;
+    else if (request.keepalive && no_body) body = new ArrayBuffer(0);
+    else body = await request.arrayBuffer();
+  }
+  if (request.keepalive && !reserved) reserve?.(body?.byteLength || 0);
   return {
     url: request.url,
     signal: request.signal,
@@ -24,6 +48,7 @@ export async function serialize_request(resource, init, base, source_url = base)
       credentials: request.credentials,
       redirect: request.redirect,
       cache: request.cache,
+      keepalive: request.keepalive,
       mode: request.mode,
       referrer,
       referrerPolicy: request.referrerPolicy

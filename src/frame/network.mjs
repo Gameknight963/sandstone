@@ -4,10 +4,15 @@ import { create_websocket_class } from "./websocket.mjs";
 import { ctx } from "./context.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
 import {document_referrer_policy} from './intercept/document.mjs';
+import {reserve_keepalive} from './keepalive_budget.mjs';
 
 export const rpc_fetch = rpc.create_rpc_wrapper(rpc.host, "fetch");
 const rpc_fetch_read = rpc.create_rpc_wrapper(rpc.host, "fetch_read");
 const rpc_fetch_abort = rpc.create_rpc_wrapper(rpc.host, "fetch_abort");
+const rpc_keepalive = rpc.create_rpc_wrapper(rpc.host,'fetch_keepalive');
+const rpc_keepalive_read = rpc.create_rpc_wrapper(rpc.host,'fetch_keepalive_read');
+const rpc_keepalive_abort = rpc.create_rpc_wrapper(rpc.host,'fetch_keepalive_abort');
+const rpc_keepalive_done = rpc.create_rpc_wrapper(rpc.host,'fetch_keepalive_done');
 export const rpc_ws_new = rpc.create_rpc_wrapper(rpc.host, "ws_new");
 export const rpc_ws_event = rpc.create_rpc_wrapper(rpc.host, "ws_event");
 export const rpc_ws_send = rpc.create_rpc_wrapper(rpc.host, "ws_send");
@@ -32,13 +37,16 @@ export async function fetch(url, options) {
   let base_url = ctx.location?.href || loader.url;
   url = new URL(url, base_url);
   if (url.protocol === "data:" || url.protocol === "blob:") {
-    return await globalThis.fetch(url.href, options);
+    try { return await globalThis.fetch(url.href, options); }
+    finally { options?.sandstone_keepalive_release?.(); }
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw TypeError("Invalid URL");
   }
 
   const params = {...options};
+  const reserved_release = params.sandstone_keepalive_release;
+  delete params.sandstone_keepalive_release;
   if (!params.referrerPolicy) params.referrerPolicy = document_referrer_policy();
   const frame_id = params.sandstone_frame_id || loader.frame_id;
   delete params.sandstone_frame_id;
@@ -46,16 +54,24 @@ export async function fetch(url, options) {
   delete params.signal;
   signal?.throwIfAborted();
   const request_id = Math.random() + "";
+  const keepalive = !!params.keepalive;
+  const owner = keepalive ? loader.beacon_context : frame_id;
+  const open = keepalive ? rpc_keepalive : rpc_fetch;
+  const read = keepalive ? rpc_keepalive_read : rpc_fetch_read;
+  const cancel = keepalive ? rpc_keepalive_abort : rpc_fetch_abort;
+  const bytes = keepalive && params.body != null ? new Blob([params.body]).size : 0;
+  const release = reserved_release || (keepalive ? reserve_keepalive(bytes) : ()=>{});
   let stream_controller;
   const cleanup = () => signal?.removeEventListener("abort", abort);
   const abort = () => {
-    rpc_fetch_abort(frame_id, request_id).catch(() => {});
+    cancel(owner, request_id).catch(() => {});
     stream_controller?.error(signal.reason);
     cleanup();
   };
   signal?.addEventListener("abort", abort, {once: true});
   try {
-    const pending = rpc_fetch(frame_id, request_id, url.href, params);
+    const pending = open(owner, request_id, url.href, params);
+    if (keepalive) pending.then(()=>rpc_keepalive_done(owner,request_id)).then(release,release);
     const fetch_data = signal ? await new Promise((resolve, reject) => {
       const reject_abort = () => reject(signal.reason);
       signal.addEventListener("abort", reject_abort, {once: true});
@@ -67,16 +83,16 @@ export async function fetch(url, options) {
       start(controller) { stream_controller = controller; },
       async pull(controller) {
         try {
-          const chunk = await rpc_fetch_read(frame_id, request_id);
+          const chunk = await read(owner, request_id);
           if (chunk.done) { cleanup(); controller.close(); }
           else controller.enqueue(chunk.value);
         } catch (error) { cleanup(); controller.error(error); }
       },
-      cancel() { cleanup(); return rpc_fetch_abort(frame_id, request_id); }
+      cancel() { cleanup(); return cancel(owner, request_id); }
     }) : null;
-    if (!body) { cleanup(); await rpc_fetch_abort(frame_id, request_id); }
+    if (!body) { cleanup(); if (!keepalive) await cancel(owner, request_id); }
     return restore_response({...fetch_data, body});
-  } catch (error) { cleanup(); throw error; }
+  } catch (error) { cleanup(); release(); throw error; }
 };
 
 function restore_response(data) {

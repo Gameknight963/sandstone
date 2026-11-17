@@ -303,7 +303,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   iframes[child_id] = child;
   child.history.navigate(url, {mode: saved?.navigation?.history_mode || "push"});
   return {
-    beacon_context: network.beacons.register(child_id, {url: child.url.href, top_url: root.url.href}),
+    beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href}),
     crypto_available: crypto_service.methods,
     local_storage: site_data.local[child.origin],
     session_storage: child.session_storage[child.origin],

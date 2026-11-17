@@ -85,6 +85,7 @@ export function set_url(_url) {
 }
 
 export function set_worker_context(options) {
+  beacon_context = options.beacon_context;
   referrer_policy = options.referrer_policy || default_referrer_policy;
   reset_document_referrer_policy(referrer_policy);
   crypto_available = options.crypto_available || false;
