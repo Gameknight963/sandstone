@@ -1,6 +1,10 @@
 // Native HTML constructors return the element before custom-element fields or
 // constructor bodies run. Keep that boundary available to DOM copy operations.
 const hooks=[],construction_hooks=[],constructors=new WeakMap(),parents=new Map();
+const inert_nodes=new WeakSet();
+export const native_attach_shadow=globalThis.Element?.prototype.attachShadow;
+export function mark_inert_node(node){inert_nodes.add(node);return node;}
+export const is_inert_node=node=>inert_nodes.has(node);
 export const html_constructor_names=[];
 const base=globalThis.HTMLElement?.prototype,isPrototypeOf=Object.prototype.isPrototypeOf;
 if(base)for(const [name,property] of Object.entries(Object.getOwnPropertyDescriptors(globalThis))){

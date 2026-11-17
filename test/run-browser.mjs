@@ -49,6 +49,8 @@ const mediaAttributesTest=await readFile(new URL('media-attributes.playwright.js
 const verifyMediaAttributes=runInThisContext(`(${mediaAttributesTest})`);
 const domSerializationTest=await readFile(new URL('dom-serialization.playwright.js',import.meta.url),'utf8');
 const verifyDOMSerialization=runInThisContext(`(${domSerializationTest})`);
+const getHTMLTest=await readFile(new URL('get-html.playwright.js',import.meta.url),'utf8');
+const verifyGetHTML=runInThisContext(`(${getHTMLTest})`);
 const mediaPolicyTest=await readFile(new URL('media-policy.playwright.js',import.meta.url),'utf8');
 const verifyMediaPolicy=runInThisContext(`(${mediaPolicyTest})`);
 const pictureLifecycleTest=await readFile(new URL('picture-lifecycle.playwright.js',import.meta.url),'utf8');
@@ -212,6 +214,7 @@ try {
     result.passed.push(...await timed(verifyImageConstructor(page), 'Image constructor fixture'));
     result.passed.push(...await timed(verifyMediaAttributes(page), 'Media attribute fixture'));
     result.passed.push(...await timed(verifyDOMSerialization(page), 'DOM serialization fixture'));
+    result.passed.push(...await timed(verifyGetHTML(page), 'getHTML fixture'));
     result.passed.push(...await timed(verifyMediaPolicy(page), 'Media policy fixture'));
     result.passed.push(...await timed(verifyPictureLifecycle(page), 'Picture lifecycle fixture'));
     result.passed.push(...await timed(verifySVGResources(page), 'SVG resource fixture'));

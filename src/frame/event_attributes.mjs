@@ -1,5 +1,6 @@
 import {run_script} from './context.mjs';
 import {finish_event_listener} from './link_events.mjs';
+import {is_inert_node} from './dom_operations.mjs';
 
 const states=new WeakMap(),supported=new Set(),nativeHandlers=new WeakMap();
 let assigning=0;
@@ -7,7 +8,7 @@ const attributes=globalThis.Element&&Object.getOwnPropertyDescriptor(Element.pro
 const attrValue=globalThis.Attr&&Object.getOwnPropertyDescriptor(Attr.prototype,'value').get;
 function entries(element){let value=states.get(element);if(!value){value=new Map();states.set(element,value);}return value;}
 export function rewrite_event_attributes(element){
-  if(!(element instanceof Element))return;
+  if(!(element instanceof Element)||is_inert_node(element))return;
   const handlers=entries(element);
   for(const attribute of attributes.call(element)){
     const name=attribute.name;

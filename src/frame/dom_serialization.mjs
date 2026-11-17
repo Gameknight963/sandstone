@@ -1,6 +1,8 @@
-import {serialize,serializeOuter} from 'parse5';
+import {serialize,serializeOuter,parseFragment} from 'parse5';
 import {copy_resource_node} from './resource_nodes.mjs';
 import {unwrap_document} from './document_identity.mjs';
+import {shadow_root,track_shadow_root} from './shadow_roots.mjs';
+import {native_attach_shadow as attach,mark_inert_node} from './dom_operations.mjs';
 
 const N=globalThis.Node?.prototype,E=globalThis.Element?.prototype,D=globalThis.Document?.prototype;
 const descriptor=(prototype,key)=>prototype&&Object.getOwnPropertyDescriptor(prototype,key);
@@ -12,38 +14,70 @@ const attribute_fields=Object.fromEntries(['name','localName','namespaceURI','pr
 const data=globalThis.CharacterData&&descriptor(CharacterData.prototype,'data').get;
 const content_type=descriptor(D,'contentType')?.get,view=descriptor(D,'defaultView')?.get;
 const create=D?.createElementNS,import_node=D?.importNode,fragment=D?.createDocumentFragment;
-const append=N?.appendChild,set=E?.setAttributeNS;
+const append=N?.appendChild,set=E?.setAttributeNS,remove=E?.removeAttributeNS;
 const element_inner=descriptor(E,'innerHTML'),element_outer=descriptor(E,'outerHTML');
 const shadow_inner=globalThis.ShadowRoot&&descriptor(ShadowRoot.prototype,'innerHTML');
-const native_serialize=globalThis.XMLSerializer?.prototype.serializeToString;
+const NativeSerializer=globalThis.XMLSerializer,native_serialize=NativeSerializer?.prototype.serializeToString;
+const element_getHTML=E?.getHTML,shadow_getHTML=globalThis.ShadowRoot?.prototype.getHTML;
+const shadow_host=globalThis.ShadowRoot&&descriptor(ShadowRoot.prototype,'host').get;
+const shadow_serializable=globalThis.ShadowRoot&&descriptor(ShadowRoot.prototype,'serializable')?.get;
 const standard_namespaces=new Set(['http://www.w3.org/1999/xhtml','http://www.w3.org/2000/svg','http://www.w3.org/1998/Math/MathML']);
+let serialization_sequence=0;
 
 // Build plain inert nodes, rather than cloning custom elements with their
 // registries. Serialization must never invoke authored constructors/reactions.
-function snapshot(source){
-  const document=kind.call(source)===9?source:owner.call(source),inert=clone.call(document,false),pairs=[],scripting=new WeakMap();
+function snapshot(source,options){
+  const document=kind.call(source)===9?source:owner.call(source),inert=clone.call(document,false),pairs=[],scripting=new WeakMap(),copies=new WeakMap(),raw=new WeakSet(),xml=content_type.call(document)!=='text/html',projections=[];
+  const selected=new Set(options?.shadowRoots||[]),explicit=new Map();
+  for(const root of selected){track_shadow_root(root);explicit.set(shadow_host.call(root),root);}
   const shallow=node=>{
     const type=kind.call(node);let copy;
     if(type===1){
       const tag=(prefix.call(node)?prefix.call(node)+':':'')+local.call(node);
       copy=create.call(inert,namespace.call(node),tag);
+      mark_inert_node(copy);
       for(const attribute of attributes.call(node))set.call(copy,attribute_fields.namespaceURI.call(attribute),attribute_fields.name.call(attribute),attribute_fields.value.call(attribute));
     }else if(type===9)copy=inert;
-    else if(type===11)copy=fragment.call(inert);
+    else if(type===11)copy=options&&xml?attach.call(create.call(inert,'http://www.w3.org/1999/xhtml','div'),{mode:'open'}):fragment.call(inert);
     else copy=import_node.call(inert,node,false);
     if(type===1)scripting.set(copy,!!view.call(owner.call(node)));
-    pairs.push([node,copy]);return copy;
+    copies.set(node,copy);pairs.push([node,copy]);return copy;
   };
   const root=shallow(source),stack=[[source,root]];
   while(stack.length){
-    const [node,copy]=stack.pop();
+    const [node,copy]=stack.pop();let shadowTask;
+    if(options&&kind.call(node)===1){
+      const root=explicit.get(node)||shadow_root(node);
+      if(root&&(selected.has(root)||options.serializableShadowRoots&&shadow_serializable?.call(root))){
+        // Let the native serializer supply flag names and their order, including
+        // newer shadow metadata. XML copies use private roots for namespace scope.
+        const native=element_getHTML.call(node,native_options({shadowRoots:[root],serializableShadowRoots:false})),end=native.indexOf('>');
+        let target;
+        if(xml){target=attach.call(copy,{mode:'open'});projections.push({host:copy,root:target,header:native.slice(0,end+1)});}
+        else{
+          const container=create.call(inert,'http://www.w3.org/1999/xhtml','div');element_inner.set.call(container,native.slice(0,end+1)+'</template>');
+          const projection=children.call(container)[0];append.call(copy,projection);target=content.call(projection);
+        }
+        pairs.push([root,target]);copies.set(root,target);shadowTask=[root,target];
+      }else if(options.opaque?.has(node)){
+        const value=options.opaque.get(node);
+        if(content_type.call(document)==='text/html'){
+          const text=inert.createTextNode(value);raw.add(text);append.call(copy,text);
+        }else{
+          const end=value.indexOf('>')+1,target=attach.call(copy,{mode:'open'});
+          shadow_inner.set.call(target,value.slice(end,value.lastIndexOf('</template>')));
+          projections.push({host:copy,root:target,header:value.slice(0,end)});
+        }
+      }
+    }
     const template=kind.call(node)===1&&namespace.call(node)==='http://www.w3.org/1999/xhtml'&&local.call(node)==='template';
     const from=template?content.call(node):node,to=template?content.call(copy):copy,next=[];
     for(const child of children.call(from)){const target=shallow(child);append.call(to,target);next.push([child,target]);}
     for(let index=next.length-1;index>=0;index--)stack.push(next[index]);
+    if(shadowTask)stack.push(shadowTask);
   }
   for(let index=pairs.length-1;index>=0;index--)copy_resource_node(pairs[index][0],pairs[index][1],true,false,true);
-  return {root,document,html:content_type.call(document)==='text/html',scripting:!!view.call(document),nodeScripting:scripting,empty:fragment.call(inert)};
+  return {root,document,html:!xml,scripting:!!view.call(document),nodeScripting:scripting,empty:fragment.call(inert),raw,copies,projections,rawParent:create.call(inert,'http://www.w3.org/1999/xhtml','script')};
 }
 const adapter={
   isElementNode:node=>kind.call(node)===1,
@@ -64,14 +98,96 @@ const adapter={
   })
 };
 function contextual_adapter(state){
-  return {...adapter,getParentNode(node){const parent=adapter.getParentNode(node);return parent&&adapter.isElementNode(parent)&&adapter.getTagName(parent)==='noscript'&&!state.nodeScripting.get(parent)?state.empty:parent;}};
+  return {...adapter,getParentNode(node){if(state.raw.has(node))return state.rawParent;const parent=adapter.getParentNode(node);return parent&&adapter.isElementNode(parent)&&adapter.getTagName(parent)==='noscript'&&!state.nodeScripting.get(parent)?state.empty:parent;}};
 }
-function markup(source,outer){
-  const state=snapshot(source);
-  if(!state.html)return (outer?element_outer:element_inner).get.call(state.root);
+function serialize_snapshot(state,root=state.root,outer=false,getHTML=false){
+  if(!state.html){
+    if(getHTML)return xml_shadow_markup(state,root);
+    if(kind.call(root)===11)return native_serialize.call(new NativeSerializer(),root);
+    return (outer?element_outer:element_inner).get.call(root);
+  }
   const options={treeAdapter:contextual_adapter(state),scriptingEnabled:state.scripting};
-  if(outer)return serializeOuter(state.root,options);
-  return serialize(state.root,options);
+  return outer?serializeOuter(root,options):serialize(root,options);
+}
+function xml_shadow_markup(state,root){
+  const method=kind.call(root)===11?shadow_getHTML:element_getHTML,options=native_options({serializableShadowRoots:false,shadowRoots:state.projections.map(value=>value.root)});
+  let result=method.call(root,options);if(!state.projections.length)return result;
+  let marker;do{marker='data-sandstone-serialize-'+serialization_sequence++;}while(result.includes(marker)||state.projections.some(value=>value.header.includes(marker)));
+  for(let index=0;index<state.projections.length;index++)if(state.projections[index].host!==root)set.call(state.projections[index].host,null,marker,String(index));
+  result=method.call(root,options);
+  for(let index=0;index<state.projections.length;index++){
+    const projection=state.projections[index],attribute=' '+marker+'="'+index+'"';
+    const position=projection.host===root?0:result.indexOf(attribute);if(position<0)continue;
+    const offset=projection.host===root?0:result.indexOf('>',position)+1;
+    if(!result.startsWith('<template',offset))continue;
+    const end=result.indexOf('>',offset)+1,header=result.slice(offset,end);
+    // Native XML shadow serialization manages namespace scope across the
+    // projection. Preserve those declarations while restoring source flags.
+    const flags=projection.header.match(/\s+shadowroot[a-z-]*(?:="[^"]*")?/g)||[];
+    const restored=header.replace(/\s+shadowroot[a-z-]*(?:="[^"]*")?/g,'').slice(0,-1)+flags.join('')+'>';
+    result=result.slice(0,offset)+restored+result.slice(end);
+  }
+  for(let index=0;index<state.projections.length;index++){result=result.split(' '+marker+'="'+index+'"').join('');remove.call(state.projections[index].host,null,marker);}
+  return result;
+}
+function native_options(options){
+  return {serializableShadowRoots:options.serializableShadowRoots,shadowRoots:{[Symbol.iterator](){let index=0;return {next(){return index<options.shadowRoots.length?{value:options.shadowRoots[index++],done:false}:{value:undefined,done:true};}};}}};
+}
+function shadow_markup(value,locations=false){
+  const tree=parseFragment(value,{scriptingEnabled:true,sourceCodeLocationInfo:locations});let count=0;
+  const pending=[tree];while(pending.length){const node=pending.pop();if(node.tagName==='template'&&node.namespaceURI==='http://www.w3.org/1999/xhtml'&&node.attrs.some(attribute=>attribute.name==='shadowrootmode'))count++;for(const child of node.childNodes||[])pending.push(child);if(node.content)pending.push(node.content);}
+  return {tree,count};
+}
+function opaque_roots(source,value,options,state){
+  const opaque=new Map(),pending=[[source,value]],selected=new Set(options.shadowRoots);
+  const native=native_options(options),empty=native_options({serializableShadowRoots:false,shadowRoots:[]});
+  const body=node=>(kind.call(node)===11?shadow_getHTML:element_getHTML).call(node,native);
+  const missing=(node,value)=>shadow_markup(value).count>shadow_markup(serialize_snapshot(state,state.copies.get(node),false,true)).count;
+  while(pending.length){
+    const [node,html]=pending.pop();let remaining=html,root=kind.call(node)===1?shadow_root(node):null;
+    if(kind.call(node)===1&&!root){
+      const parsed=shadow_markup(html,true).tree,first=parsed.childNodes[0];
+      if(first?.tagName==='template'&&first.attrs.some(attribute=>attribute.name==='shadowrootmode')&&parsed.childNodes.length>shadow_markup(element_getHTML.call(node,empty)).tree.childNodes.length){
+        const end=first.sourceCodeLocation.endOffset;opaque.set(node,html.slice(0,end));remaining=html.slice(end);
+      }
+    }
+    if(!missing(node,remaining))continue;
+    const template=kind.call(node)===1&&namespace.call(node)==='http://www.w3.org/1999/xhtml'&&local.call(node)==='template';
+    for(const child of children.call(template?content.call(node):node))if(kind.call(child)===1){const value=body(child);if(missing(child,value))pending.push([child,value]);}
+    if(root&&(selected.has(root)||options.serializableShadowRoots&&shadow_serializable?.call(root))){const value=body(root);if(missing(root,value))pending.push([root,value]);}
+  }
+  return opaque;
+}
+function markup(source,outer,shadows,raw){
+  let state=snapshot(source,shadows),result=serialize_snapshot(state,state.root,outer,!!shadows);
+  if(shadows&&(shadows.serializableShadowRoots||shadows.shadowRoots.length)&&shadow_markup(raw).count>shadow_markup(result).count){
+    // Native declarative closed roots may have no JavaScript reference yet.
+    // Preserve their exact native projection while restoring accessible nodes.
+    const opaque=opaque_roots(source,raw,shadows,state);
+    if(opaque.size){state=snapshot(source,{...shadows,opaque});result=serialize_snapshot(state,state.root,outer,true);}
+  }
+  return result;
+}
+function capture_options(input){
+  const captured={serializableShadowRoots:false,shadowRoots:[]};
+  if(input===null||typeof input!=='object'&&typeof input!=='function')return {value:input,captured};
+  const records=[];
+  const value={get serializableShadowRoots(){const value=Reflect.get(input,'serializableShadowRoots',input);captured.serializableShadowRoots=!!value;return value;},get shadowRoots(){
+    const iterable=Reflect.get(input,'shadowRoots',input);
+    if(iterable===null||typeof iterable!=='object'&&typeof iterable!=='function')return iterable;
+    return {[Symbol.iterator](){
+      const iterator=Reflect.apply(iterable[Symbol.iterator],iterable,[]);
+      if(iterator===null||typeof iterator!=='object'&&typeof iterator!=='function')return iterator;
+      const next=iterator.next;
+      return {next(...args){
+        const result=Reflect.apply(next,iterator,args);
+        if(result===null||typeof result!=='object'&&typeof result!=='function')return result;
+        const record={};records.push(record);
+        return new Proxy(result,{get(target,key){const value=Reflect.get(target,key,target);if(key==='value')record.value=value;else if(key==='done')record.done=!!value;return value;}});
+      },get return(){const close=iterator.return;return typeof close==='function'?function(...args){return Reflect.apply(close,iterator,args);}:close;}};
+    }};
+  }};
+  return {value,captured,finish(){captured.shadowRoots=records.filter(record=>!record.done).map(record=>record.value);}};
 }
 export function install_serialization(){
   if(!E)return;
@@ -88,4 +204,11 @@ export function install_serialization(){
     Reflect.apply(target,receiver,converted);
     const state=snapshot(converted[0]);return Reflect.apply(target,receiver,[state.root]);
   }});
+  for(const [prototype,native] of [[E,element_getHTML],[globalThis.ShadowRoot?.prototype,shadow_getHTML]])if(native){
+    prototype.getHTML=new Proxy(native,{apply(target,receiver,args){
+      const options=capture_options(args[0]),converted=[...args];if(args.length)converted[0]=options.value;
+      const raw=Reflect.apply(target,receiver,converted);options.finish?.();
+      return markup(receiver,false,options.captured,raw);
+    }});
+  }
 }
