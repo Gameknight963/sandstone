@@ -1,4 +1,5 @@
-import { ctx, get_handler_keys, create_obj_proxy, intercept_property, proxy_function } from "../context.mjs";
+import { ctx, get_handler_keys, intercept_property, proxy_function } from "../context.mjs";
+import { create_obj_proxy } from '../global_functions.mjs';
 import { get_cookie, set_cookie } from "../polyfill/cookie.mjs";
 import * as loader from "../loader.mjs";
 import { rewrite_media } from "../rewrite/media.mjs";

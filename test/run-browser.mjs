@@ -54,6 +54,24 @@ try {
     const requests = [];
     page.on("request", request => requests.push(request.url()));
     const result = await timed(verify(page, target), "Browser compatibility fixture");
+    const globalPatch = JSON.parse(await page.evaluate(() => main_frame.eval_js(`(async () => {
+      const original = window.queueMicrotask;
+      const calls = [];
+      try {
+        window.queueMicrotask = callback => {
+          calls.push('patched');
+          original(callback);
+        };
+        const stable = window.queueMicrotask === window.queueMicrotask;
+        await new Promise(resolve => queueMicrotask(() => { calls.push('callback'); resolve(); }));
+        window.queueMicrotask = original;
+        const restored = window.queueMicrotask === original;
+        await new Promise(resolve => window.queueMicrotask(() => { calls.push('restored'); resolve(); }));
+        return JSON.stringify({stable, restored, calls});
+      } finally { window.queueMicrotask = original; }
+    })()`)));
+    assert.deepEqual(globalPatch, {stable:true, restored:true, calls:['patched','callback','restored']});
+    result.passed.push('Global function instrumentation and restoration');
     const moduleResults = await timed(verifyModules(page), "Module fixture");
     result.passed.push(...moduleResults);
     result.passed.push(...await timed(verifyResources(page), "Resource fixture"));

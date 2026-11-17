@@ -4,7 +4,7 @@ import * as intercept from "./intercept/index.mjs";
 import * as parser from "./parser.mjs";
 import * as loader from "./loader.mjs";
 import { modules } from "./polyfill/module.mjs";
-import { bind_global_function } from "./global_functions.mjs";
+import { create_obj_proxy } from "./global_functions.mjs";
 const parse_json = JSON.parse;
 
 export const is_worker = typeof importScripts === "function";
@@ -32,31 +32,6 @@ export function get_handler_keys(obj) {
     keys.push(key);
   }
   return keys;
-}
-
-export function create_obj_proxy(obj, ctx_vars, target) {
-  let proxies = new Map();
-
-  const proxy = new Proxy(target, {
-    get: (_, key) => {
-      if (typeof obj[key] !== "undefined")
-        return obj[key];
-      if (typeof target[key] === "function" && !target[key].prototype) {
-        if (!proxies.has(key)) 
-          proxies.set(key, bind_global_function(target, target[key], proxy))
-        return proxies.get(key)
-      }
-      return target[key];
-    },
-    set: (_, key, value) => {
-      if (ctx_vars.includes(key))
-        obj[key] = value;
-      else
-        target[key] = value;
-      return true;
-    }
-  });
-  return proxy;
 }
 
 export class CustomCTX {
