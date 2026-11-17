@@ -64,6 +64,28 @@ test('CSS import cycles terminate and failed resources cannot fall through to re
   assert.equal(calls.filter(url=>url.endsWith('root.css')).length,0);
 });
 
+test('CSS font sources retain CORS credentials without changing image requests', async () => {
+  const source = String.raw`@supports (display:grid) {
+    @font-face { font-family: "test"; s\72 c /* comment */ : url(shared.bin) format("truetype"); }
+    .image { background: url(shared.bin); content: "@font-face {src:url(ignored)}"; }
+    @font-face {font-family: another; src:local("font"),url(second.bin); --custom:url(other.bin);}
+  }`;
+  assert.deepEqual(css_references(source).map(({url,font})=>[url,!!font]), [
+    ['shared.bin',true],['shared.bin',false],['second.bin',true],['other.bin',false]
+  ]);
+  const requests=[];
+  await rewrite_css(source,'https://site.test/fonts/style.css',{
+    request:{referrer:'https://site.test/fonts/style.css',referrerPolicy:'origin'},
+    async fetch(url, options){requests.push({url,...options});return new Response('resource');},
+    createURL:()=> 'blob:local'
+  });
+  assert.equal(requests.length,4);
+  const shared=requests.filter(value=>value.url.endsWith('/shared.bin'));
+  assert.equal(shared[0].mode,'cors');assert.equal(shared[0].credentials,'same-origin');
+  assert.equal(shared[1].mode,undefined);assert.equal(shared[1].credentials,undefined);
+  assert.equal(shared[0].referrerPolicy,'origin');
+});
+
 test('Imported CSS uses its final URL and delivered referrer policy for its resources', async () => {
   const requests = [], contexts = [];
   const parent = {referrer:'https://site.test/css/root.css',referrerPolicy:'origin'};

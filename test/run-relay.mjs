@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {chromium} from 'playwright-core';
 import {server as wisp} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
 import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
+import {font_fixture, font_script} from './font-fixture.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -13,10 +14,12 @@ const authRequests=[];
 const beaconRequests=[],heldBeacons=new Map();
 const contextRequests=[];
 const cssRequests=[];
+const fonts=font_fixture();
 const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
 const server=create_relay_server((request,response)=>{
   const url=new URL(request.url,'http://localhost');
   const client=url.searchParams.get('client');
+  if(fonts.handle(request,response,url))return;
   if(url.pathname.startsWith('/css-context/')){
     const policy=url.searchParams.get('policy')||'';
     const query='?client='+encodeURIComponent(client)+'&policy='+encodeURIComponent(policy);
@@ -271,6 +274,12 @@ try{
   assert.equal(nativeRequestContexts.find(value=>value.label==='meta').referrer,null);
   await nativePage.goto(origin+'/request-context/source?policy=origin&meta=no-referrer&script=meta-native');
   const nativeDeclaredMeta=contextValues('meta-native');assert.equal(nativeDeclaredMeta.length,1);assert.equal(nativeDeclaredMeta[0].referrer,null);
+  await nativeContext.addCookies([{url:origin.replace('127.0.0.1','localhost')+'/fonts/',name:'font_session',value:'cross',sameSite:'Lax'}]);
+  await nativePage.goto(origin+'/fonts/page?client=font-native');
+  const nativeFonts=JSON.parse(await nativePage.evaluate(source=>eval(source),font_script('font-native')));
+  assert.deepEqual(nativeFonts.map(value=>[value.count,value.status,value.width]),Array.from({length:6},()=>[1,'loaded',60]));
+  const nativeFontRequests=fonts.values('font-native');
+  assert.equal(nativeFontRequests.length,6);
   const nativeCSS=new Map();
   for(const policy of ['', 'unsafe-url', 'no-referrer', 'link-no-referrer']){
     const client='css-native-'+policy;
@@ -332,6 +341,12 @@ try{
   const metaClient='declared-meta-'+storageDenied;
   await page.evaluate(url=>main_frame.navigate_to(url),origin+'/request-context/source?policy=origin&meta=no-referrer&script='+metaClient);
   assert.deepEqual(contextValues(metaClient),nativeDeclaredMeta,'Declared meta policy was ignored during initial script downloads');
+  await page.evaluate(origin=>sandstone.controller.site_data.setCookie(origin.replace('127.0.0.1','localhost')+'/fonts/','font_session=cross; SameSite=Lax; Path=/fonts/'),origin);
+  const fontClient='font-'+storageDenied;
+  await page.evaluate(url=>main_frame.navigate_to(url),origin+'/fonts/page?client='+fontClient);
+  const actualFonts=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),font_script(fontClient)));
+  assert.deepEqual(actualFonts,nativeFonts,'Relayed CSS fonts did not load and render like native fonts');
+  assert.deepEqual(fonts.values(fontClient),nativeFontRequests,'CSS font Origin/referrer/cookie headers differ from native Chromium');
   for(const policy of ['', 'unsafe-url', 'no-referrer', 'link-no-referrer']){
     const client='css-'+storageDenied+'-'+policy;
     await page.evaluate(url=>main_frame.navigate_to(url),origin+'/css-context/page?client='+client+'&policy='+policy);

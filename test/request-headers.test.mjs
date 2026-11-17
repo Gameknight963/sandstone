@@ -55,6 +55,21 @@ test('Redirects taint Origin, reduce referrers and honor response referrer polic
   assert.deepEqual(seen.map(value=>value.method),['POST','GET','GET']);
 });
 
+test('Font requests send document Origin for local and remote resources with anonymous credentials',async()=>{
+  const store=new SiteDataStore(),seen=[];
+  store.setCookie('https://site.test/','font=own; SameSite=Lax; Secure; Path=/');
+  store.setCookie('https://cdn.test/','font=cross; SameSite=None; Secure; Path=/');
+  for(const url of ['https://site.test/font.ttf','https://cdn.test/font.ttf']){
+    await fetch_with_cookies(async(url,options)=>{seen.push(options);return new Response('font');},store,url,
+      {mode:'cors',credentials:'same-origin',destination:'font',referrer:'https://cdn.test/style.css',referrerPolicy:'unsafe-url'},
+      {url:'https://site.test/page'});
+  }
+  assert.deepEqual(seen.map(value=>value.headers.origin),['https://site.test','https://site.test']);
+  assert.deepEqual(seen.map(value=>value.headers.cookie),['font=own',undefined]);
+  assert.deepEqual(seen.map(value=>value.headers.referer),['https://cdn.test/style.css','https://cdn.test/style.css']);
+  assert.ok(seen.every(value=>!('destination' in value)));
+});
+
 test('Cross-site form submissions and nested navigations do not gain destination SameSite cookies',async()=>{
   const store=new SiteDataStore();
   for(const cookie of ['strict=s; SameSite=Strict; Secure; Path=/','lax=l; SameSite=Lax; Secure; Path=/','none=n; SameSite=None; Secure; Path=/'])store.setCookie('https://destination.test/',cookie);

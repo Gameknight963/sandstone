@@ -51,8 +51,17 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
       native.setProperty.call(declaration, name, native.getPropertyValue.call(resolved, name), priority);
     }
   };
-  let scratch;
-  function scratch_declaration() {
+  let scratch, scratch_font;
+  function scratch_declaration(fontFace = false) {
+    if (fontFace) {
+      if (!scratch_font) {
+        const sheet = new NativeSheet();
+        nativeInsert.call(sheet, '@font-face {}', 0);
+        scratch_font = unwrap(sheet.cssRules[0].style);
+      }
+      text.set.call(scratch_font, '');
+      return scratch_font;
+    }
     if (!scratch) scratch = unwrap(document.createElement('span').style);
     text.set.call(scratch, '');
     return scratch;
@@ -67,9 +76,13 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
     const expected = snapshot(declaration, prefix);
     if (expected.size) {
       const accepted = restore_css(text.get.call(declaration), prepared.markers);
-      const pending = parse_css(accepted, declaration_base(declaration), undefined, sheet_request(parent.get.call(declaration)?.parentStyleSheet));
+      const rule = parent.get.call(declaration);
+      const request = sheet_request(rule?.parentStyleSheet);
+      const fontFace = rule instanceof CSSFontFaceRule;
+      const pending = parse_css(accepted, declaration_base(declaration), undefined,
+        fontFace ? {...request, fontFace:true} : request);
       Promise.resolve(pending).then(css => {
-        const resolved = scratch_declaration();
+        const resolved = scratch_declaration(fontFace);
         text.set.call(resolved, css);
         apply(declaration, expected, resolved);
       }).catch(console.error);
@@ -83,7 +96,7 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
       set(target, key, value) {
         if (key === 'cssText') { change(target, value, (target, css) => text.set.call(target, css)); return true; }
         const name = typeof key === 'string' ? key.replace(/[A-Z]/g, value => '-' + value.toLowerCase()).replace(/^webkit-/, '-webkit-') : '';
-        if (name && name in target && CSS.supports(name, 'initial')) {
+        if (name && name in target && (CSS.supports(name, 'initial') || name === 'src' && parent.get.call(target) instanceof CSSFontFaceRule)) {
           return change(target, value, (target, css) => Reflect.set(target, key, css, target));
         }
         return Reflect.set(target, key, value, target);

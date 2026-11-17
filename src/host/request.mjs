@@ -14,12 +14,14 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
   const options = {...init, headers: Object.fromEntries(new Headers(init.headers))};
   const redirect = options.redirect || "follow";
   const mode = options.mode || (context.navigation ? 'navigate' : 'no-cors');
+  const destination = options.destination;
   let policy = parse_referrer_policy(options.referrerPolicy || context.referrerPolicy);
   let referrer = options.referrer === '' ? '' : options.referrer && options.referrer !== 'about:client' ? options.referrer : context.url || '';
   let tainted = false, crossSiteRedirect = !same_site(top,url), cors = false;
   delete options.mode;
   delete options.referrer;
   delete options.referrerPolicy;
+  delete options.destination;
   let redirected = false;
   for (let hop = 0; hop <= 20; hop++) {
     const headers = new Headers(options.headers);
@@ -31,7 +33,8 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
     const allowed = credentials === "include" || (credentials === "same-origin" && url.origin === source.origin && !cors);
     const safe_method = /^(GET|HEAD)$/i.test(options.method || "GET");
     const sameSiteContext = same_site(top, source) && same_site(top, url) && !crossSiteRedirect ? "strict" : context.navigation && !context.nested && safe_method ? "lax" : "none";
-    const origin = request_origin(source.href,url.href,{method:options.method,mode,policy,tainted,cors});
+    // Font loads send their document Origin even for a same-origin URL.
+    const origin = request_origin(source.href,url.href,{method:options.method,mode,policy,tainted,cors: cors || destination === 'font'});
     if (origin !== null) headers.set('origin',origin);
     referrer = request_referrer(referrer,url.href,policy);
     if (referrer) headers.set('referer',referrer);

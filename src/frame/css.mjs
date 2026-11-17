@@ -75,6 +75,8 @@ function import_supports(source, index) {
 export function css_references(source) {
   const references = [];
   const functions = [];
+  const blocks = [];
+  let font_block = false, descriptor = '';
   let index = 0;
   let imported = false;
   let namespace = false;
@@ -102,7 +104,8 @@ export function css_references(source) {
       const name_start = index;
       while (name_character(source[index]) || source[index] === "\\") index = source[index] === "\\" ? escape_end(source, index) : index + 1;
       const name = decode_css(source.slice(name_start, index)).toLowerCase();
-      if (at) { imported = name === "import"; namespace = name === "namespace"; continue; }
+      if (at) { imported = name === "import"; namespace = name === "namespace"; font_block = name === 'font-face'; continue; }
+      if (blocks.at(-1) && source[skip_space(source, index)] === ':') descriptor = name;
       if (source[index] !== "(") { imported = false; continue; }
       if (name !== "url") { functions.push(name); index++; imported = false; continue; }
       const url_start = skip_space(source, index + 1);
@@ -128,6 +131,7 @@ export function css_references(source) {
         if (end >= source.length) { ending = 'unquoted'; trailing = source.slice(token_end, end); }
       }
       if (!namespace && (source[end] === ")" || ending) && url !== undefined) references.push({start, end: Math.min(end + 1, source.length), url, imported, quoted: false,
+        ...(blocks.at(-1) && descriptor === 'src' ? {font: true} : {}),
         ...(ending ? {ending, trailing} : {}),
         ...(imported ? import_supports(source, end + 1) : {})});
       imported = false;
@@ -136,7 +140,9 @@ export function css_references(source) {
     }
     if (character === "(") functions.push("");
     if (character === ")") functions.pop();
-    if (character === ";") namespace = false;
+    if (character === '{') { blocks.push(font_block); font_block = false; descriptor = ''; }
+    if (character === '}') { blocks.pop(); font_block = false; descriptor = ''; }
+    if (character === ";") { namespace = false; font_block = false; descriptor = ''; }
     imported = false;
     index++;
   }
@@ -225,7 +231,7 @@ export function edit_css_parts(parts, edits) {
   return output;
 }
 
-export function rewrite_css(source, base, {fetch, createURL, supports, transform, request, importPolicy}, ancestors = new Set()) {
+export function rewrite_css(source, base, {fetch, createURL, supports, transform, request, importPolicy, fontFace}, ancestors = new Set()) {
   source = String(source);
   const references = css_resource_references(source);
   if (!references.length) return transform ? transform(source, []) : source;
@@ -239,11 +245,13 @@ export function rewrite_css(source, base, {fetch, createURL, supports, transform
     try { url = new URL(reference.url, base); } catch { return Promise.resolve(reference.imported ? empty_stylesheet : empty_resource); }
     const hash = url.hash;
     url.hash = "";
-    const key = `${reference.imported}:${url.href}`;
+    const font = !!(reference.font || fontFace);
+    const key = `${reference.imported}:${font}:${url.href}`;
     if (!pending.has(key)) pending.set(key, (async () => {
       try {
         if (reference.imported && ancestors.has(url.href)) return empty_stylesheet;
-        const response = await fetch(url.href, reference.imported && importPolicy ? {...request, referrerPolicy: importPolicy} : request);
+        const options = font ? {...request, mode:'cors', credentials:'same-origin', destination:'font'} : reference.imported && importPolicy ? {...request, referrerPolicy: importPolicy} : request;
+        const response = await fetch(url.href, options);
         if (!response.ok) return reference.imported ? empty_stylesheet : empty_resource;
         const final = response.url || url.href;
         let blob;
