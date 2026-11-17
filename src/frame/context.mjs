@@ -179,11 +179,11 @@ export function update_ctx(options = {}) {
   internal.history = is_worker ? undefined : new polyfill.FakeHistory(options.history);
   if (is_worker) { internal.localStorage = undefined; internal.sessionStorage = undefined; }
   if (!is_worker) {
-  internal.localStorage = new polyfill.FakeStorage(options.local_storage, entries => {
-    loader.local_storage(loader.frame_id, entries).catch(console.error);
+  internal.localStorage = new polyfill.FakeStorage(options.local_storage, (_entries,change) => {
+    loader.local_storage(loader.frame_id, undefined, change).catch(console.error);
   });
-  internal.sessionStorage = new polyfill.FakeStorage(options.session_storage, entries => {
-    loader.session_storage(loader.frame_id, entries).catch(console.error);
+  internal.sessionStorage = new polyfill.FakeStorage(options.session_storage, (_entries,change) => {
+    loader.session_storage(loader.frame_id, undefined, change).catch(console.error);
   });
   }
   delete globalThis.caches;

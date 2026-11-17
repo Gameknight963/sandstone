@@ -1,6 +1,7 @@
 import { Cookie, CookieJar, domainMatch } from "tough-cookie";
 import {http_cache} from './http_cache.mjs';
 import {storage_cookie} from '../cookie.mjs';
+import {apply_storage_change} from '../storage_changes.mjs';
 
 const storage_key = "sandstone_site_data_v1";
 
@@ -50,6 +51,8 @@ export class SiteDataStore {
     this.local[origin] = entries.map(([key, value]) => [String(key), String(value)]);
     this.persist();
   }
+
+  changeLocal(origin,change){this.setLocal(origin,apply_storage_change(this.local[origin],change));}
 
   setCookie(url, value, http = true, policy = {}) {
     try {

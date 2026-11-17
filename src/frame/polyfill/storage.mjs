@@ -33,14 +33,16 @@ export class FakeStorage {
   key(index) { return [...this.#map.keys()][Number(index) >>> 0] ?? null; }
   getItem(key) { return this.#map.get(String(key)) ?? null; }
   setItem(key, value) {
-    this.#map.set(String(key), String(value));
-    this.#sync(this._get_entries());
+    key=String(key);value=String(value);
+    this.#map.set(key, value);
+    this.#sync(this._get_entries(),{type:'set',key,value});
   }
   removeItem(key) {
-    this.#map.delete(String(key));
-    this.#sync(this._get_entries());
+    key=String(key);
+    this.#map.delete(key);
+    this.#sync(this._get_entries(),{type:'remove',key});
   }
-  clear() { this.#map.clear(); this.#sync([]); }
+  clear() { this.#map.clear(); this.#sync([],{type:'clear'}); }
   _get_entries() { return [...this.#map]; }
   toString() { return "[object Storage]"; }
   get [Symbol.toStringTag]() { return "Storage"; }

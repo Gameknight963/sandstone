@@ -8,6 +8,7 @@ import { NavigationHistory } from "../history.mjs";
 import {parse_referrer_policy,default_referrer_policy} from '../referrer.mjs';
 import {is_download} from '../download.mjs';
 import {frame_cross_site} from './frame_context.mjs';
+import {apply_storage_change} from '../storage_changes.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 
@@ -276,15 +277,16 @@ rpc.rpc_handlers["history_go"] = (id, delta, scroll) => {
   return null;
 };
 
-rpc.rpc_handlers["local_storage"] = async (frame_id, entries) => {
+rpc.rpc_handlers["local_storage"] = async (frame_id, entries, change) => {
   let frame = iframes[frame_id];
   if (!frame) return;
-  site_data.setLocal(frame.url.origin, entries);
+  if(change===undefined)site_data.setLocal(frame.url.origin, entries);
+  else site_data.changeLocal(frame.url.origin,change);
 }
 
-rpc.rpc_handlers["session_storage"] = async (frame_id, entries) => {
+rpc.rpc_handlers["session_storage"] = async (frame_id, entries, change) => {
   const frame = iframes[frame_id];
-  if (frame) frame.session_storage[frame.url.origin] = entries;
+  if (frame) frame.session_storage[frame.url.origin] = change===undefined?entries:apply_storage_change(frame.session_storage[frame.url.origin],change);
 };
 
 rpc.rpc_handlers["cookie_set"] = async (frame_id, value) => {
