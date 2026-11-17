@@ -218,6 +218,11 @@ const contextScript=client=>`(async()=>{
     ['chosen',own,{referrer:'/request-context/chosen#fragment',referrerPolicy:'unsafe-url'}],['empty',own,{referrer:''}],['unsafe',cross,{referrerPolicy:'unsafe-url'}]
   ];
   for(const [label,base,options] of cases){const response=await fetch(endpoint(base,label),options);await response.arrayBuffer();}
+  for(const [label,base,options] of cases){
+    const url=endpoint(base,'request-'+label);
+    const request=new Request(base===own?url.slice(own.length):url,options);
+    const response=await fetch(request.clone());await response.arrayBuffer();
+  }
   for(const [label,base,target,policy] of [['out',own,cross,''],['back',cross,own,''],['policy-change',own,cross,'no-referrer']]){
     const url=new URL(base+'/request-context/redirect');url.searchParams.set('client',client);url.searchParams.set('label',label+'-start');url.searchParams.set('target',endpoint(target,label+'-finish'));if(policy)url.searchParams.set('policy',policy);
     await (await fetch(url,{method:'POST',body:'redirected'})).arrayBuffer();

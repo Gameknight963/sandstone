@@ -5,13 +5,14 @@ async page => {
       '/workers/classic.js': `
         importScripts('./lib/first.js');
         self.runCount = (self.runCount || 0) + 1;
-        const effect = fetch('./side-effect').then(response => response.text());
+        const request = new Request('./side-effect',{referrer:'/workers/chosen#fragment'});
+        const effect = fetch(request.clone()).then(response => response.text());
         self.onmessage = async event => {
           await effect;
           postMessage({bytes: Array.from(event.data.bytes), order: self.importOrder,
             imported: importedValue, count: self.runCount, href: location.href, origin: location.origin,
             windowType: typeof window, documentType: typeof document, storageType: typeof localStorage,
-            historyType: typeof history,uuid:crypto.randomUUID()}, [event.data.bytes.buffer]);
+            historyType: typeof history,uuid:crypto.randomUUID(),requestURL:request.url,requestReferrer:request.referrer}, [event.data.bytes.buffer]);
         };
       `,
       '/workers/lib/first.js': "self.importOrder=['first']; importScripts('./second.js'); self.importOrder.push('after-second'); var importedValue=42;",
@@ -61,6 +62,8 @@ async page => {
     windowType:'undefined',documentType:'undefined',storageType:'undefined',historyType:'undefined',detached:true};
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(classic.uuid))throw new Error('Worker UUID is unavailable or invalid');
   delete classic.uuid;
+  if(classic.requestURL!=='https://fixture.test/workers/side-effect'||classic.requestReferrer!=='https://fixture.test/workers/chosen')throw new Error('Worker Request did not use virtual URLs: '+JSON.stringify(classic));
+  delete classic.requestURL;delete classic.requestReferrer;
   if (JSON.stringify(classic)!==JSON.stringify(expected)) throw new Error('Classic worker failed: '+JSON.stringify(classic));
   const computed = JSON.parse(await page.evaluate(() => main_frame.eval_js(`new Promise((resolve,reject) => {
     const worker=new Worker('/workers/computed.js');

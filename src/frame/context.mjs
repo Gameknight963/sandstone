@@ -65,6 +65,7 @@ export class CustomCTX {
   }
 
   fetch() {return polyfill.fetch(...arguments)}
+  get Request() {return polyfill.FakeRequest}
   get URL() {return polyfill.FakeURL}
   get Worker() {return polyfill.FakeWorker}
   get importScripts() {return is_worker ? polyfill.fakeImportScripts : undefined}

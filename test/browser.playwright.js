@@ -84,6 +84,17 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
   assert.equal(parsed.session, 'session');
   assert.equal(parsed.webrtc, 'undefined');
 
+  const constructedRequest=JSON.parse(await page.evaluate(()=>main_frame.eval_js(`(async()=>{
+    const base=document.createElement('base');base.href='/assets/';document.head.append(base);
+    try{
+      const request=new window.Request('../status',{referrer:'/chosen#fragment',headers:{'X-Request':'constructed'}});
+      const copy=request.clone();
+      const response=await fetch(copy);
+      return JSON.stringify({url:request.url,referrer:copy.referrer,instance:copy instanceof Request,status:response.status,text:await response.text()});
+    }finally{base.remove();}
+  })()`)));
+  assert.deepEqual(constructedRequest,{url:'https://fixture.test/status',referrer:'https://fixture.test/chosen',instance:true,status:404,text:'missing'});
+
   const stream = JSON.parse(await page.evaluate(() => main_frame.eval_js(`(async () => {
     const response = await fetch('/stream');
     const reader = response.body.getReader();

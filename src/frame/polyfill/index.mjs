@@ -4,7 +4,7 @@ export { FakeHistory } from "./history.mjs";
 export { FakeStorage } from "./storage.mjs";
 export { fakeImportScripts, FakeWorker, mark_worker_started } from "./worker.mjs";
 
-export { fetch } from "./fetch.mjs";
+export { fetch, FakeRequest } from "./fetch.mjs";
 export { FakeXMLHttpRequest } from "./xhr.mjs";
 export { FakeEventSource } from "./event_source.mjs";
 export * as idb from "./indexeddb.mjs";
