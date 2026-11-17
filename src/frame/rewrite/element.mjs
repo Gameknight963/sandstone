@@ -15,12 +15,10 @@ function rewrite_element_single(element) {
     promise = rewrite.noscript(element);
   else if (Element.prototype.matches.call(element, "img, source, video, audio, input[type='image'], track"))
     promise = rewrite.media(element);
-  else if (element instanceof HTMLLinkElement && element.rel !== "stylesheet")
-    promise = rewrite.link(element);
+  else if (element instanceof HTMLLinkElement)
+    promise = Element.prototype.matches.call(element,'[rel~="stylesheet" i]') ? rewrite.stylesheet(element) : rewrite.link(element);
   else if (element instanceof HTMLMetaElement)
     promise = rewrite.meta(element);
-  else if (element instanceof HTMLLinkElement && element.rel === "stylesheet")
-    promise = rewrite.stylesheet(element);
   else if (element instanceof HTMLStyleElement)
     promise = rewrite.style(element);
   else if (element instanceof HTMLScriptElement)

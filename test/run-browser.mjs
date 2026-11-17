@@ -51,6 +51,8 @@ const frameReadinessTest=await readFile(new URL('frame-readiness.playwright.js',
 const verifyFrameReadiness=runInThisContext(`(${frameReadinessTest})`);
 const rootInitializationTest=await readFile(new URL('root-initialization.playwright.js',import.meta.url),'utf8');
 const verifyRootInitialization=runInThisContext(`(${rootInitializationTest})`);
+const stylesheetRelTest=await readFile(new URL('stylesheet-rel.playwright.js',import.meta.url),'utf8');
+const verifyStylesheetRel=runInThisContext(`(${stylesheetRelTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 async function timed(operation, label) {
@@ -99,6 +101,7 @@ try {
     const moduleResults = await timed(verifyModules(page), "Module fixture");
     result.passed.push(...moduleResults);
     result.passed.push(...await timed(verifyResources(page), "Resource fixture"));
+    result.passed.push(...await timed(verifyStylesheetRel(page), 'Stylesheet relation fixture'));
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
     result.passed.push(...await timed(verifyWorkerBundles(page), 'Worker bundle fixture'));
     result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));

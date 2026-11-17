@@ -13,7 +13,8 @@ const sites=[
   {id:'mdn',url:'https://developer.mozilla.org/en-US/docs/Web/JavaScript'},
   {id:'wikipedia',url:'https://en.wikipedia.org/wiki/Main_Page'},
   {id:'github',url:'https://github.com/octocat/Hello-World'},
-  {id:'react',url:'https://react.dev/learn'}
+  {id:'react',url:'https://react.dev/learn'},
+  {id:'vue',url:'https://vuejs.org/guide/introduction.html'}
 ];
 const selected=process.argv.slice(2);
 for(const id of selected)if(!sites.some(site=>site.id===id))throw new Error('Unknown live site: '+id+'; choose '+sites.map(site=>site.id).join(', '));
@@ -53,6 +54,18 @@ async function wait(page,proxy,expression){
 const summary=(page,proxy)=>read(page,proxy,'({title:document.title,heading:document.querySelector("h1")?.textContent.trim()||"",links:document.links.length})');
 async function interact(page,proxy,site){
   const surface=proxy?page.frameLocator('iframe[frame-id]'):page;
+  if(site.id==='vue'){
+    await wait(page,proxy,'!!document.getElementById("app")?.__vue_app__');
+    await surface.getByRole('button',{name:'Count is: 0',exact:true}).click();
+    await surface.getByRole('button',{name:'Count is: 1',exact:true}).waitFor();
+    const counter=await surface.getByRole('button',{name:'Count is: 1',exact:true}).textContent();
+    const dark=await read(page,proxy,'document.documentElement.classList.contains("dark")');
+    await surface.locator('button[aria-label="Toggle dark mode"]:visible').first().click();
+    await wait(page,proxy,'document.documentElement.classList.contains("dark")==='+JSON.stringify(!dark));
+    await surface.locator('a[href="/guide/essentials/reactivity-fundamentals.html"]:visible').first().click();
+    await wait(page,proxy,'location.pathname==="/guide/essentials/reactivity-fundamentals.html"&&document.querySelector("h1")?.textContent.includes("Reactivity Fundamentals")');
+    return {...await read(page,proxy,'({path:location.pathname,heading:document.querySelector("h1").textContent.trim(),dark:document.documentElement.classList.contains("dark"),font:getComputedStyle(document.querySelector("h1")).fontFamily,fontSize:getComputedStyle(document.querySelector("h1")).fontSize})'),counter:counter.trim()};
+  }
   if(site.id==='react'){
     // Compile the final embedded example and exercise shared React state before
     // testing article navigation. Every resource must stay behind the relay.
@@ -90,9 +103,9 @@ async function interact(page,proxy,site){
   await wait(page,proxy,'document.documentElement.classList.contains("skin-theme-clientpref-night")');
   return read(page,proxy,'({dark:document.documentElement.classList.contains("skin-theme-clientpref-night"),checked:document.getElementById("skin-client-pref-skin-theme-value-night").checked})');
 }
-async function context(){
+async function context(denyStorage=storageDenied){
   const value=await browser.newContext();value.setDefaultTimeout(15000);value.setDefaultNavigationTimeout(20000);
-  if(storageDenied)await value.addInitScript(()=>{
+  if(denyStorage)await value.addInitScript(()=>{
     Object.defineProperty(window,'localStorage',{get(){throw new DOMException('Storage denied','SecurityError');}});
     Object.defineProperty(window,'indexedDB',{get(){throw new DOMException('Storage denied','SecurityError');}});
   });
@@ -102,7 +115,9 @@ try{
   const channel=process.env.BROWSER_CHANNEL||'chrome';
   browser=await chromium.launch({headless:true,channel:channel==='headless'?undefined:channel});
   for(const site of targets){
-    const result={site:site.id,url:site.url,storageDenied},nativeContext=await context();
+    // Compare the site's ordinary native behavior with a standalone host whose
+    // real storage may be denied. Proxied sites should still have virtual stores.
+    const result={site:site.id,url:site.url,storageDenied},nativeContext=await context(false);
     try{
       const native=await nativeContext.newPage();
       const response=await native.goto(site.url,{waitUntil:'domcontentloaded'});
