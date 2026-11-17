@@ -1,3 +1,5 @@
+import {unwrap_global_target} from './frame/global_functions.mjs';
+
 export let role = null;
 export const rpc_handlers = {};
 export const rpc_requests = {};
@@ -122,7 +124,7 @@ export async function message_listener(event, target) {
 
 export async function call_procedure(target, procedure, args) {
   if (globalThis.HTMLIFrameElement && target instanceof globalThis.HTMLIFrameElement) {
-    target = target.contentWindow || target;
+    target = unwrap_global_target(target.contentWindow || target);
   }
   let msg = {
     type: "procedure",
@@ -162,7 +164,7 @@ export function set_host(frame, msg_port) {
     type: "set_host",
     id: Math.random() + ""
   };
-  let msg_target = frame.contentWindow || frame;
+  let msg_target = unwrap_global_target(frame.contentWindow || frame);
   msg_target.postMessage(msg, {targetOrigin: "*", transfer: [msg_port]})
 }
 
@@ -180,7 +182,7 @@ export async function wait_on_frame(frame) {
       type: "ping",
       id: Math.random() + ""
     };
-    frame.contentWindow.postMessage(msg, "*");
+    unwrap_global_target(frame.contentWindow).postMessage(msg, "*");
     await new Promise(r => setTimeout(r, 50));
   }
 }
@@ -196,7 +198,7 @@ function host_set_handler(event) {
       type: "pong",
       id: Math.random() + ""
     };
-    event.source.postMessage(msg, "*");
+    unwrap_global_target(event.source).postMessage(msg, "*");
     return;
   }
 

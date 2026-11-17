@@ -11,6 +11,7 @@ import { flush_import_map } from "./polyfill/module.mjs";
 import {configure_crypto} from './polyfill/crypto.mjs';
 import {default_referrer_policy} from '../referrer.mjs';
 import {document_referrer_policy,reset_document_referrer_policy} from './intercept/document.mjs';
+import {configure_window_messages} from './window_messages.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -130,6 +131,7 @@ async function load_html(options) {
   set_frame_id(options.frame_id);
   get_frame_html();
   update_ctx(options);
+  configure_window_messages(options);
   load_cookies(options.cookies);
 
   if (options.error) {

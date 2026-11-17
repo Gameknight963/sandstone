@@ -1,5 +1,6 @@
 import {ctx} from './context.mjs';
 import {create_obj_proxy} from './global_functions.mjs';
+import {register_message_peer,window_post_message} from './window_messages.mjs';
 
 const frames=new WeakMap();
 const windows=new WeakMap();
@@ -55,12 +56,14 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
     });
     const replacements=Object.create(null);
     Object.defineProperties(replacements,{
+      postMessage:{value:(...args)=>window_post_message(target,state.token,args)},
       location:{get:()=>location,set:value=>{location.href=value;}},
       window:{get:()=>state.window},self:{get:()=>state.window},frames:{get:()=>state.window},
       parent:{get:()=>ctx.window},top:{get:()=>ctx.top}
     });
     state.window=create_obj_proxy(replacements,['location'],target);
     windows.set(target,state.window);
+    register_message_peer(target,state.token,()=>state.window);
     return state.window;
   }
 });
@@ -71,6 +74,6 @@ if(source)Object.defineProperty(MessageEvent.prototype,'source',{
   ...source,get(){const target=source.get.call(this);return windows.get(target)||target;}
 });
 
-export function intercept_iframe_window(element,url,navigate){
-  frames.set(element,{url,navigate,opaque:()=>element.hasAttribute('sandbox')&&!element.sandbox.contains('allow-same-origin')});
+export function intercept_iframe_window(element,url,navigate,token){
+  frames.set(element,{url,navigate,token,opaque:()=>element.hasAttribute('sandbox')&&!element.sandbox.contains('allow-same-origin')});
 }

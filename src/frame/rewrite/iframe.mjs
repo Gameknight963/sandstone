@@ -11,6 +11,7 @@ import {intercept_iframe_window} from '../iframe_window.mjs';
 
 export function rewrite_iframe(iframe_element) {
   const frame_id = Math.random() + "";
+  const message_token=crypto.randomUUID();
   const register = rpc.create_rpc_wrapper(rpc.host, "frame_register");
   const unregister = rpc.create_rpc_wrapper(rpc.host, "frame_unregister");
   let registered = false;
@@ -95,7 +96,9 @@ export function rewrite_iframe(iframe_element) {
         settings: {},
         default_settings: loader.default_settings,
         version: loader.version,
-        is_iframe: true
+        is_iframe: true,
+        message_parent:{token:message_token},
+        message_origin:iframe_element.hasAttribute('sandbox')&&!iframe_element.sandbox.contains('allow-same-origin')?'null':undefined
       });
     }
     catch (error) {
@@ -135,7 +138,7 @@ export function rewrite_iframe(iframe_element) {
   });
   intercept_iframe_window(iframe_element,()=>iframe_url,(url,history_mode)=>{
     fetch_src(url,null,{history_mode}).catch(console.error);
-  });
+  },message_token);
   proxy_function(iframe_element, "setAttribute", (target, this_arg, args) => {
     if(this_arg!==iframe_element||args.length<2)return Reflect.apply(target,this_arg,args);
     const name=`${args[0]}`;

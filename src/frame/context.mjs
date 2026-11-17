@@ -5,6 +5,7 @@ import * as parser from "./parser.mjs";
 import * as loader from "./loader.mjs";
 import { modules } from "./polyfill/module.mjs";
 import { create_obj_proxy } from "./global_functions.mjs";
+import {parent_message_window,self_post_message} from './window_messages.mjs';
 const parse_json = JSON.parse;
 
 export const is_worker = typeof importScripts === "function";
@@ -54,17 +55,18 @@ export class CustomCTX {
   get parent() {
     if (is_worker) return undefined;
     if (loader.is_iframe)
-      return globalThis.parent;
+      return parent_message_window();
     return this.__proxy__;
   }
   get top() {
     if (is_worker) return undefined;
     if (loader.is_iframe)
-      return globalThis.parent;
+      return parent_message_window();
     return this.__proxy__;
   }
 
   fetch() {return polyfill.fetch(...arguments)}
+  postMessage(){return is_worker?globalThis.postMessage(...arguments):self_post_message(...arguments)}
   get Request() {return polyfill.FakeRequest}
   get URL() {return polyfill.FakeURL}
   get Worker() {return polyfill.FakeWorker}

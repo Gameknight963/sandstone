@@ -39,6 +39,8 @@ const cryptoTest = await readFile(new URL('crypto.playwright.js',import.meta.url
 const verifyCrypto = runInThisContext(`(${cryptoTest})`);
 const iframeWindowTest=await readFile(new URL('iframe-window.playwright.js',import.meta.url),'utf8');
 const verifyIframeWindow=runInThisContext(`(${iframeWindowTest})`);
+const windowMessagesTest=await readFile(new URL('window-messages.playwright.js',import.meta.url),'utf8');
+const verifyWindowMessages=runInThisContext(`(${windowMessagesTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 async function timed(operation, label) {
@@ -91,6 +93,7 @@ try {
     result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
     result.passed.push(...await timed(verifyIframeWindow(page), 'Frame window fixture'));
+    result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
     result.passed.push(...await timed(verifyLinks(page), 'Link event fixture'));
     result.passed.push(...await timed(verifyAttributes(page), 'Event attribute fixture'));
     result.passed.push(...await timed(verifyHyperlinks(page), 'Hyperlink URL fixture'));

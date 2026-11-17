@@ -3,6 +3,7 @@ import * as rpc from '../../rpc.mjs';
 import * as loader from '../loader.mjs';
 
 let client;
+export function encode_message(value){return client?client.encode(value):value;}
 export function configure_crypto(available) {
   if (!available || !globalThis.crypto || client) return;
   const command = rpc.create_rpc_wrapper(rpc.host,'crypto');
@@ -18,8 +19,11 @@ export function configure_crypto(available) {
   const data = Object.getOwnPropertyDescriptor(MessageEvent.prototype,'data');
   const decoded = new WeakMap();
   Object.defineProperty(MessageEvent.prototype,'data',{...data,get() {
-    if (!decoded.has(this)) decoded.set(this,client.decode(data.get.call(this)));
-    return decoded.get(this);
+    const value=data.get.call(this),previous=decoded.get(this);
+    // A window-message capture listener can replace a transport envelope with
+    // its payload after an earlier internal listener inspected the same event.
+    if(!previous||previous.source!==value)decoded.set(this,{source:value,value:client.decode(value)});
+    return decoded.get(this).value;
   }});
   const post = MessagePort.prototype.postMessage;
   MessagePort.prototype.postMessage = function postMessage(value, transfer) {
