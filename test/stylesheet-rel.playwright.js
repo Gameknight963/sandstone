@@ -31,7 +31,7 @@ async page=>{
         document.querySelector('link')?.remove();const link=document.createElement('link');link.rel=${JSON.stringify(rel)};
         link.href=${JSON.stringify(origin+'/stylesheet-rel/one.css')};link.onload=()=>resolve(true);link.onerror=()=>reject(new Error('Dynamic stylesheet failed'));document.head.append(link);
       })`);
-      values.push(await read(proxy,'({rel:document.querySelector("link").rel,href:document.querySelector("link").href,padding:getComputedStyle(document.getElementById("probe")).paddingLeft})'));
+      values.push(await read(proxy,'({rel:document.querySelector("link").rel,href:document.querySelector("link").href,raw:document.querySelector("link").getAttribute("href"),has:document.querySelector("link").hasAttribute("href"),padding:getComputedStyle(document.getElementById("probe")).paddingLeft})'));
       await evaluate(proxy,`new Promise((resolve,reject)=>{const link=document.querySelector('link');link.onload=()=>resolve(true);link.onerror=()=>reject(new Error('Updated stylesheet failed'));link.href=${JSON.stringify(origin+'/stylesheet-rel/two.css')};})`);
       await until(proxy,'getComputedStyle(document.getElementById("probe")).paddingLeft==="29px"');
       values.push(await read(proxy,'({href:document.querySelector("link").href,padding:getComputedStyle(document.getElementById("probe")).paddingLeft})'));

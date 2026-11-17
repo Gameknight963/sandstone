@@ -11,7 +11,9 @@ export function is_style_link(element){
 
 export function rewrite_stylesheet(element,initialHref) {
   element.removeAttribute("integrity");
-  const initial = typeof initialHref==='function' ? initialHref() : initialHref===undefined ? element.getAttribute("href") || element.getAttribute("data-href") : initialHref;
+  const initial = typeof initialHref==='function' ? initialHref() : initialHref===undefined ? element.getAttribute("href") ?? element.getAttribute("data-href") : initialHref;
+  const remove=element.removeAttribute;
+  let authored=initial??null;
   let remote = "";
   let generation = 0;
   let pending;
@@ -29,20 +31,29 @@ export function rewrite_stylesheet(element,initialHref) {
     });
   }
   const descriptor = intercept_property(element, "href", {
-    get: () => remote || descriptor.get.call(element),
+    get() {
+      if(authored===null)return '';
+      try{return convert_url(authored,ctx.document.baseURI);}
+      catch{return authored;}
+    },
     set(value) {
       value=`${value}`;
-      clear_error();
-      const current = ++generation;
+      authored=value;
       // Clearing before the first await also protects dynamically inserted links.
-      element.removeAttribute("href");
-      try{remote=convert_url(value,ctx.document.baseURI);}
-      catch{remote=value;return;}
+      remove.call(element,"href");
+      // Removing/invalidating href does not cancel an already pending native
+      // stylesheet request. Only a new valid URL supersedes that request.
+      if(value==='')return;
+      let url;
+      try{url=convert_url(value,ctx.document.baseURI);}
+      catch{return;}
+      clear_error();
+      const current=++generation;
+      remote=url;
       if (remote.startsWith("data:") || remote.startsWith("blob:")) {
         descriptor.set.call(element, remote);
         return;
       }
-      const url = remote;
       pending = (async () => {
         const inherited_policy = document_referrer_policy();
         const response = await network.fetch(url, {
@@ -65,10 +76,20 @@ export function rewrite_stylesheet(element,initialHref) {
       })().catch(error=>failed(error,current));
     }
   });
-  proxy_function(element, "setAttribute", (target, receiver, args) => {
-    if (String(args[0]).toLowerCase() === "href") { element.href = args[1]; return; }
-    return Reflect.apply(target, receiver, args);
-  });
-  if (initial) element.href = initial;
+  for(const name of ['getAttribute','hasAttribute','setAttribute','removeAttribute']){
+    proxy_function(element,name,(target,receiver,args)=>{
+      const required=name==='setAttribute'?2:1;
+      if(receiver!==element||args.length<required)return Reflect.apply(target,receiver,args);
+      const attribute=`${args[0]}`;
+      if(attribute.toLowerCase()==='href'){
+        if(name==='getAttribute')return authored;
+        if(name==='hasAttribute')return authored!==null;
+        if(name==='setAttribute'){element.href=args[1];return;}
+        authored=null;
+      }
+      return Reflect.apply(target,receiver,[attribute,...args.slice(1)]);
+    });
+  }
+  if(initial!==null&&initial!==undefined)element.href=initial;
   return pending;
 }

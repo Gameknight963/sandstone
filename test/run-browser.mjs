@@ -53,6 +53,8 @@ const rootInitializationTest=await readFile(new URL('root-initialization.playwri
 const verifyRootInitialization=runInThisContext(`(${rootInitializationTest})`);
 const stylesheetRelTest=await readFile(new URL('stylesheet-rel.playwright.js',import.meta.url),'utf8');
 const verifyStylesheetRel=runInThisContext(`(${stylesheetRelTest})`);
+const stylesheetAttributesTest=await readFile(new URL('stylesheet-attributes.playwright.js',import.meta.url),'utf8');
+const verifyStylesheetAttributes=runInThisContext(`(${stylesheetAttributesTest})`);
 const stylesheetErrorsTest=await readFile(new URL('stylesheet-errors.playwright.js',import.meta.url),'utf8');
 const verifyStylesheetErrors=runInThisContext(`(${stylesheetErrorsTest})`);
 const scriptErrorsTest=await readFile(new URL('script-errors.playwright.js',import.meta.url),'utf8');
@@ -106,6 +108,7 @@ try {
     result.passed.push(...moduleResults);
     result.passed.push(...await timed(verifyResources(page), "Resource fixture"));
     result.passed.push(...await timed(verifyStylesheetRel(page), 'Stylesheet relation fixture'));
+    result.passed.push(...await timed(verifyStylesheetAttributes(page), 'Stylesheet attribute fixture'));
     try{result.passed.push(...await timed(verifyStylesheetErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Stylesheet failure fixture'));}
     finally{expectedDiagnostics.clear();}
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
