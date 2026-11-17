@@ -13,6 +13,7 @@ import {default_referrer_policy} from '../referrer.mjs';
 import {document_referrer_policy,reset_document_referrer_policy} from './intercept/document.mjs';
 import {configure_window_messages} from './window_messages.mjs';
 import {scripting_html} from './scripting_html.mjs';
+import {defer_declarative_roots} from './declarative_html.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -67,12 +68,14 @@ export function eval_script(script_element, script_text) {
   script_element.dispatchEvent(new Event("load"));
 }
 
-async function evaluate_scripts() {
-  pending_scripts.sort((a, b) => a[0] - b[0]);
+async function evaluate_scripts(order) {
   let deferred = [];
-  const initial = pending_scripts.splice(0).sort((a, b) => a[0] - b[0]);
+  const initial = pending_scripts.splice(0).sort((a, b) => (order.get(a[1])??Infinity)-(order.get(b[1])??Infinity)||a[0]-b[0]);
   for (let [num, script_element] of initial) {
-    if (script_element.defer || script_element.async || script_element.__sandstone_module__) {
+    // Scripts parsed in template contents carry a native force-async flag.
+    // Initial shadow declarations instead follow normal parser script rules.
+    const asynchronous=order.has(script_element)?script_element.hasAttribute('async'):script_element.async;
+    if (script_element.__sandstone_module__ || script_element.hasAttribute('src')&&(script_element.defer || asynchronous)) {
       deferred.push(script_element)
     }
     else {
@@ -150,9 +153,19 @@ async function load_html(options) {
   }
 
   let parser = new DOMParser();
-  const source=site_settings.allow_js?scripting_html(null,options.html,true):{value:options.html,restore(){}};
+  const declarations=defer_declarative_roots(null,options.html,true,site_settings.allow_js);
+  const source=site_settings.allow_js?scripting_html(null,declarations.value,true):{value:declarations.value,restore(){}};
   let html = parser.parseFromString(source.value, "text/html");
   source.restore(html);
+  // Hydrating declarations moves scripts out of their original tree position.
+  // Retain parser order before closed roots and ordinary templates are restored.
+  const script_order=new WeakMap(),nodes=[html];let script_index=0;
+  while(nodes.length){
+    const node=nodes.pop();if(node instanceof HTMLScriptElement)script_order.set(node,script_index++);
+    const children=node instanceof HTMLTemplateElement?node.content.childNodes:node.childNodes;
+    for(let index=children.length-1;index>=0;index--)nodes.push(children[index]);
+  }
+  declarations.restore(html);
   document_referrer_policy(html);
   const base_href = [...html.querySelectorAll('base[href]')].find(node=>node instanceof HTMLBaseElement)?.getAttribute('href');
   base_url=resolve_base_href(base_href,options.url);
@@ -175,7 +188,7 @@ async function load_html(options) {
   flush_import_map();
   is_loaded = true;
   if (site_settings.allow_js) {
-    await evaluate_scripts();
+    await evaluate_scripts(script_order);
   }
 
   //trigger load events

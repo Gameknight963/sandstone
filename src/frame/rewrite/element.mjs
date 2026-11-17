@@ -7,6 +7,7 @@ import {is_style_link} from './stylesheet.mjs';
 import {is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
 import {observe_media_container} from './media.mjs';
 import {inline_style_version,remember_inline_style} from '../style_sources.mjs';
+import {shadow_root} from '../shadow_roots.mjs';
 
 const rewritten_elements = new WeakSet();
 
@@ -77,6 +78,8 @@ export function rewrite_element(element) {
   }
   
   //recursively rewrite children
+  const root=shadow_root(element);
+  if(root)promises.push(rewrite_element(root));
   let children = [...get_dom_property(element, "children")];
   for (let child of children) {
     promises.push(rewrite_element(child));

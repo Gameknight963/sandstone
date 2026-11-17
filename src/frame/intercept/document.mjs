@@ -60,6 +60,7 @@ export function document_referrer_policy(root = globalThis.document) {
 const internal = {
   currentScript: null
 }
+const script_root=globalThis.Node?.prototype.getRootNode;
 
 class CustomDocument {
   constructor() {
@@ -85,7 +86,7 @@ class CustomDocument {
   get readyState() {return loader.ready_state}
   get documentURI() {return ctx.location.href}
   get referrer() {return loader.document_referrer}
-  get currentScript() {return internal.currentScript}
+  get currentScript() {return internal.currentScript&&script_root.call(internal.currentScript) instanceof ShadowRoot?null:internal.currentScript}
   set currentScript(value) {internal.currentScript = value}
   get activeElement() {return this.__target__.activeElement}
 
