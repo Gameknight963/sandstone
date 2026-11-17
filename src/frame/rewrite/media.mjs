@@ -12,6 +12,36 @@ const set=globalThis.Element?.prototype.setAttribute,remove_attribute=globalThis
 const attr_owner=globalThis.Attr&&Object.getOwnPropertyDescriptor(Attr.prototype,'ownerElement').get;
 const attr_value=globalThis.Attr&&Object.getOwnPropertyDescriptor(Attr.prototype,'value');
 const dispatch=globalThis.EventTarget?.prototype.dispatchEvent;
+const attribute=globalThis.Element?.prototype.getAttribute;
+let policy_observer;
+
+function request_element(element){
+  if(!(element instanceof HTMLSourceElement))return element;
+  const parent=element.parentElement;
+  if(parent instanceof HTMLPictureElement)return [...parent.children].find(child=>child instanceof HTMLImageElement)||element;
+  return parent instanceof HTMLMediaElement?parent:element;
+}
+function cross_origin(element){
+  const target=request_element(element);
+  if(!(target instanceof HTMLImageElement||target instanceof HTMLMediaElement))return null;
+  const value=attribute.call(target,'crossorigin');
+  return value===null?null:value.toLowerCase()==='use-credentials'?'use-credentials':'anonymous';
+}
+function refresh_image_policy(element){
+  const session=sessions.get(element),policy=cross_origin(element);
+  if(!session||session.crossOrigin===policy)return;
+  session.crossOrigin=policy;
+  const targets=[element];
+  if(element.parentElement instanceof HTMLPictureElement){
+    for(const child of element.parentElement.children){if(child===element)break;if(child instanceof HTMLSourceElement)targets.push(child);}
+  }
+  for(const target of targets){
+    const state=sessions.get(target);
+    if(!state||target!==element&&state.crossOrigin===policy)continue;
+    state.crossOrigin=policy;
+    for(const [key,value] of state.authored)if(value!==null)state.states.get(key).update(value,state.active);
+  }
+}
 
 function source_pending(element) {
   const parent = element.parentElement;
@@ -74,7 +104,11 @@ export function rewrite_media(element,initial_sources) {
   const authored = new Map(initial_sources||properties.map(key => [key, get(key)]));
   prepared.set(element,authored);
   const states = new Map();
-  const session={authored,states,active:true},aliases=new Map();sessions.set(element,session);
+  const session={authored,states,active:true,crossOrigin:cross_origin(element)},aliases=new Map();sessions.set(element,session);
+  if(element instanceof HTMLImageElement){
+    policy_observer??=new MutationObserver(records=>{for(const element of new Set(records.map(record=>record.target)))refresh_image_policy(element);});
+    policy_observer.observe(element,{attributes:true,attributeFilter:['crossorigin']});
+  }
   // Clear every source before starting asynchronous work, including picture sources.
   for (const key of properties) remove(key);
   const base = () => owner.call(element)===document?ctx.document.baseURI:native_base.call(element);
@@ -100,17 +134,14 @@ export function rewrite_media(element,initial_sources) {
       state.urls = [];
       const urls = [];
       const resources = new Map();
+      let request_options;
       const done = key === "src" ? source_pending(element) : () => {};
       const resource = async source => {
         if (!source) return source;
         const url = new URL(source, request_base);
         if (["data:", "blob:"].includes(url.protocol)) return url.href;
         if (!resources.has(url.href)) resources.set(url.href, (async () => {
-          const crossOrigin = element.crossOrigin ?? (element instanceof HTMLSourceElement ? element.parentElement?.crossOrigin : null);
-          const response = await network.fetch(url.href, {
-            signal: controller.signal, credentials: crossOrigin === "anonymous" ? "same-origin" : "include",
-            mode: crossOrigin == null ? 'no-cors' : 'cors', referrerPolicy:element.referrerPolicy
-          });
+          const response = await network.fetch(url.href, request_options);
           if (!response.ok) throw new TypeError(`Media request failed: ${response.status}`);
           const blob = await response.blob();
           controller.signal.throwIfAborted();
@@ -129,6 +160,14 @@ export function rewrite_media(element,initial_sources) {
       }
       (async () => {
         try {
+          // Native resource selection waits until the current script finishes.
+          // This includes CORS/referrer attributes assigned immediately after src.
+          await Promise.resolve();
+          controller.signal.throwIfAborted();
+          const crossOrigin=cross_origin(element);
+          session.crossOrigin=crossOrigin;
+          request_options={signal:controller.signal,credentials:crossOrigin==='anonymous'?'same-origin':'include',
+            mode:crossOrigin===null?'no-cors':'cors',referrerPolicy:request_element(element).referrerPolicy};
           const rewritten = key === "srcset" ? await rewrite_srcset(value, async source => {
             try { return await resource(source); }
             catch (error) { if (controller.signal.aborted) throw error; return "data:application/octet-stream,"; }
