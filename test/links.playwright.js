@@ -3,6 +3,7 @@ async page=>{
     const pause=()=>new Promise(resolve=>setTimeout(resolve,20)),results=[];
     const link=(name,parent=document.body)=>{const a=document.createElement('a');a.href='#'+name;a.textContent=name;parent.append(a);return a;};
     const reset=()=>history.replaceState(null,'','#start');
+    results.push({name:'document-window',same:document.defaultView===window,owner:document.body.ownerDocument.defaultView===window,document:document.defaultView.document===document});
     const run=async(name,setup)=>{
       reset();const a=link(name),seen=[];
       const cleanup=setup(a,seen)||(()=>{});
@@ -20,6 +21,21 @@ async page=>{
     await run('window',(a,seen)=>{
       const route=e=>{if(e.target===a){seen.push(e.defaultPrevented);e.preventDefault();}};
       window.addEventListener('click',route);return ()=>window.removeEventListener('click',route);
+    });
+    await run('unbound-undefined',(a,seen)=>{
+      const handler=e=>{if(e.target===a){seen.push(e.defaultPrevented);e.preventDefault();}};
+      Reflect.apply(EventTarget.prototype.addEventListener,undefined,['click',handler]);
+      return ()=>Reflect.apply(EventTarget.prototype.removeEventListener,null,['click',handler]);
+    });
+    await run('unbound-null',(a,seen)=>{
+      const handler=e=>{if(e.target===a){seen.push('called');e.preventDefault();}};
+      Reflect.apply(EventTarget.prototype.addEventListener,null,['click',handler]);
+      return ()=>Reflect.apply(EventTarget.prototype.removeEventListener,window,['click',handler]);
+    });
+    await run('borrowed-document',(a,seen)=>{
+      const handler=e=>{if(e.target===a){seen.push('document');e.preventDefault();}};
+      Reflect.apply(EventTarget.prototype.addEventListener,document,['click',handler]);
+      return ()=>Reflect.apply(EventTarget.prototype.removeEventListener,document,['click',handler]);
     });
     await run('stopped',(a,seen)=>{a.addEventListener('click',e=>{seen.push(e.defaultPrevented);e.stopPropagation();});});
     await run('immediate',(a,seen)=>{a.addEventListener('click',e=>{seen.push('first');e.stopImmediatePropagation();});a.addEventListener('click',()=>seen.push('unexpected'));});

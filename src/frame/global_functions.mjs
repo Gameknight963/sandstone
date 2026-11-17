@@ -1,5 +1,7 @@
 // Binding a global method must not write .call/.apply onto the original function:
 // window.addEventListener can share that function with EventTarget.prototype.
+const native_targets=new WeakMap();
+export function unwrap_global_target(value){return native_targets.get(value)||value;}
 export function bind_global_function(target, method, virtual_target) {
   return new Proxy(method, {
     apply(method, receiver, args) {
@@ -34,5 +36,6 @@ export function create_obj_proxy(obj, ctx_vars, target) {
       return true;
     }
   });
+  native_targets.set(proxy,target);
   return proxy;
 }

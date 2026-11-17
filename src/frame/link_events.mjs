@@ -1,6 +1,7 @@
 // Suppress the sandbox's physical link activation without presenting that
 // internal cancellation to page listeners. Run the virtual default action only
 // after dispatch, including when propagation stops before document/window.
+import {unwrap_global_target} from './global_functions.mjs';
 export function install_link_events({enabled,activate}) {
   const records=new WeakMap(),prepared=new WeakSet(),listeners=new WeakMap();
   const eventProto=Event.prototype,targetProto=EventTarget.prototype;
@@ -52,6 +53,8 @@ export function install_link_events({enabled,activate}) {
     set(value){if(!value)cancel(this);else returnValue.set.call(this,value);}
   });
   targetProto.addEventListener=new Proxy(add,{apply(target,receiver,args){
+    receiver=unwrap_global_target(receiver??globalThis);
+    if(!(receiver instanceof EventTarget))return Reflect.apply(target,receiver,args);
     const [type,listener,options]=args;
     if(type!=='click'||!listener||!['function','object'].includes(typeof listener))return Reflect.apply(target,receiver,args);
     prepare(receiver);
@@ -82,6 +85,8 @@ export function install_link_events({enabled,activate}) {
     return result;
   }});
   targetProto.removeEventListener=new Proxy(remove,{apply(target,receiver,args){
+    receiver=unwrap_global_target(receiver??globalThis);
+    if(!(receiver instanceof EventTarget))return Reflect.apply(target,receiver,args);
     const [type,listener,options]=args;
     if(type!=='click')return Reflect.apply(target,receiver,args);
     const normalized=listener_options(options,false),capture=normalized.capture;
@@ -91,6 +96,7 @@ export function install_link_events({enabled,activate}) {
   }});
   const dispatch=targetProto.dispatchEvent;
   targetProto.dispatchEvent=new Proxy(dispatch,{apply(target,receiver,args){
+    receiver=unwrap_global_target(receiver??globalThis);
     const event=args[0];prepare(receiver);
     if(event?.type==='click'&&event.eventPhase===Event.NONE&&records.has(event)){
       const {cancelled,activated}=records.get(event);records.set(event,{cancelled,duringCancelled:cancelled,queued:false,activated});

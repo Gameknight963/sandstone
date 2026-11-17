@@ -8,6 +8,14 @@ import {configure_document_base,document_base_url} from '../document_base.mjs';
 
 configure_document_base(()=>ctx.location?.href||loader.url,()=>loader.is_loaded?undefined:loader.base_url);
 
+if(globalThis.document){
+  const view=Object.getOwnPropertyDescriptor(Document.prototype,'defaultView');
+  Object.defineProperty(Document.prototype,'defaultView',{...view,get(){
+    const native=view.get.call(this);
+    return this===globalThis.document?ctx.window:native;
+  }});
+}
+
 function prepare_media(element) {
   if (element.matches("img, source, video, audio, input, track")) rewrite_media(element);
   return element;

@@ -11,10 +11,11 @@ import {server as wisp,logging} from '../example/node_modules/@mercuryworkshop/w
 const sites=[
   {id:'hn',url:'https://news.ycombinator.com/'},
   {id:'mdn',url:'https://developer.mozilla.org/en-US/docs/Web/JavaScript'},
-  {id:'wikipedia',url:'https://en.wikipedia.org/wiki/Main_Page'}
+  {id:'wikipedia',url:'https://en.wikipedia.org/wiki/Main_Page'},
+  {id:'github',url:'https://github.com/octocat/Hello-World'}
 ];
 const selected=process.argv.slice(2);
-for(const id of selected)if(!sites.some(site=>site.id===id))throw new Error('Unknown live site: '+id+'; choose hn, mdn, wikipedia');
+for(const id of selected)if(!sites.some(site=>site.id===id))throw new Error('Unknown live site: '+id+'; choose '+sites.map(site=>site.id).join(', '));
 const targets=sites.filter(site=>!selected.length||selected.includes(site.id));
 const storageDenied=process.env.LIVE_STORAGE_DENIED==='1';
 const artifact=pathToFileURL(fileURLToPath(new URL('../example/bundled.html',import.meta.url))).href;
@@ -51,6 +52,11 @@ async function wait(page,proxy,expression){
 const summary=(page,proxy)=>read(page,proxy,'({title:document.title,heading:document.querySelector("h1")?.textContent.trim()||"",links:document.links.length})');
 async function interact(page,proxy,site){
   const surface=proxy?page.frameLocator('iframe[frame-id]'):page;
+  if(site.id==='github'){
+    await surface.locator('a[href="/octocat/Hello-World/blob/master/README"]:visible').first().click();
+    await wait(page,proxy,'location.pathname==="/octocat/Hello-World/blob/master/README"&&Array.from(document.querySelectorAll("a")).some(link=>link.textContent.trim()==="Raw")');
+    return read(page,proxy,'({path:location.pathname,title:document.title,file:document.body.innerText.includes("Hello World!")})');
+  }
   if(site.id==='hn'){
     await surface.locator('.pagetop a[href="newest"]').first().click();
     await wait(page,proxy,'location.pathname==="/newest"&&document.querySelectorAll("tr.athing").length>0');
