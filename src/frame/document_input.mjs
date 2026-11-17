@@ -10,6 +10,7 @@ import {ctx} from './context.mjs';
 import * as loader from './loader.mjs';
 import {pending_media_attribute} from './media_attributes.mjs';
 import {pending_style_request} from './style_requests.mjs';
+import {is_svg_script} from './svg_scripts.mjs';
 
 let session,writer,writerOwner,ignoreWrites=0,validation;
 const type=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'contentType').get;
@@ -58,23 +59,11 @@ function images(current){
 
 function prepare_script(current,node,input){
   if(current.controller.signal.aborted||!loader.site_settings.allow_js)return;
-  const sourceElement=node,svg=globalThis.SVGScriptElement&&node instanceof SVGScriptElement;
-  if(svg){
-    const type=(node.getAttribute('type')||'').trim().toLowerCase();
-    if(!['','application/javascript','text/javascript','application/ecmascript','text/ecmascript','module'].includes(type))return;
-    // Keep SVG href reflection and currentScript identity on the real node.
-    // The existing HTML executor prepares the request on a private surrogate.
-    const script=document.implementation.createHTMLDocument('').createElement('script');
-    for(const name of ['type','crossorigin','referrerpolicy','async'])if(node.hasAttribute(name))script.setAttribute(name,node.getAttribute(name));
-    const href=node.getAttribute('href')??node.getAttributeNS('http://www.w3.org/1999/xlink','href');
-    if(href!==null)script.setAttribute('src',href);
-    script.textContent=node.textContent;
-    Object.defineProperty(script,'isConnected',{get:()=>sourceElement.isConnected});node=script;
-  }
-  const module=node.type.trim().toLowerCase()==='module',external=node.hasAttribute('src');
-  const deferred=module||external&&node.hasAttribute('defer'),asynchronous=external&&node.hasAttribute('async');
+  const svg=is_svg_script(node),module=(node.getAttribute('type')||'').trim().toLowerCase()==='module';
+  const external=svg?node.hasAttribute('href')||node.hasAttributeNS('http://www.w3.org/1999/xlink','href'):node.hasAttribute('src');
+  const deferred=module||!svg&&external&&node.hasAttribute('defer'),asynchronous=external&&node.hasAttribute('async');
   const run=callback=>deferred||asynchronous?ignored(callback):scoped(input,callback,current);
-  const pending=rewrite_script(node,{parser:true,signal:current.controller.signal,run,sourceElement});
+  const pending=rewrite_script(node,{parser:true,signal:current.controller.signal,run});
   const execute=()=>{
     if(current.controller.signal.aborted)return;
     flush_import_map();return module?run_late_script(()=>node.__sandstone_execute__?.()):node.__sandstone_execute__?.();
@@ -89,7 +78,7 @@ export function run_late_script(execute){
   if(result&&typeof result.then==='function')return Promise.resolve(result).finally(()=>ignoreWrites--);
   ignoreWrites--;return result;
 }
-export function run_document_script(element,execute){return element.hasAttribute('src')&&!writer?ignored(execute):execute();}
+export function run_document_script(element,execute){return (is_svg_script(element)?element.hasAttribute('href')||element.hasAttributeNS('http://www.w3.org/1999/xlink','href'):element.hasAttribute('src'))&&!writer?ignored(execute):execute();}
 export async function load_document_html(source,{scriptingEnabled=true}={}){
   const current=begin({source:true,scriptingEnabled});
   current.stream.write(source);close(current);await current.finished;

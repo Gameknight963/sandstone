@@ -30,7 +30,7 @@ function rewrite_element_single(element) {
     promise = rewrite.meta(element);
   else if (element instanceof HTMLStyleElement || globalThis.SVGStyleElement && element instanceof SVGStyleElement)
     promise = rewrite.style(element);
-  else if (element instanceof HTMLScriptElement)
+  else if (element instanceof HTMLScriptElement||globalThis.SVGScriptElement&&element instanceof SVGScriptElement)
     promise = rewrite.script(element);
   else if (element instanceof HTMLIFrameElement)
     promise = rewrite.iframe(element);

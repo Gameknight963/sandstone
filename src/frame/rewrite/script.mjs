@@ -4,13 +4,14 @@ import { ctx, convert_url, intercept_property, proxy_function } from "../context
 import { modules, execute_module } from "../polyfill/module.mjs";
 import {schedule_resource_event} from '../resource_events.mjs';
 import {remember_attribute_order} from '../resource_attributes.mjs';
+import {is_svg_script,rewrite_svg_script,capture_svg_script,mark_svg_parser_script,mark_svg_script_connected} from '../svg_scripts.mjs';
 
 export const pending_scripts = [];
 let script_num = 0;
 const classic_types = new Set(["", "application/javascript", "text/javascript", "application/ecmascript", "text/ecmascript"]);
 const records=new WeakMap();
 const parser_scripts=new WeakSet();
-export function mark_parser_script(element){parser_scripts.add(element);}
+export function mark_parser_script(element){if(is_svg_script(element))mark_svg_parser_script(element);else parser_scripts.add(element);}
 const get=globalThis.Element?.prototype.getAttribute,set=globalThis.Element?.prototype.setAttribute,remove=globalThis.Element?.prototype.removeAttribute;
 const N=globalThis.Node?.prototype,append=N?.appendChild,remove_child=N?.removeChild,insert=N?.insertBefore;
 const owner=N&&Object.getOwnPropertyDescriptor(N,'ownerDocument').get,connected=N&&Object.getOwnPropertyDescriptor(N,'isConnected').get;
@@ -26,6 +27,7 @@ function eligible(element,record){
     ((record?record.src():get.call(element,'src'))!==null||data.get.call(element).length>0);
 }
 export function mark_script_connected(element){
+  if(is_svg_script(element)){mark_svg_script_connected(element);return;}
   if(!globalThis.HTMLScriptElement||!(element instanceof HTMLScriptElement)||!connected.call(element))return;
   const record=records.get(element);if(!eligible(element,record))return;
   if(record)record.started=true;
@@ -46,6 +48,7 @@ export function clone_script(source,copy,prime=false,serializing=false){
   capture_script(source)?.(copy,prime,serializing);
 }
 export function capture_script(source){
+  if(is_svg_script(source))return capture_svg_script(source);
   if(!globalThis.HTMLScriptElement||!(source instanceof HTMLScriptElement))return;
   const record=records.get(source),started=parser_scripts.has(source)||source.__sandstone_inert__||record&&(record.started||connected.call(source)&&eligible(source,record));
   const type=record?.type(),src=record?.src();
@@ -69,6 +72,7 @@ export function should_load(element) {
 }
 
 export function rewrite_script(element,{parser=false,signal,run,sourceElement=element}={}) {
+  if(is_svg_script(element))return rewrite_svg_script(element,{parser,signal,run});
   remember_attribute_order(element,['src','type']);
   const original_type=get.call(element,'type');
   const type = element.type.trim().toLowerCase();

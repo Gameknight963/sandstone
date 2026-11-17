@@ -76,6 +76,8 @@ const pictureLifecycleTest=await readFile(new URL('picture-lifecycle.playwright.
 const verifyPictureLifecycle=runInThisContext(`(${pictureLifecycleTest})`);
 const svgResourceTest=await readFile(new URL('svg-resources.playwright.js',import.meta.url),'utf8');
 const verifySVGResources=runInThisContext(`(${svgResourceTest})`);
+const svgScriptTest=await readFile(new URL('svg-scripts.playwright.js',import.meta.url),'utf8');
+const verifySVGScripts=runInThisContext(`(${svgScriptTest})`);
 const svgUseTest=await readFile(new URL('svg-use.playwright.js',import.meta.url),'utf8');
 const verifySVGUse=runInThisContext(`(${svgUseTest})`);
 const formTest = await readFile(new URL("forms.playwright.js", import.meta.url), "utf8");
@@ -247,6 +249,7 @@ try {
     result.passed.push(...await timed(verifyMediaPolicy(page), 'Media policy fixture'));
     result.passed.push(...await timed(verifyPictureLifecycle(page), 'Picture lifecycle fixture'));
     result.passed.push(...await timed(verifySVGResources(page), 'SVG resource fixture'));
+    result.passed.push(...await timed(verifySVGScripts(page), 'SVG script fixture'));
     result.passed.push(...await timed(verifySVGUse(page), 'SVG symbol fixture'));
     result.passed.push(...await timed(verifyForms(page), "Form fixture"));
     result.passed.push(...await timed(verifyFormEvents(page), 'Form event fixture'));

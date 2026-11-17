@@ -8,6 +8,7 @@ import {configure_document_base,document_base_url} from '../document_base.mjs';
 import {is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
 import * as ranges from './ranges.mjs';
 import {input_ready_state} from '../document_input.mjs';
+import {is_svg_script,rewrite_svg_script} from '../svg_scripts.mjs';
 
 configure_document_base(()=>ctx.location?.href||loader.url,()=>loader.is_loaded?undefined:loader.base_url);
 
@@ -20,6 +21,7 @@ if(globalThis.document){
 }
 
 function prepare_media(element) {
+  if(is_svg_script(element))rewrite_svg_script(element);
   if (Element.prototype.matches.call(element,"img, source, video, audio, input, track")) rewrite_media(element);
   if(is_svg_resource(element))rewrite_svg_resource(element);
   return element;

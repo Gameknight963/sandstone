@@ -15,7 +15,13 @@ import {unwrap_document} from '../document_identity.mjs';
 import {range_sources} from './ranges.mjs';
 import {capture_range_copy,perform_range_copy,clone_range_contents} from '../range_copy.mjs';
 import {install_serialization} from '../dom_serialization.mjs';
-const mutate_styles=(nodes,operation)=>mutate_document_base(()=>active_document(node_document(nodes[0]))?mutate_style_sources(nodes,operation):operation());
+import {is_svg_script,notify_svg_script} from '../svg_scripts.mjs';
+const mutate_styles=(nodes,operation)=>{
+  const scripts=new Set();
+  for(const node of nodes)if(node instanceof Node){const parent=parent_element.call(node);if(is_svg_script(node))scripts.add(node);if(is_svg_script(parent))scripts.add(parent);}
+  const result=mutate_document_base(()=>active_document(node_document(nodes[0]))?mutate_style_sources(nodes,operation):operation());
+  for(const script of scripts)notify_svg_script(script);return result;
+};
 const parent_element=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'parentElement').get;
 
 function prepare(node,full=true) {

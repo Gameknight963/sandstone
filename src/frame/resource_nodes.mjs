@@ -7,6 +7,7 @@ import {clone_script,mark_script_connected,capture_script} from './rewrite/scrip
 import {copy_resource_attributes,capture_resource_attributes} from './resource_attributes.mjs';
 import {clone_style,capture_style} from './rewrite/style.mjs';
 import {import_declarative_host} from './declarative_html.mjs';
+import {is_svg_script} from './svg_scripts.mjs';
 
 const N=globalThis.Node?.prototype,D=globalThis.Document?.prototype;
 const owner=N&&Object.getOwnPropertyDescriptor(N,'ownerDocument').get;
@@ -40,7 +41,7 @@ export function prepare_resources(node){
 }
 export function pause_resources(node){walk_resources(node,element=>{set_media_active(element,false);set_svg_active(element,false);});}
 export function mark_connected_scripts(node){walk_resources(node,element=>mark_script_connected(element));}
-export function mark_fragment_scripts(node){walk_resources(node,element=>{if(element instanceof HTMLScriptElement)element.__sandstone_inert__=true;},true);}
+export function mark_fragment_scripts(node){walk_resources(node,element=>{if(element instanceof HTMLScriptElement||is_svg_script(element))element.__sandstone_inert__=true;},true);}
 export function copy_resource_node(source,copy,inactive=false,prime=false,serializing=false){
   if(source===copy)return;
   const restored=clone_media(source,copy,inactive)||clone_svg_resource(source,copy,inactive);
