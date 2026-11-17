@@ -24,6 +24,7 @@
     "fake-indexeddb": "^6.2.8",
     "libcurl.js": "^0.7.0",
     "meriyah": "^6.0.3",
+    "parse5": "8.1.1",
     "tough-cookie": "^6.1.0"
   },
   "devDependencies": {

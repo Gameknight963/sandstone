@@ -2,7 +2,7 @@ import { ctx, intercept_property, proxy_function } from "../context.mjs";
 import * as network from "../network.mjs";
 import { rewrite_srcset } from "../srcset.mjs";
 
-const prepared = new WeakSet();
+const prepared = new WeakMap();
 const source_loads = new WeakMap();
 
 function source_pending(element) {
@@ -21,13 +21,21 @@ function source_pending(element) {
   };
 }
 
-export function rewrite_media(element) {
+export function clone_media(source,copy){
+  const authored=prepared.get(source);
+  if(!authored)return false;
+  rewrite_media(copy,authored);
+  return true;
+}
+
+export function rewrite_media(element,initial_sources) {
   if (prepared.has(element)) return;
-  prepared.add(element);
+  prepared.set(element,null);
   const get = element.getAttribute.bind(element);
   const remove = element.removeAttribute.bind(element);
   const properties = ["src", "srcset", "poster"].filter(key => key in element);
-  const authored = new Map(properties.map(key => [key, get(key)]));
+  const authored = new Map(initial_sources||properties.map(key => [key, get(key)]));
+  prepared.set(element,authored);
   const states = new Map();
   // Clear every source before starting asynchronous work, including picture sources.
   for (const key of properties) remove(key);

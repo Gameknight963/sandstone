@@ -1,3 +1,5 @@
+import {scripting_html} from './scripting_html.mjs';
+
 // Parse with native context rules in a document without a browsing context.
 // Detached elements in the live document can start resource requests before
 // their nodes have been rewritten.
@@ -8,13 +10,16 @@ const adjacent=element?.insertAdjacentHTML,append=node?.appendChild,remove=node?
 const parent=node&&Object.getOwnPropertyDescriptor(node,'parentElement').get;
 const first=node&&Object.getOwnPropertyDescriptor(node,'firstChild').get;
 const owner=node&&Object.getOwnPropertyDescriptor(node,'ownerDocument').get;
+const type=node&&Object.getOwnPropertyDescriptor(node,'nodeType').get;
 const importNode=globalThis.Document?.prototype.importNode;
+const contextual=globalThis.Range?.prototype.createContextualFragment;
+const select=globalThis.Range?.prototype.selectNodeContents;
 
-export function html_fragment(context,value,operation='inner',position){
-  const source=owner.call(context);
+function clone_context(context){
+  const kind=type.call(context),source=kind===9?context:owner.call(context);
   const inert=source.contentType==='text/html'?source.implementation.createHTMLDocument(''):
     source.implementation.createDocument(source.documentElement?.namespaceURI||null,'',null);
-  const copy=importNode.call(inert,context,false);
+  const copy=kind===9?inert:kind===11?inert.createDocumentFragment():importNode.call(inert,context,false);
   let original=context,ancestor=copy;
   // The fragment parser's form pointer and namespace integration points can
   // depend on ancestors, even when those ancestors are detached.
@@ -22,6 +27,32 @@ export function html_fragment(context,value,operation='inner',position){
     const container=importNode.call(inert,original,false);
     append.call(container,ancestor);ancestor=container;
   }
+  return {inert,copy};
+}
+
+export function range_fragment(context,value){
+  const {inert,copy}=clone_context(context),range=inert.createRange();
+  let parsing=copy;
+  const element=type.call(copy)===1?copy:parent.call(copy);
+  let raw=false;
+  if(element?.namespaceURI==='http://www.w3.org/1999/xhtml'&&element.localName==='noscript'){
+    // Style has the same raw-text tokenizer state regardless of scripting.
+    parsing=inert.createElement('style');
+    const ancestor=parent.call(element);if(ancestor)append.call(ancestor,parsing);
+    raw=true;
+  }
+  select.call(range,parsing);
+  // Unlike innerHTML, this native API creates executable scripts. Leave them
+  // untouched until the ordinary insertion hooks prepare their execution.
+  if(raw)return contextual.call(range,value);
+  const protected_html=scripting_html(parsing,value);
+  const fragment=contextual.call(range,protected_html.value);
+  protected_html.restore(fragment);
+  return fragment;
+}
+
+export function html_fragment(context,value,operation='inner',position){
+  const {inert,copy}=clone_context(context);
   let container=copy;
   if(operation==='outer'||operation==='adjacent'&&['beforebegin','afterend'].includes(position)){
     container=parent.call(copy);

@@ -23,6 +23,8 @@ const hyperlinkTest=await readFile(new URL('hyperlinks.playwright.js',import.met
 const verifyHyperlinks=runInThisContext(`(${hyperlinkTest})`);
 const htmlInsertionTest=await readFile(new URL('html-insertion.playwright.js',import.meta.url),'utf8');
 const verifyHTMLInsertion=runInThisContext(`(${htmlInsertionTest})`);
+const rangeFragmentTest=await readFile(new URL('range-fragments.playwright.js',import.meta.url),'utf8');
+const verifyRangeFragments=runInThisContext(`(${rangeFragmentTest})`);
 const baseTest=await readFile(new URL('base.playwright.js',import.meta.url),'utf8');
 const verifyBase=runInThisContext(`(${baseTest})`);
 const attributeTest=await readFile(new URL('event-attributes.playwright.js',import.meta.url),'utf8');
@@ -175,6 +177,7 @@ try {
     result.passed.push(...await timed(verifyAttributes(page), 'Event attribute fixture'));
     result.passed.push(...await timed(verifyHyperlinks(page), 'Hyperlink URL fixture'));
     result.passed.push(...await timed(verifyHTMLInsertion(page), 'HTML insertion fixture'));
+    result.passed.push(...await timed(verifyRangeFragments(page), 'Range fragment fixture'));
     result.passed.push(...await timed(verifyCSS(page), "CSS fixture"));
     result.passed.push(...await timed(verifyMedia(page), "Media fixture"));
     result.passed.push(...await timed(verifyForms(page), "Form fixture"));
