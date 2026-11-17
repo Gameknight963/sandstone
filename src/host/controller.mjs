@@ -8,7 +8,7 @@ import { NavigationHistory } from "../history.mjs";
 import {parse_referrer_policy,default_referrer_policy} from '../referrer.mjs';
 import {is_download} from '../download.mjs';
 import {frame_cross_site} from './frame_context.mjs';
-import {apply_storage_change} from '../storage_changes.mjs';
+import './storage.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 
@@ -277,18 +277,6 @@ rpc.rpc_handlers["history_go"] = (id, delta, scroll) => {
   return null;
 };
 
-rpc.rpc_handlers["local_storage"] = async (frame_id, entries, change) => {
-  let frame = iframes[frame_id];
-  if (!frame) return;
-  if(change===undefined)site_data.setLocal(frame.url.origin, entries);
-  else site_data.changeLocal(frame.url.origin,change);
-}
-
-rpc.rpc_handlers["session_storage"] = async (frame_id, entries, change) => {
-  const frame = iframes[frame_id];
-  if (frame) frame.session_storage[frame.url.origin] = change===undefined?entries:apply_storage_change(frame.session_storage[frame.url.origin],change);
-};
-
 rpc.rpc_handlers["cookie_set"] = async (frame_id, value) => {
   const frame = iframes[frame_id];
   if (frame) site_data.setCookie(frame.url.href, value, false,{crossSite:frame_cross_site(frame,iframes)});
@@ -326,6 +314,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   return {
     beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin}),
     cookie_cross_site:frame_cross_site(child,iframes),
+    message_origin:child.broadcast_origin.startsWith('opaque:')?'null':undefined,
     crypto_available: crypto_service.methods,
     local_storage: site_data.local[child.origin],
     session_storage: child.session_storage[child.origin],

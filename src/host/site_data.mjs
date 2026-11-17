@@ -13,6 +13,7 @@ export class SiteDataStore {
     this.cookies = new CookieJar();
     this.indexed = [];
     this.persistent = false;
+    this.localListeners=new Set();
     this.load();
   }
 
@@ -50,6 +51,7 @@ export class SiteDataStore {
   setLocal(origin, entries) {
     this.local[origin] = entries.map(([key, value]) => [String(key), String(value)]);
     this.persist();
+    for(const listener of this.localListeners)listener(origin,this.local[origin]);
   }
 
   changeLocal(origin,change){this.setLocal(origin,apply_storage_change(this.local[origin],change));}
@@ -102,7 +104,10 @@ export class SiteDataStore {
     http_cache.clear(hostname);
     if (localStorage) {
       for (const origin of Object.keys(this.local)) {
-        if (new URL(origin).hostname === hostname) delete this.local[origin];
+        if (new URL(origin).hostname === hostname) {
+          delete this.local[origin];
+          for(const listener of this.localListeners)listener(origin,[]);
+        }
       }
       // Do not let migration resurrect data that the user has cleared.
       try { this.storage?.removeItem("proxy_local_storage"); } catch {}

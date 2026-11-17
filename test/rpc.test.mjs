@@ -6,6 +6,16 @@ globalThis.parent=globalThis;
 const rpc=await import('../src/rpc.mjs');
 delete globalThis.self;delete globalThis.parent;
 
+test('RPC notifications deliver updates without allocating requests or sending replies',async()=>{
+  const values=[],messages=[];
+  rpc.rpc_handlers.test_notification=value=>values.push(value);
+  try{
+    rpc.notify({postMessage:message=>messages.push(message)},'test_notification',[42]);
+    await rpc.message_listener({data:messages[0],source:{postMessage(){throw new Error('Notification sent a reply');}}});
+    assert.deepEqual(values,[42]);assert.deepEqual(Object.keys(rpc.rpc_requests),[]);
+  }finally{delete rpc.rpc_handlers.test_notification;}
+});
+
 test('RPC cancellation removes pending replies and ignores late replies',async()=>{
   const controller=new AbortController(),messages=[];
   const request=rpc.call_procedure({postMessage:message=>messages.push(message)},'pending',[],{signal:controller.signal});

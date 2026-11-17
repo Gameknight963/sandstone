@@ -109,6 +109,9 @@ export async function message_listener(event, target) {
   else if (msg.type === "reply") {
     handle_procedure_reply(msg);
   }
+  else if(msg.type==='notification'){
+    if(rpc_handlers[msg.procedure])await rpc_handlers[msg.procedure](...msg.arguments);
+  }
   
   else if (msg.type === "attach") {
     let msg_port = event.ports[0];
@@ -153,6 +156,8 @@ export function create_rpc_wrapper(target, procedure) {
     return call_procedure(target, procedure, [...arguments]);
   }
 }
+
+export function notify(target,procedure,args){target.postMessage({type:'notification',procedure,arguments:args});}
 
 //attach an additional message port to the host
 export function attach_host(msg_port, frame_id) {

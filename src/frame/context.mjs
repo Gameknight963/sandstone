@@ -6,6 +6,7 @@ import * as loader from "./loader.mjs";
 import { modules } from "./polyfill/module.mjs";
 import { create_obj_proxy } from "./global_functions.mjs";
 import {parent_message_window,self_post_message} from './window_messages.mjs';
+import {create_document_storage} from './storage_sync.mjs';
 const parse_json = JSON.parse;
 
 export const is_worker = typeof importScripts === "function";
@@ -78,8 +79,8 @@ export class CustomCTX {
   get CSSStyleSheet() {return intercept.FakeCSSStyleSheet}
   get history() {return internal.history}
 
-  get localStorage() {return internal.localStorage}
-  get sessionStorage() {return internal.sessionStorage}
+  get localStorage() {if(internal.storage_unavailable)throw new DOMException('Storage origin is unavailable','SecurityError');return internal.localStorage}
+  get sessionStorage() {if(internal.storage_unavailable)throw new DOMException('Storage origin is unavailable','SecurityError');return internal.sessionStorage}
   get WebSocket() {return network.WebSocket}
   get BroadcastChannel(){return polyfill.BroadcastChannel;}
   get indexedDB() {return polyfill.idb.indexedDB}
@@ -173,18 +174,16 @@ export function wrap_obj(wrapper, target) {
 }
 
 export function update_ctx(options = {}) {
+  let storageReady;
   internal.location = is_worker ? new polyfill.FakeWorkerLocation() : new polyfill.FakeLocation();
   internal.self = ctx.__proxy__;
   internal.globalThis = ctx.__proxy__;
   internal.history = is_worker ? undefined : new polyfill.FakeHistory(options.history);
   if (is_worker) { internal.localStorage = undefined; internal.sessionStorage = undefined; }
   if (!is_worker) {
-  internal.localStorage = new polyfill.FakeStorage(options.local_storage, (_entries,change) => {
-    loader.local_storage(loader.frame_id, undefined, change).catch(console.error);
-  });
-  internal.sessionStorage = new polyfill.FakeStorage(options.session_storage, (_entries,change) => {
-    loader.session_storage(loader.frame_id, undefined, change).catch(console.error);
-  });
+    const stores=create_document_storage(options,()=>ctx.location.href,()=>ctx.window);
+    internal.localStorage=stores.local;internal.sessionStorage=stores.session;
+    storageReady=stores.ready.then(snapshot=>{internal.storage_unavailable=!!snapshot.opaque;});
   }
   delete globalThis.caches;
   // These APIs would bypass the relay and contact destination peers directly.
@@ -195,6 +194,7 @@ export function update_ctx(options = {}) {
   globalThis.__ctx__ = ctx.__proxy__;
   globalThis.__get_this__ = ctx.__get_this__;
   globalThis.__get_var__ = ctx.__get_var__;
+  return storageReady;
 }
 
 export function convert_url(url, base) {

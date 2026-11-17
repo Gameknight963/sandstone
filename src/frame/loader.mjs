@@ -133,7 +133,7 @@ async function load_html(options) {
   base_url = options.url;
   set_frame_id(options.frame_id);
   get_frame_html();
-  update_ctx(options);
+  await update_ctx(options);
   configure_window_messages(options);
   load_cookies(options.cookies);
 

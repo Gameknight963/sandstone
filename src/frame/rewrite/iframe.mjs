@@ -109,12 +109,6 @@ export function rewrite_iframe(iframe_element) {
       rpc.set_host(iframe_element, msg_channel_2.port2);
       const send_page=options=>rpc.call_procedure(rpc_target,'html',[options],{signal:controller.signal});
 
-      //load persisted local storage if needed
-      let iframe_origin = new URL(final_url).origin;
-      let local_storage;
-      if (iframe_origin === ctx.location.origin)
-        local_storage = ctx.localStorage._get_entries();
-
       iframe_url=final_url;
       const opaque=iframe_element.hasAttribute('sandbox')&&!iframe_element.sandbox.contains('allow-same-origin');
       const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque});
@@ -134,7 +128,7 @@ export function rewrite_iframe(iframe_element) {
           version: loader.version,
           is_iframe: true,
           message_parent:{token:message_token},
-          message_origin:opaque?'null':undefined
+          message_origin:state.message_origin
         });
       }
       catch (error) {

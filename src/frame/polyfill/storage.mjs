@@ -44,6 +44,7 @@ export class FakeStorage {
   }
   clear() { this.#map.clear(); this.#sync([],{type:'clear'}); }
   _get_entries() { return [...this.#map]; }
+  _replace_entries(entries){this.#map=new Map(entries);}
   toString() { return "[object Storage]"; }
   get [Symbol.toStringTag]() { return "Storage"; }
 }

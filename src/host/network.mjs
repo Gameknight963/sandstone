@@ -12,6 +12,7 @@ import {http_cache} from './http_cache.mjs';
 import {Downloads} from './download.mjs';
 import {frame_cross_site} from './frame_context.mjs';
 import {broadcast_channels} from './broadcast.mjs';
+import {disconnect_storage} from './storage.mjs';
 export {http_cache} from './http_cache.mjs';
 export {broadcast_channels};
 
@@ -176,6 +177,7 @@ rpc_handlers["ws_close"] = function (frame_id, ws_id) {
 
 //when navigating to a new page we need to close unused connections
 export function clean_ws_connections(id_to_clean) {
+  disconnect_storage(id_to_clean);
   broadcast_channels.disconnect(id_to_clean);
   beacons.retire(id_to_clean);
   keepalives.retire(id_to_clean);
