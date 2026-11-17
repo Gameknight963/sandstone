@@ -10,6 +10,7 @@ import {detach_media_attribute} from '../rewrite/media.mjs';
 import {detach_svg_attribute} from '../svg_resources.mjs';
 import {shadow_root} from '../shadow_roots.mjs';
 import {unwrap_document} from '../document_identity.mjs';
+import {range_sources} from './ranges.mjs';
 const mutate_styles=(nodes,operation)=>mutate_document_base(()=>active_document(node_document(nodes[0]))?mutate_style_sources(nodes,operation):operation());
 
 function prepare(node,full=true) {
@@ -122,11 +123,12 @@ if (globalThis.Node) {
     for (const key of ['deleteContents', 'extractContents', 'insertNode', 'surroundContents']) {
       const original = Range.prototype[key];
       Range.prototype[key] = function(...args) {
-        const ancestor=this.commonAncestorContainer;
+        if((key==='insertNode'||key==='surroundContents')&&args.length)args[0]=unwrap_document(args[0]);
+        const sources=range_sources(this),ancestor=sources[0];
         const active=active_document(node_document(ancestor)),full=active&&connected_node(ancestor);
         const inserting=key==='insertNode'||key==='surroundContents',node=args[0];
         const inserted=inserting?(node?.nodeType===11?[...node.childNodes]:[node]):[];
-        const result=mutate_styles([ancestor,...args],()=>{
+        const result=mutate_styles([...sources,...args],()=>{
           if(inserting&&active)prepare(node,full);
           return Reflect.apply(original,this,args);
         });
@@ -137,6 +139,15 @@ if (globalThis.Node) {
         return result;
       };
     }
+  }
+  if(globalThis.Selection&&typeof Selection.prototype.deleteFromDocument==='function'){
+    const original=Selection.prototype.deleteFromDocument,getRange=Selection.prototype.getRangeAt;
+    const count=Object.getOwnPropertyDescriptor(Selection.prototype,'rangeCount').get;
+    Selection.prototype.deleteFromDocument=new Proxy(original,{apply(target,receiver,args){
+      const length=count.call(receiver);if(!length)return Reflect.apply(target,receiver,args);
+      const sources=[];for(let index=0;index<length;index++)sources.push(...range_sources(getRange.call(receiver,index)));
+      return mutate_styles(sources,()=>Reflect.apply(target,receiver,args));
+    }});
   }
   for (const [prototype, keys] of [[CharacterData.prototype, ['appendData', 'insertData', 'deleteData', 'replaceData']], [Text.prototype, ['splitText']]]) {
     for (const key of keys) {
@@ -176,7 +187,7 @@ if (globalThis.Node) {
       start.call(this);
       if(!arguments.length)return contextual.call(this);
       value=markup_string(value);
-      const context=start.call(this),source=owner.call(context)||context;
+      const context=unwrap_document(start.call(this)),source=owner.call(context)||context;
       if(!view.call(source))return contextual.call(this,value);
       const content=range_fragment(context,value);
       // Images/media can start loading as soon as their owner document is

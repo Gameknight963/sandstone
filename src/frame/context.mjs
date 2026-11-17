@@ -93,6 +93,10 @@ export class CustomCTX {
   get BroadcastChannel(){return polyfill.BroadcastChannel;}
   get MutationObserver(){return Object.hasOwn(internal,'MutationObserver')?internal.MutationObserver:intercept.mutation_observer.MutationObserver;}
   set MutationObserver(value){internal.MutationObserver=value;}
+  get Range(){return Object.hasOwn(internal,'Range')?internal.Range:intercept.ranges.Range;}
+  set Range(value){internal.Range=value;}
+  get StaticRange(){return Object.hasOwn(internal,'StaticRange')?internal.StaticRange:intercept.ranges.StaticRange;}
+  set StaticRange(value){internal.StaticRange=value;}
   get indexedDB() {return polyfill.idb.indexedDB}
   get IDBFactory() {return polyfill.idb.IDBFactory}
   get IDBDatabase() {return polyfill.idb.IDBDatabase}

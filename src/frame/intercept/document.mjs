@@ -6,6 +6,7 @@ import { rewrite_media } from "../rewrite/media.mjs";
 import {parse_referrer_policy} from '../../referrer.mjs';
 import {configure_document_base,document_base_url} from '../document_base.mjs';
 import {is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
+import * as ranges from './ranges.mjs';
 
 configure_document_base(()=>ctx.location?.href||loader.url,()=>loader.is_loaded?undefined:loader.base_url);
 
@@ -73,6 +74,10 @@ class CustomDocument {
   get cookie() {return get_cookie()}
   set cookie(value) {set_cookie(value)}
   get body() {return this.__target__.body}
+  get createRange(){return Object.hasOwn(internal,'createRange')?internal.createRange:ranges.createRange;}
+  set createRange(value){internal.createRange=value;}
+  get getSelection(){return Object.hasOwn(internal,'getSelection')?internal.getSelection:ranges.getSelection;}
+  set getSelection(value){internal.getSelection=value;}
   get location() {return ctx.location}
   get URL() {return ctx.location.href}
   get baseURI() {

@@ -4,6 +4,7 @@ export * as dom from "./dom.mjs";
 export * as navigator from "./navigator.mjs";
 export * as mutation_observer from "./mutation_observer.mjs";
 import './traversal.mjs';
+export * as ranges from './ranges.mjs';
 export * as function from "./function.mjs";
 import './crypto.mjs';
 import './fonts.mjs';
