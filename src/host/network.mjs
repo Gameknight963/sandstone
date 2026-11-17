@@ -9,12 +9,16 @@ import { relay_websocket_class, websocket_options } from "./websocket.mjs";
 import { BeaconQueue } from './beacon.mjs';
 import {KeepaliveRequests} from './keepalive.mjs';
 import {http_cache} from './http_cache.mjs';
+import {Downloads} from './download.mjs';
 export {http_cache} from './http_cache.mjs';
 
 export const ws_connections = {};
 export let session = null;
 export const beacons = new BeaconQueue({fetch: (...args) => fetch(...args), cookies: url => site_data.documentCookies(url)});
 export const keepalives = new KeepaliveRequests({queue:beacons,fetch:(...args)=>fetch(...args),cookies:url=>site_data.documentCookies(url)});
+export const downloads=new Downloads({fetch:(...args)=>fetch(...args),contexts:beacons.contexts,cookies:url=>site_data.documentCookies(url)});
+rpc_handlers.download_request=(...args)=>downloads.request(...args);
+rpc_handlers.download_blob=(...args)=>downloads.blob(...args);
 rpc_handlers.beacon = (context, url, body, options) => beacons.send(context, url, body, options);
 rpc_handlers.fetch_keepalive = (...args) => keepalives.open(...args);
 rpc_handlers.fetch_keepalive_read = (...args) => keepalives.read(...args);

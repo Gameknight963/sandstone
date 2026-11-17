@@ -3,7 +3,7 @@ import * as rewrite from "./rewrite/index.mjs";
 import * as network from "./network.mjs";
 import * as parser from "./parser.mjs";
 
-import { update_ctx, run_script, run_script_safe, ctx, convert_url } from "./context.mjs";
+import { update_ctx, run_script, ctx } from "./context.mjs";
 import { pending_scripts } from "./rewrite/script.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
 import { flush_import_map } from "./polyfill/module.mjs";
@@ -13,7 +13,9 @@ import {document_referrer_policy,reset_document_referrer_policy} from './interce
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
-  return navigate_rpc(id,url,reload,form_data,{referrerPolicy:document_referrer_policy(),...navigation});
+  return navigate_rpc(id,url,reload,form_data,{referrerPolicy:document_referrer_policy(),...navigation}).then(result=>{
+    if(result?.download)load_cookies(result.cookies);return result;
+  });
 }
 export const local_storage = rpc.create_rpc_wrapper(rpc.host, "local_storage");
 export const session_storage = rpc.create_rpc_wrapper(rpc.host, "session_storage");
@@ -145,30 +147,6 @@ async function load_html(options) {
   
   //rewrite all html elements
   await rewrite.element(html.documentElement);
-
-  //add handler for navigation
-  document.addEventListener("click", (event) => {
-    if (event.defaultPrevented) return;
-    let element = event.target;
-    while (element && !(element instanceof HTMLAnchorElement)) {
-      element = element.parentElement;
-    }
-    if (!element) return;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    if (element.href.startsWith("javascript:")) {
-      let original_js = element.href.replace("javascript:", "");
-      run_script_safe(original_js)
-    }
-    else {
-      const original_href = convert_url(element.getAttribute("href") || "", ctx.document.baseURI);
-      const target = new URL(original_href), current = new URL(ctx.location.href);
-      if (target.origin === current.origin && target.pathname === current.pathname && target.search === current.search && (target.hash !== current.hash || target.hash)) ctx.location.assign(original_href);
-      else navigate(frame_id,original_href,true,null,{referrerPolicy:element.relList.contains('noreferrer') ? 'no-referrer' : element.referrerPolicy || document_referrer_policy()}).catch(console.error);
-    }
-  });
 
   //parse elements with ids and add them to the scope
   let id_elements = html.querySelectorAll("*[id]");

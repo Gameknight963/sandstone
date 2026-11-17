@@ -5,6 +5,8 @@ import * as util from "../../util.mjs";
 import * as rpc from "../../rpc.mjs";
 import {parse_referrer_policy} from '../../referrer.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
+import {is_download} from '../../download.mjs';
+import {save_response} from '../downloads.mjs';
 
 export function rewrite_iframe(iframe_element) {
   const frame_id = Math.random() + "";
@@ -15,6 +17,7 @@ export function rewrite_iframe(iframe_element) {
   let iframe_url = "";
 
   let fetch_src = async (value, form_data = null, navigation = {}) => {
+    const previous_url=iframe_url;
     //download the proxied html
     iframe_element.setAttribute("__src", value);
     iframe_url = convert_url(value, ctx.location.href);
@@ -31,6 +34,11 @@ export function rewrite_iframe(iframe_element) {
         ...(form_data ? {
         method: "POST", headers: form_data.headers || {"Content-Type": form_data.enctype}, body: form_data.body
       } : {})});
+      if(is_download(response.headers)){
+        try{return {download:true,filename:await save_response(response)};}
+        catch(error){console.error(error);return {download:true};}
+        finally{iframe_url=previous_url;iframe_element.setAttribute('__src',previous_url);}
+      }
       html = await response.text();
       final_url = response.url;
       referrer_policy = parse_referrer_policy(response.headers.get('referrer-policy'));

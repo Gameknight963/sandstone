@@ -6,6 +6,7 @@ import { indexed_db } from "./indexeddb.mjs";
 import {crypto_service} from './crypto.mjs';
 import { NavigationHistory } from "../history.mjs";
 import {parse_referrer_policy,default_referrer_policy} from '../referrer.mjs';
+import {is_download} from '../download.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 
@@ -118,26 +119,8 @@ export class ProxyFrame {
     if (navigation_id !== this.navigation_id) return;
     const source_url = navigation.initiated ? this.url?.href : undefined;
     const source_policy = navigation.referrerPolicy || this.referrer_policy || default_referrer_policy;
-    this.url = new URL(url);
-    
-    this.iframe.style.backgroundColor = "#222222";
-    this.history.save_scroll(navigation.scroll);
-    this.on_navigate();
-    this.iframe.src = get_frame_bundle();
-    indexed_db.disconnect(this.id);
-    network.clean_ws_connections(this.id);
-    for (const [id, frame] of Object.entries(iframes)) {
-      if (frame.root_id === this.id && id !== this.id) {
-        indexed_db.disconnect(id);
-        network.clean_ws_connections(id);
-        delete iframes[id];
-      }
-    }
-    for (const [id, saved] of saved_child_histories) {
-      if (saved.root_id === this.id) saved_child_histories.delete(id);
-    }
-
     let html = null;
+    let download_response;
     let error = false;
     let referrer_policy = default_referrer_policy, document_referrer = '';
 
@@ -157,7 +140,9 @@ export class ProxyFrame {
         }
         if (navigation.history_mode === 'reload') options.cache = 'no-cache';
         let response = await network.fetch(url, options, {url:source_url,top_url:source_url,referrerPolicy:source_policy,navigation:true});
-        html = await response.text();
+        if(navigation_id!==this.navigation_id){await response.body?.cancel();return;}
+        if(is_download(response.headers))download_response=response;
+        else html = await response.text();
         url = response.url;
         referrer_policy = parse_referrer_policy(response.headers.get('referrer-policy'));
         document_referrer = response.request_referrer || '';
@@ -167,7 +152,27 @@ export class ProxyFrame {
       }  
     }
     if (navigation_id !== this.navigation_id) return;
+    if(download_response){
+      try{return {download:true,filename:await network.downloads.response(download_response,url),cookies:site_data.documentCookies(this.url?.href||url)};}
+      finally{if(navigation_id===this.navigation_id)this.is_navigating=false;}
+    }
     this.url = new URL(url);
+    this.iframe.style.backgroundColor = "#222222";
+    this.history.save_scroll(navigation.scroll);
+    this.on_navigate();
+    this.iframe.src = get_frame_bundle();
+    indexed_db.disconnect(this.id);
+    network.clean_ws_connections(this.id);
+    for (const [id, frame] of Object.entries(iframes)) {
+      if (frame.root_id === this.id && id !== this.id) {
+        indexed_db.disconnect(id);
+        network.clean_ws_connections(id);
+        delete iframes[id];
+      }
+    }
+    for (const [id, saved] of saved_child_histories) {
+      if (saved.root_id === this.id) saved_child_histories.delete(id);
+    }
     this.referrer_policy = referrer_policy;
     this.document_referrer = document_referrer;
     this.history.navigate(url, {mode: navigation.history_mode || "push"});
@@ -233,7 +238,7 @@ rpc.rpc_handlers["navigate"] = async (frame_id, url, reload=true, form_data=null
   if (!frame) return;
 
   if (reload) {
-    await frame.navigate_to(url, form_data, {...navigation,initiated:true});
+    return await frame.navigate_to(url, form_data, {...navigation,initiated:true});
   }
   else {
     frame.url = new URL(url);
@@ -291,20 +296,22 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
     session_storage: parent.session_storage,
     history: saved?.history || new NavigationHistory(),
     async navigate_to(url, form_data, navigation = {}) {
+      const previous_url=child.url;
       navigation = {...navigation,source_url:child.url.href};
       child.url = new URL(url, child.url);
       child.history.save_scroll(navigation.scroll);
       child.pending_navigation = navigation;
       const port = parent_id === root.id ? root.rpc_target.target : root.rpc_target.extra_frame_targets.get(parent_id);
       if (!port) throw new DOMException("Parent frame is disconnected", "InvalidStateError");
-      await rpc.call_procedure(port, "child_navigate", [child_id, child.url.href, form_data, {...navigation,from_child:true}]);
+      const result=await rpc.call_procedure(port, "child_navigate", [child_id, child.url.href, form_data, {...navigation,from_child:true}]);
+      if(result?.download){child.url=previous_url;child.pending_navigation=null;return {...result,cookies:site_data.documentCookies(previous_url.href)};}
     },
     on_url_change() {}
   };
   iframes[child_id] = child;
   child.history.navigate(url, {mode: saved?.navigation?.history_mode || "push"});
   return {
-    beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href}),
+    beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href,nested:true}),
     crypto_available: crypto_service.methods,
     local_storage: site_data.local[child.origin],
     session_storage: child.session_storage[child.origin],

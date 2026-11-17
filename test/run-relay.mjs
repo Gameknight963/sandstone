@@ -1,5 +1,6 @@
 import {create_relay_server} from '../example/http.mjs';
 import {once} from 'node:events';
+import {readFile} from 'node:fs/promises';
 import {pathToFileURL, fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright-core';
@@ -8,6 +9,7 @@ import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
 import {font_fixture, font_script, constructor_font_script} from './font-fixture.mjs';
 import {keepalive_fixture,keepalive_quota_script,keepalive_finish_script,keepalive_unload_script,keepalive_abort_script,keepalive_worker_script} from './keepalive-fixture.mjs';
 import {cache_fixture,cache_script} from './cache-fixture.mjs';
+import {download_fixture,verify_downloads,prepare_downloads} from './download-fixture.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -19,6 +21,7 @@ const cssRequests=[];
 const fonts=font_fixture();
 const keepalive=keepalive_fixture();
 const cacheFixture=cache_fixture();
+const downloadFixture=download_fixture();
 const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
 const server=create_relay_server((request,response)=>{
   const url=new URL(request.url,'http://localhost');
@@ -26,6 +29,7 @@ const server=create_relay_server((request,response)=>{
   if(fonts.handle(request,response,url))return;
   if(keepalive.handle(request,response,url))return;
   if(cacheFixture.handle(request,response,url))return;
+  if(downloadFixture.handle(request,response,url))return;
   if(url.pathname.startsWith('/css-context/')){
     const policy=url.searchParams.get('policy')||'';
     const query='?client='+encodeURIComponent(client)+'&policy='+encodeURIComponent(policy);
@@ -280,6 +284,24 @@ try{
   assert.equal(nativeRequestContexts.find(value=>value.label==='meta').referrer,null);
   await nativePage.goto(origin+'/request-context/source?policy=origin&meta=no-referrer&script=meta-native');
   const nativeDeclaredMeta=contextValues('meta-native');assert.equal(nativeDeclaredMeta.length,1);assert.equal(nativeDeclaredMeta[0].referrer,null);
+  await nativePage.goto(origin+'/downloads/page?client=downloads-native');
+  const nativeDownloads=await verify_downloads(nativePage,source=>nativePage.evaluate(source=>eval(source),source),'downloads-native',()=>nativePage.locator('#download-trigger').click());
+  const nativeDownloadRequests=downloadFixture.values('downloads-native');
+  const nativeIgnoredURL=origin.replace('127.0.0.1','localhost')+'/downloads/view?client=ignored-native&name=ignored';
+  await nativePage.evaluate(url=>{const link=document.createElement('a');link.href=url;link.download='ignored.txt';document.body.append(link);link.click();},nativeIgnoredURL);
+  await nativePage.waitForURL(nativeIgnoredURL);
+  await nativePage.goto(origin+'/downloads/page?client=download-parent-native');
+  const nativeDownloadChildAttached=nativePage.waitForEvent('frameattached');
+  const nativeDownloadChildURL=origin+'/downloads/page?client=download-child-native';
+  await nativePage.evaluate(url=>{const child=document.createElement('iframe');child.src=url;document.body.append(child);},nativeDownloadChildURL);
+  const nativeDownloadChild=await nativeDownloadChildAttached;await nativeDownloadChild.waitForURL(nativeDownloadChildURL);
+  await nativeDownloadChild.evaluate(source=>eval(source),prepare_downloads('download-child-native'));
+  await nativeDownloadChild.evaluate(()=>{downloadAction='attachment';});
+  const nativeChildDownloadPending=nativePage.waitForEvent('download');await nativeDownloadChild.locator('#download-trigger').click();
+  const nativeChildDownload=await nativeChildDownloadPending;
+  const nativeChildFile={filename:nativeChildDownload.suggestedFilename(),body:(await readFile(await nativeChildDownload.path())).toString('base64')};
+  assert.equal(await nativeDownloadChild.evaluate(()=>downloadMarker),'original');
+  const nativeChildDownloadRequests=downloadFixture.values('download-child-native');
   await nativePage.goto(origin+'/cache/page?client=cache-native');
   const nativeCache=JSON.parse(await nativePage.evaluate(source=>eval(source),cache_script('cache-native')));
   const nativeCacheRequests=cacheFixture.values('cache-native');
@@ -394,6 +416,32 @@ try{
   const metaClient='declared-meta-'+storageDenied;
   await page.evaluate(url=>main_frame.navigate_to(url),origin+'/request-context/source?policy=origin&meta=no-referrer&script='+metaClient);
   assert.deepEqual(contextValues(metaClient),nativeDeclaredMeta,'Declared meta policy was ignored during initial script downloads');
+  const downloadClient='downloads-'+storageDenied;
+  await page.evaluate(url=>main_frame.navigate_to(url),origin+'/downloads/page?client='+downloadClient);
+  const actualDownloads=await verify_downloads(page,source=>page.evaluate(source=>main_frame.eval_js(source),source),downloadClient,()=>page.frameLocator('iframe[frame-id]').locator('#download-trigger').click());
+  assert.deepEqual(actualDownloads,nativeDownloads,'Relayed download filenames or contents differ from native Chromium');
+  assert.deepEqual(downloadFixture.values(downloadClient),nativeDownloadRequests,'Download cookies, referrers, redirects or network requests differ from native Chromium');
+  assert.equal(await page.evaluate(()=>main_frame.eval_js('downloadMarker')),'original');
+  const ignoredURL=origin.replace('127.0.0.1','localhost')+'/downloads/view?client=ignored-'+storageDenied+'&name=ignored';
+  await page.evaluate(url=>main_frame.eval_js('const ignored=document.createElement("a");ignored.href='+JSON.stringify(url)+';ignored.download="ignored.txt";document.body.append(ignored);ignored.click();true'),ignoredURL);
+  await page.waitForFunction(url=>!main_frame.is_navigating&&main_frame.url.href===url,ignoredURL);
+  assert.equal(await page.evaluate(()=>main_frame.eval_js('Boolean(document.getElementById("cross-view"))')),true,'Cross-origin download attribute prevented ordinary navigation');
+  await page.evaluate(url=>main_frame.navigate_to(url),origin+'/downloads/page?client=download-parent-'+storageDenied);
+  const childDownloadClient='download-child-'+storageDenied,childDownloadURL=origin+'/downloads/page?client='+childDownloadClient;
+  await page.evaluate(url=>main_frame.eval_js('const child=document.createElement("iframe");child.src='+JSON.stringify(url)+';document.body.append(child);true'),childDownloadURL);
+  let downloadChild;const downloadChildDeadline=Date.now()+10000;
+  while(!downloadChild&&Date.now()<downloadChildDeadline){
+    for(const frame of page.frames())if(await frame.evaluate(url=>globalThis.sandstone_frame?.loader.url===url&&sandstone_frame.loader.ready_state==='complete',childDownloadURL).catch(()=>false)){downloadChild=frame;break;}
+    if(!downloadChild)await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  assert.ok(downloadChild,'Nested download fixture did not load');
+  await downloadChild.evaluate(source=>sandstone_frame.context.run_script(source),prepare_downloads(childDownloadClient));
+  await downloadChild.evaluate(()=>sandstone_frame.context.run_script('downloadAction="attachment";true'));
+  const childDownloadPending=page.waitForEvent('download');await downloadChild.locator('#download-trigger').click();
+  const childDownload=await childDownloadPending;
+  assert.deepEqual({filename:childDownload.suggestedFilename(),body:(await readFile(await childDownload.path())).toString('base64')},nativeChildFile);
+  assert.equal(await downloadChild.evaluate(()=>sandstone_frame.context.run_script('downloadMarker')),'original','An iframe attachment replaced the original child document');
+  assert.deepEqual(downloadFixture.values(childDownloadClient),nativeChildDownloadRequests,'Nested attachment download used the wrong document headers');
   const cacheClient='cache-'+storageDenied;
   await page.evaluate(url=>main_frame.navigate_to(url),origin+'/cache/page?client='+cacheClient);
   const actualCache=JSON.parse(await page.evaluate(async source=>{
