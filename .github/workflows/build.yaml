@@ -43,16 +43,18 @@ jobs:
           npm run build:prod --prefix example
 
       - name: Install test browser
-        run: npx --no-install playwright-core install --with-deps chromium
+        run: npx --no-install playwright-core install --with-deps --only-shell chromium
 
       - name: Test the standalone file
         env:
-          BROWSER_CHANNEL: chromium
+          # Use Playwright's bundled headless shell. The full Chromium channel
+          # can crash Playwright's frame tracker during cross-process swaps.
+          BROWSER_CHANNEL: headless
         run: npm run test:browser
 
       - name: Test real relay networking
         env:
-          BROWSER_CHANNEL: chromium
+          BROWSER_CHANNEL: headless
         run: npm run test:relay
 
       - name: Prepare download
