@@ -1,7 +1,8 @@
 import * as rewrite from "./index.mjs";
 
 import { parse_css } from "./css.mjs";
-import { ctx, run_script, get_dom_property } from "../context.mjs";
+import { ctx, get_dom_property } from "../context.mjs";
+import {rewrite_event_attributes} from '../event_attributes.mjs';
 
 const rewritten_elements = new WeakSet();
 
@@ -28,23 +29,7 @@ function rewrite_element_single(element) {
     promise = rewrite.iframe(element);
   let promises = [promise];
 
-  //patch event handler attributes for all tags
-  for (const item of [...get_dom_property(element, "attributes")]) {
-    let attribute = item.name;
-    if (!attribute.startsWith("on")) continue;
-    let handler_script = Element.prototype.getAttribute.call(element, attribute);
-
-    Element.prototype.setAttribute.call(element, "__" + attribute, handler_script);
-    Element.prototype.removeAttribute.call(element, attribute);
-    // Event attributes are function bodies with an event argument and a native
-    // element receiver. Installing a property handler also preserves return
-    // false cancellation, replacement through .onclick, and handler identity.
-    let handler;
-    element[attribute] = function(event) {
-      handler ||= run_script('(function(event){\n'+handler_script+'\n})');
-      return handler.call(this,event);
-    };
-  }
+  rewrite_event_attributes(element);
 
   //rewrite inline styles
   let inline_style = Element.prototype.getAttribute.call(element, "style");
