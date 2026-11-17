@@ -54,12 +54,17 @@ const summary=(page,proxy)=>read(page,proxy,'({title:document.title,heading:docu
 async function interact(page,proxy,site){
   const surface=proxy?page.frameLocator('iframe[frame-id]'):page;
   if(site.id==='react'){
-    // This article initializes lazy embedded examples while navigating away;
-    // their contentWindow.location requests must also stay behind the relay.
-    await page.waitForTimeout(1200);
+    // Compile the final embedded example and exercise shared React state before
+    // testing article navigation. Every resource must stay behind the relay.
+    await surface.locator('iframe').last().scrollIntoViewIfNeeded();
+    const counter=surface.frameLocator('iframe').last();
+    const button=counter.getByRole('button',{name:'Clicked 0 times',exact:true}).first();
+    await button.waitFor({state:'visible',timeout:25000});await button.click();
+    await counter.getByRole('button',{name:'Clicked 1 times',exact:true}).first().waitFor();
+    const counters=await counter.locator('button').allTextContents();
     await surface.locator('a[href="/learn/installation"]:visible').first().click();
     await wait(page,proxy,'location.pathname==="/learn/installation"&&document.title.includes("Installation")');
-    return read(page,proxy,'({path:location.pathname,title:document.title})');
+    return {...await read(page,proxy,'({path:location.pathname,title:document.title})'),counters};
   }
   if(site.id==='github'){
     await surface.locator('a[href="/octocat/Hello-World/blob/master/README"]:visible').first().click();
@@ -103,7 +108,7 @@ try{
       const response=await native.goto(site.url,{waitUntil:'domcontentloaded'});
       assert.ok(response.ok(),'Native page returned '+response.status());
       await native.waitForTimeout(1000);
-      result.native={status:response.status(),...await summary(native,false),interaction:await deadline(interact(native,false,site),'Native interaction')};
+      result.native={status:response.status(),...await summary(native,false),interaction:await deadline(interact(native,false,site),'Native interaction',site.id==='react'?40000:25000)};
     }catch(error){result.status='baseline-unavailable';result.error=error.message;}
     finally{await nativeContext.close();}
     if(!result.native){results.push(result);console.log(JSON.stringify(result));continue;}
@@ -119,7 +124,7 @@ try{
       await page.evaluate(port=>sandstone.network.set_websocket('ws://127.0.0.1:'+port+'/'),server.address().port);
       await deadline(page.evaluate(url=>main_frame.navigate_to(url),site.url),'Proxy navigation');
       await page.waitForTimeout(1000);
-      result.proxy={...await summary(page,true),interaction:await deadline(interact(page,true,site),'Proxy interaction')};
+      result.proxy={...await summary(page,true),interaction:await deadline(interact(page,true,site),'Proxy interaction',site.id==='react'?40000:25000)};
       assert.equal(result.proxy.title,result.native.title,'Initial document title differs');
       assert.ok(result.proxy.links>0,'No proxied links rendered');
       assert.deepEqual(result.proxy.interaction,result.native.interaction,'Interaction result differs from native');

@@ -1,14 +1,15 @@
 import { parse } from "meriyah";
 
-// Discover literal and constant importScripts URLs without running page code.
+// Discover literal imports and declared lazy bundle assets without running code.
 // Unresolved calls are handled by an isolated, network-disabled discovery worker.
-export function worker_imports(source, base) {
+export function worker_imports(source, base, {scriptURL=base}={}) {
   let ast;
   try { ast = parse(source, {webcompat: true, next: true}); }
   catch { return {urls: [], dynamic: false}; }
   const urls = new Set();
   let dynamic = false;
   const constants = new Map();
+  const member=node=>node?.type==='MemberExpression'?(node.computed?node.property.value:node.property.name):undefined;
   function value(node, scope) {
     if (!node) return undefined;
     if (node.type === "Literal") return node.value;
@@ -42,6 +43,23 @@ export function worker_imports(source, base) {
     }
     if (node.type === "CallExpression") {
       const callee = node.callee;
+      // Parcel registers lazy bundle IDs and filenames in a flat asset table.
+      // These chunks can be imported after the first message, when a discovery
+      // worker cannot observe the call. Read the declared table without running
+      // its registration function or arbitrary JavaScript/JSON expressions.
+      if(member(callee)==='register'&&node.arguments[0]?.type==='CallExpression'&&member(node.arguments[0].callee)==='getBundleURL'){
+        const argument=node.arguments[1];let assets;
+        if(argument?.type==='CallExpression'&&member(argument.callee)==='parse'&&argument.callee.object.type==='Identifier'&&argument.callee.object.name==='JSON'){
+          const text=value(argument.arguments[0],scope);
+          if(typeof text==='string')try{assets=JSON.parse(text);}catch{}
+        }else if(argument?.type==='ArrayExpression')assets=argument.elements.map(item=>value(item,scope));
+        if(Array.isArray(assets)&&assets.length%2===0&&assets.every(item=>typeof item==='string')){
+          for(let i=1;i<assets.length;i+=2){
+            if(!/\.(?:m?js)(?:[?#]|$)/i.test(assets[i]))continue;
+            try{urls.add(new URL(assets[i],scriptURL).href);}catch{}
+          }
+        }
+      }
       const imports = callee.type === "Identifier" && callee.name === "importScripts" || callee.type === "MemberExpression" &&
         (callee.computed ? callee.property.value === "importScripts" : callee.property.name === "importScripts");
       if (imports) for (const argument of node.arguments) {
@@ -59,11 +77,14 @@ export function worker_imports(source, base) {
   return {urls: [...urls], dynamic};
 }
 
-export async function prefetch_worker_scripts(source, base, fetch, cache = new Map()) {
-  const queue = [source];
+export async function prefetch_worker_scripts(source, base, fetch, cache = new Map(), source_urls=new Map(), scriptURL=base) {
+  const queue = [{source,url:scriptURL}];
+  if(!cache.has(scriptURL))cache.set(scriptURL,source);
+  if(!source_urls.has(scriptURL))source_urls.set(scriptURL,scriptURL);
   let dynamic = false;
   while (queue.length) {
-    const next = worker_imports(queue.shift(), base);
+    const entry=queue.shift();
+    const next = worker_imports(entry.source, base,{scriptURL:entry.url});
     dynamic ||= next.dynamic;
     for (const url of next.urls) {
       if (cache.has(url)) continue;
@@ -73,9 +94,11 @@ export async function prefetch_worker_scripts(source, base, fetch, cache = new M
         if (!response.ok) continue;
         const text = await response.text();
         cache.set(url, text);
-        queue.push(text);
+        const final_url=response.url||url;
+        source_urls.set(url,final_url);
+        queue.push({source:text,url:final_url});
       } catch {}
     }
   }
-  return {cache, dynamic};
+  return {cache, dynamic,source_urls};
 }

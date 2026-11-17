@@ -50,8 +50,9 @@ export function fakeImportScripts(...paths) {
     }
     if (typeof source !== "string") throw new DOMException(`Worker script is unavailable: ${url}`, "NetworkError");
     if (!imported_blobs.has(url)) {
-      const rewritten = parser.rewrite_js(source, {url,sourceURL:url});
-      imported_blobs.set(url, network.create_blob_url(new Blob([rewritten], {type: "text/javascript"}), url));
+      const scriptURL=worker_options?.source_urls?.[url]||url;
+      const rewritten = parser.rewrite_js(source, {url:scriptURL,sourceURL:scriptURL});
+      imported_blobs.set(url, network.create_blob_url(new Blob([rewritten], {type: "text/javascript"}), scriptURL));
     }
     return imported_blobs.get(url);
   });
@@ -60,6 +61,7 @@ export function fakeImportScripts(...paths) {
 
 // Invoked by the native worker bootstrap, in its own thread and opaque origin.
 export function initialize_worker(options) {
+  options.source??=options.sources?.[options.url];
   worker_options = options;
   loader.set_worker_context(options);
   update_ctx();
@@ -137,6 +139,7 @@ export class FakeWorker extends EventTarget {
   #bootstrap;
   #controller = new AbortController();
   #unload;
+  #source_urls=new Map();
 
   constructor(url, options = {}) {
     super();
@@ -162,7 +165,7 @@ export class FakeWorker extends EventTarget {
 
   #payload(source, url, sources, probe = false) {
     return {
-      source, url, sources: Object.fromEntries(sources), probe,
+      source:sources.get(url)===source?undefined:source, url, sources: Object.fromEntries(sources), source_urls:Object.fromEntries(this.#source_urls),probe,
       frame_id: this.#id, token: this.#token, type: this.#options.type,
       credentials: this.#options.credentials, runtime_src: loader.runtime_src,
       crypto_available: loader.crypto_available,
@@ -207,7 +210,9 @@ export class FakeWorker extends EventTarget {
         if (!response.ok) continue;
         const script = await response.text();
         sources.set(missing, script);
-        await prefetch_worker_scripts(script, url, resource => network.fetch(resource, {signal: this.#controller.signal}), sources);
+        const final_url=response.url||missing;
+        this.#source_urls.set(missing,final_url);
+        await prefetch_worker_scripts(script, url, resource => network.fetch(resource, {signal: this.#controller.signal}), sources,this.#source_urls,final_url);
       } catch {}
     }
   }
@@ -220,7 +225,7 @@ export class FakeWorker extends EventTarget {
     const url = response.url || this.#url;
     let sources = new Map();
     if (this.#options.type === "classic") {
-      const prefetched = await prefetch_worker_scripts(source, url, resource => network.fetch(resource, {signal: this.#controller.signal}));
+      const prefetched = await prefetch_worker_scripts(source, url, resource => network.fetch(resource, {signal: this.#controller.signal}),sources,this.#source_urls);
       sources = prefetched.cache;
       if (prefetched.dynamic) await this.#probe(source, url, sources);
     }
