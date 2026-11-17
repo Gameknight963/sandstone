@@ -148,6 +148,12 @@ export function clone_media(source,copy,inactive=false){
   return true;
 }
 export function capture_media(source){
+  if(globalThis.Attr&&source instanceof Attr){
+    const authored=prepared.get(attr_owner.call(source));
+    if(source.namespaceURI===null&&authored?.has(source.localName)){
+      const value=authored.get(source.localName);return copy=>{attr_value.set.call(copy,value);return true;};
+    }
+  }
   const current=prepared.get(source);if(!current)return;
   const authored=new Map(current);
   return (copy,inactive=false)=>{

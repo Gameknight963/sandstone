@@ -128,6 +128,10 @@ export function clone_svg_resource(source,copy,inactive=false){
   return false;
 }
 export function capture_svg_resource(source){
+  if(A&&source instanceof Attr){
+    const state=states.get(owner(source));
+    if(state&&resource_attr(source)){const authored=canonical(state,source);return copy=>{fields.value.set.call(copy,authored);return true;};}
+  }
   const state=states.get(source);if(!state)return;
   const mirror=clone.call(state.mirror,true);
   return (copy,inactive=false)=>{

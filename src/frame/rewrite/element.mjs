@@ -59,10 +59,6 @@ function rewrite_element_single(element) {
     }
   }
 
-  EventTarget.prototype.addEventListener.call(element, "focus", () => {
-    ctx.document.activeElement = element;
-  })
-
   return promises;
 }
 

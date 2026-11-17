@@ -2,7 +2,7 @@ import * as rewrite from './rewrite/index.mjs';
 import {clone_media,set_media_active,capture_media,observe_media_container} from './rewrite/media.mjs';
 import {clone_svg_resource,is_svg_resource,rewrite_svg_resource,set_svg_active,capture_svg_resource} from './svg_resources.mjs';
 import {rewrite_event_attributes} from './event_attributes.mjs';
-import {shadow_root,clonable_shadow} from './shadow_roots.mjs';
+import {shadow_root,clonable_shadow,capture_shadow_state} from './shadow_roots.mjs';
 import {clone_script,mark_script_connected,capture_script} from './rewrite/script.mjs';
 import {copy_resource_attributes,capture_resource_attributes} from './resource_attributes.mjs';
 import {clone_style,capture_style} from './rewrite/style.mjs';
@@ -56,7 +56,7 @@ export function copy_resources(source,copy,inactive=false,prime=false){
   copy_resource_node(source,copy,inactive,prime);
   const originals=[...children.call(source)],copies=[...children.call(copy)];
   for(let i=0;i<Math.min(originals.length,copies.length);i++)copy_resources(originals[i],copies[i],inactive,prime);
-  if(source instanceof Element&&copy instanceof Element){const a=clonable_shadow(source),b=shadow_root(copy);if(a&&b)copy_resources(a,b,inactive,prime);}
+  if(source instanceof Element&&copy instanceof Element){const a=clonable_shadow(source),b=shadow_root(copy);if(a&&b){capture_shadow_state(a)(b);copy_resources(a,b,inactive,prime);}}
   if(source instanceof HTMLTemplateElement&&copy instanceof HTMLTemplateElement)copy_resources(source.content,copy.content,true,prime);
   return copy;
 }
@@ -64,7 +64,7 @@ export function copy_resources(source,copy,inactive=false,prime=false){
 export function capture_resources(source,shallow=false){
   const media=capture_media(source),svg=capture_svg_resource(source),script=capture_script(source),attributes=capture_resource_attributes(source),style=capture_style(source);
   const descendants=shallow?[]:[...children.call(source)].map(node=>capture_resources(node));
-  const root=source instanceof Element&&clonable_shadow(source),shadow=root&&capture_resources(root);
+  const root=source instanceof Element&&clonable_shadow(source),shadow=root&&capture_resources(root),shadow_state=root&&capture_shadow_state(root);
   const template=source instanceof HTMLTemplateElement&&capture_resources(source.content);
   return (copy,inactive=false,prime=false)=>{
     if(copy===source)return;
@@ -72,7 +72,7 @@ export function capture_resources(source,shallow=false){
     if(restored&&!inactive)rewrite_event_attributes(copy);
     script?.(copy,prime);attributes(copy);style?.(copy,shallow);
     const targets=[...children.call(copy)];for(let i=0;i<Math.min(descendants.length,targets.length);i++)descendants[i](targets[i],inactive,prime);
-    if(shadow&&copy instanceof Element){const root=shadow_root(copy);if(root)shadow(root,inactive,prime);}
+    if(shadow&&copy instanceof Element){const root=shadow_root(copy);if(root){shadow_state(root);shadow(root,inactive,prime);}}
     if(template&&copy instanceof HTMLTemplateElement)template(copy.content,true,prime);
   };
 }

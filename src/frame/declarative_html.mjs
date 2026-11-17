@@ -1,7 +1,7 @@
 import {parse,parseFragment} from 'parse5';
 import {parsing_context} from './scripting_html.mjs';
-import {remember_declarative_root,remember_shadow_root,is_declarative_root,shadow_root} from './shadow_roots.mjs';
-import {native_attach_shadow as attach} from './dom_operations.mjs';
+import {remember_declarative_root,remember_shadow_root,is_declarative_root,shadow_root,shadow_mode,remember_shadow_mode,capture_shadow_state} from './shadow_roots.mjs';
+import {native_attach_shadow as attach,with_dom_access} from './dom_operations.mjs';
 
 const html='http://www.w3.org/1999/xhtml',E=globalThis.Element?.prototype,N=globalThis.Node?.prototype;
 const get=E?.getAttribute,set=E?.setAttribute,remove=N?.removeChild,append=N?.appendChild,replace=N?.replaceChild,clone=N?.cloneNode;
@@ -25,8 +25,10 @@ const managed=new WeakMap();
 let sequence=0;
 
 function root_shell(host,template){
-  const shell=clone.call(host,false);append.call(shell,clone.call(template,false));
-  let replacement;
+  const shell=clone.call(host,false),declaration=clone.call(template,false),logical=get.call(template,'shadowrootmode').toLowerCase();
+  if(logical==='closed'&&has.call(template,'shadowrootclonable'))set.call(declaration,'shadowrootmode','open');
+  append.call(shell,declaration);
+  let replacement,observed=false;
   if(local.call(host)==='body'){
     // Fragment parsing ignores a body start tag. Use a private full document,
     // then adopt its still-empty native declaration before moving any content.
@@ -34,13 +36,19 @@ function root_shell(host,template){
     adopt.call(owner.call(host),replacement);
   }else{
     const holder=create.call(owner.call(host),html,'div',{customElementRegistry:registry?.call(host)});
-    native_set.call(holder,outer.call(shell));replacement=children.call(holder)[0];
+    with_dom_access(element=>{
+      if(observed)return;
+      try{if(parent.call(element)!==holder)return;}catch{return;}
+      const root=shadow_root(element);if(!root)return;
+      observed=true;remember_shadow_mode(root,logical);remember_declarative_root(element,root,true);
+    },()=>native_set.call(holder,outer.call(shell)));replacement=children.call(holder)[0];
   }
   // HTML serialization cannot retain every DOM attribute namespace or NUL.
   // Restore the exact native attributes before exposing the replacement node.
   for(const attribute of [...attributes.call(replacement)])remove_attribute_node.call(replacement,attribute);
   for(const attribute of attributes.call(host))set_attribute_node.call(replacement,clone.call(attribute,false));
-  return {host:replacement,root:attach.call(replacement,{mode:get.call(template,'shadowrootmode').toLowerCase()})};
+  const accessible=shadow_root(replacement),root=accessible||attach.call(replacement,{mode:logical});
+  remember_shadow_mode(root,logical);return {host:replacement,root,native:!!accessible,declared:!observed||is_declarative_root(root)};
 }
 
 // Importing first into an inert document keeps native custom-element
@@ -49,11 +57,12 @@ function root_shell(host,template){
 export function import_declarative_host(source,copy,source_root){
   const metadata=managed.get(source_root);if(!metadata)return copy;
   const existing=shadow_root(copy);
-  if(existing){managed.set(existing,metadata);if(is_declarative_root(source_root))remember_declarative_root(copy,existing);return copy;}
+  if(existing){managed.set(existing,metadata);capture_shadow_state(source_root)(existing);return copy;}
   const projection=native_get.call(source,{shadowRoots:[source_root]});let end=0,quote='';
   for(;end<projection.length;end++){const c=projection[end];if(quote){if(c===quote)quote='';}else if(c==='"'||c==="'")quote=c;else if(c==='>'){end++;break;}}
   const holder=create.call(owner.call(copy),html,'div');inner.call(holder,projection.slice(0,end)+'</template>');
   const template=children.call(holder)[0];if(metadata.keepNull)set_attribute.call(template,'shadowrootcustomelementregistry','');else remove_attribute.call(template,'shadowrootcustomelementregistry');
+  set.call(template,'shadowrootmode',shadow_mode(source_root));
   const result=root_shell(copy,template);managed.set(result.root,metadata);
   const source_registry=root_registry?.call(source_root);
   if(source_registry&&initialize&&!root_registry.call(result.root)){
@@ -61,7 +70,7 @@ export function import_declarative_host(source,copy,source_root){
     // instead follow the native adoption steps into the destination document.
     try{initialize.call(source_registry,result.root);}catch(error){if(error.name!=='NotSupportedError')throw error;}
   }
-  if(is_declarative_root(source_root))remember_declarative_root(result.host,result.root);else remember_shadow_root(result.host,result.root);
+  if(is_declarative_root(source_root))remember_declarative_root(result.host,result.root,result.native);else remember_shadow_root(result.host,result.root);
   for(const child of [...children.call(copy)])append.call(result.host,child);
   for(const child of children.call(source_root))append.call(result.root,native_import.call(owner.call(copy),child,true));
   const container=parent.call(copy);if(container)replace.call(container,result.host,copy);
@@ -96,15 +105,15 @@ export function defer_declarative_roots(context,value,whole_document=false,scrip
           set.call(node,'shadowrootmode',original);
           const host=parent.call(node);
           if(host instanceof Element&&namespace.call(host)===html&&host!==container&&!shadow_root(host)){
-            let root,replacement;
+            let root,replacement,native,declared;
             try{
               // Parse an empty native declaration to retain registry inheritance,
               // internals visibility, and current/future shadow metadata. Obtain
               // its reference before installing any authored content.
-              const result=root_shell(host,node);replacement=result.host;root=result.root;
+              const result=root_shell(host,node);replacement=result.host;root=result.root;native=result.native;declared=result.declared;
             }catch{}
             if(root){
-              remember_declarative_root(replacement,root);
+              if(declared)remember_declarative_root(replacement,root,native);else remember_shadow_root(replacement,root);
               managed.set(root,{keepNull:has.call(node,'shadowrootcustomelementregistry')});
               for(const child of [...children.call(node.content)])append.call(root,child);
               remove.call(host,node);for(const child of [...children.call(host)])append.call(replacement,child);

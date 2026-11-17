@@ -1,7 +1,7 @@
 import {serialize,serializeOuter,parseFragment} from 'parse5';
 import {copy_resource_node} from './resource_nodes.mjs';
 import {unwrap_document} from './document_identity.mjs';
-import {shadow_root,track_shadow_root} from './shadow_roots.mjs';
+import {shadow_root,track_shadow_root,shadow_mode} from './shadow_roots.mjs';
 import {native_attach_shadow as attach,mark_inert_node} from './dom_operations.mjs';
 
 const N=globalThis.Node?.prototype,E=globalThis.Element?.prototype,D=globalThis.Document?.prototype;
@@ -56,7 +56,7 @@ function snapshot(source,options){
       if(root&&(selected.has(root)||options.serializableShadowRoots&&shadow_serializable?.call(root))){
         // Let the native serializer supply flag names and their order, including
         // newer shadow metadata. XML copies use private roots for namespace scope.
-        const native=element_getHTML.call(node,native_options({shadowRoots:[root],serializableShadowRoots:false})),end=native.indexOf('>');
+        const native=element_getHTML.call(node,native_options({shadowRoots:[root],serializableShadowRoots:false})).replace(/(\sshadowrootmode=")[^"]*"/,'$1'+shadow_mode(root)+'"'),end=native.indexOf('>');
         let target;
         if(xml){target=attach.call(copy,{mode:'open'});projections.push({host:copy,root:target,header:native.slice(0,end+1)});}
         else{

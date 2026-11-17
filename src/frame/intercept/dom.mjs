@@ -6,7 +6,8 @@ import {mutate_document_base} from '../document_base.mjs';
 import {reconcile_iframes} from '../iframe_lifecycle.mjs';
 import {html_fragment,range_fragment,setter_fragment,setter_input,parsed_document} from '../html_fragments.mjs';
 import {template_host} from '../template_hosts.mjs';
-import {copy_resources,prepare_resources,pause_resources,mark_connected_scripts,mark_fragment_scripts,node_document,active_document,connected_node,walk_resources} from '../resource_nodes.mjs';
+import {copy_resources,capture_resources,prepare_resources,pause_resources,mark_connected_scripts,mark_fragment_scripts,node_document,active_document,connected_node,walk_resources} from '../resource_nodes.mjs';
+import {perform_node_copy} from '../node_copy.mjs';
 import {detach_media_attribute,observe_media_container} from '../rewrite/media.mjs';
 import {detach_svg_attribute} from '../svg_resources.mjs';
 import {shadow_root} from '../shadow_roots.mjs';
@@ -58,11 +59,12 @@ if (globalThis.Node) {
   const clone=Node.prototype.cloneNode;
   const kind=Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get;
   Node.prototype.cloneNode=new Proxy(clone,{apply(target,receiver,args){
-    let copy=Reflect.apply(target,receiver,args);
+    kind.call(receiver);
+    if(globalThis.ShadowRoot&&receiver instanceof ShadowRoot)return Reflect.apply(target,receiver,args);
+    const restore=capture_resources(receiver,!args[0]);
     // Source attributes may temporarily be absent or contain local blobs.
     // Restore their virtual values without ever assigning remote native URLs.
-    copy=copy_resources(receiver,copy,!active_document(node_document(copy)));
-    return copy;
+    return perform_node_copy(receiver,()=>Reflect.apply(target,receiver,args),copy=>{restore(copy,!active_document(node_document(copy)));return copy;});
   }});
   const import_node=Document.prototype.importNode,adopt_node=Document.prototype.adoptNode;
   const document_view=Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get;
@@ -70,10 +72,10 @@ if (globalThis.Node) {
   Document.prototype.importNode=new Proxy(import_node,{apply(target,receiver,args){
     const active=!!document_view.call(receiver);
     if(!args.length)return Reflect.apply(target,receiver,args);
-    if(!active){const copy=Reflect.apply(target,receiver,args);return copy_resources(args[0],copy,true,true);}
+    if(!active){if(!(args[0] instanceof Node))return Reflect.apply(target,receiver,args);return perform_node_copy(args[0],()=>Reflect.apply(target,receiver,args),copy=>copy_resources(args[0],copy,true,true));}
     const inert=receiver.implementation.createHTMLDocument('');
-    let copy=Reflect.apply(target,inert,args);
-    copy=copy_resources(args[0],copy,true,true);prepare_resources(copy);
+    if(!(args[0] instanceof Node)){let copy=Reflect.apply(target,inert,args);copy=copy_resources(args[0],copy,true,true);prepare_resources(copy);adopt_node.call(receiver,copy);if(upgrade&&receiver===document)upgrade.call(registry,copy);return copy;}
+    let copy=perform_node_copy(args[0],()=>Reflect.apply(target,inert,args),copy=>copy_resources(args[0],copy,true,true));prepare_resources(copy);
     adopt_node.call(receiver,copy);
     if(upgrade&&receiver===document)upgrade.call(registry,copy);
     return copy;

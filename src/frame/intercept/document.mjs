@@ -58,8 +58,7 @@ export function document_referrer_policy(root = globalThis.document) {
 }
 
 const internal = {
-  currentScript: null,
-  activeElement: null
+  currentScript: null
 }
 
 class CustomDocument {
@@ -88,8 +87,7 @@ class CustomDocument {
   get referrer() {return loader.document_referrer}
   get currentScript() {return internal.currentScript}
   set currentScript(value) {internal.currentScript = value}
-  get activeElement() {return internal.activeElement || document.body}
-  set activeElement(value) {internal.activeElement = value;}
+  get activeElement() {return this.__target__.activeElement}
 
   createElement(tag_name, options) {
     return prepare_media(this.__target__.createElement(tag_name, options));
