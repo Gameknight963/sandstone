@@ -122,7 +122,7 @@ export async function message_listener(event, target) {
   }
 }
 
-export async function call_procedure(target, procedure, args) {
+export async function call_procedure(target, procedure, args, {signal} = {}) {
   if (globalThis.HTMLIFrameElement && target instanceof globalThis.HTMLIFrameElement) {
     target = unwrap_global_target(target.contentWindow || target);
   }
@@ -134,11 +134,17 @@ export async function call_procedure(target, procedure, args) {
   };
 
   return await new Promise((resolve, reject) => {
+    const cleanup=()=>{delete rpc_requests[msg.id];signal?.removeEventListener('abort',abort);};
+    const abort=()=>{cleanup();reject(signal.reason||new DOMException('The operation was aborted','AbortError'));};
+    if(signal?.aborted){abort();return;}
     rpc_requests[msg.id] = (reply) => {
+      cleanup();
       if (reply.success) resolve(reply.value);
       else reject(reply.value);
     }
-    target.postMessage(msg, {targetOrigin: "*"});  
+    signal?.addEventListener('abort',abort,{once:true});
+    try{target.postMessage(msg, {targetOrigin: "*"});}
+    catch(error){cleanup();reject(error);}
   });
 }
 

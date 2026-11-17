@@ -41,6 +41,8 @@ const iframeWindowTest=await readFile(new URL('iframe-window.playwright.js',impo
 const verifyIframeWindow=runInThisContext(`(${iframeWindowTest})`);
 const windowMessagesTest=await readFile(new URL('window-messages.playwright.js',import.meta.url),'utf8');
 const verifyWindowMessages=runInThisContext(`(${windowMessagesTest})`);
+const iframeRacesTest=await readFile(new URL('iframe-races.playwright.js',import.meta.url),'utf8');
+const verifyIframeRaces=runInThisContext(`(${iframeRacesTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 async function timed(operation, label) {
@@ -94,6 +96,7 @@ try {
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
     result.passed.push(...await timed(verifyIframeWindow(page), 'Frame window fixture'));
     result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
+    result.passed.push(...await timed(verifyIframeRaces(page), 'Iframe race fixture'));
     result.passed.push(...await timed(verifyLinks(page), 'Link event fixture'));
     result.passed.push(...await timed(verifyAttributes(page), 'Event attribute fixture'));
     result.passed.push(...await timed(verifyHyperlinks(page), 'Hyperlink URL fixture'));

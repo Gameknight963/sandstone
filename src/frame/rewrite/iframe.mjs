@@ -18,29 +18,44 @@ export function rewrite_iframe(iframe_element) {
   let iframe_src = iframe_element.src;
   let authored_src = iframe_element.getAttribute('src');
   let iframe_url = "";
+  let generation=0,active_request,commit=Promise.resolve();
+  const retire=()=>{
+    generation++;active_request?.abort();iframe_url='';
+    const release=commit.then(async()=>{
+      if(registered){await unregister(frame_id);registered=false;}
+      loader.child_navigators.delete(frame_id);
+    });
+    commit=release.catch(console.error);
+  };
 
   let fetch_src = async (value, form_data = null, navigation = {}) => {
+    const target_url=convert_url(value,ctx.document.baseURI);
+    const revision=++generation;
+    active_request?.abort();
+    const controller=active_request=new AbortController();
+    const current=()=>revision===generation;
     const previous_url=iframe_url;
     //download the proxied html
     iframe_element.setAttribute("__src", value);
-    iframe_url = convert_url(value, ctx.document.baseURI);
-    console.log("navigating iframe to", iframe_url);
-    let final_url = iframe_url;
+    console.log("navigating iframe to", target_url);
+    let final_url = target_url;
     let error; //possible network error
     let html;
     let referrer_policy, document_referrer;
     try {
-      let response = await network.fetch(iframe_url, {
+      let response = await network.fetch(target_url, {
+        signal:controller.signal,
         mode:'navigate',sandstone_frame_id:navigation.from_child ? frame_id : loader.frame_id,
         cache:navigation.history_mode === 'reload' ? 'no-cache' : 'default',
         referrerPolicy:navigation.referrerPolicy || iframe_element.referrerPolicy || document_referrer_policy(),
         ...(form_data ? {
         method: "POST", headers: form_data.headers || {"Content-Type": form_data.enctype}, body: form_data.body
       } : {})});
+      if(!current())return;
       if(is_download(response.headers)){
-        try{return {download:true,filename:await save_response(response)};}
-        catch(error){console.error(error);return {download:true};}
-        finally{iframe_url=previous_url;iframe_element.setAttribute('__src',previous_url);}
+        try{const filename=await save_response(response);return current()?{download:true,filename}:undefined;}
+        catch(error){if(!current())return;console.error(error);return {download:true};}
+        finally{if(current())iframe_element.setAttribute('__src',previous_url);}
       }
       html = await response.text();
       final_url = response.url;
@@ -48,76 +63,94 @@ export function rewrite_iframe(iframe_element) {
       document_referrer = response.request_referrer || '';
     }
     catch (e) {
+      if(!current())return;
       error = util.format_error(e);
     }
-    if (registered) {await unregister(frame_id, {keep_history: true});registered=false;}
-    
-    //load the frame runtime
-    let loader_blob = new Blob([loader.frame_html], {type: "text/html"});
-    src_descriptor.set.call(iframe_element, network.create_blob_url(loader_blob));
-    await new Promise((resolve) => {
-      iframe_element.addEventListener("load", (event) => {
-        event.stopImmediatePropagation();
-        resolve();
-      }, {once: true});
-    })
-    
-    //create the rpc message channel
-    let msg_channel = new MessageChannel();
-    rpc.attach_host(msg_channel.port1, frame_id);
-    rpc.set_host(iframe_element, msg_channel.port2);
+    if(!current())return;
+    // Fetches may overlap, but installation and host registration must finish
+    // in order. Even a superseded installation records its registration reply
+    // so the next one can unregister it before claiming the same frame ID.
+    const installation=commit.then(async()=>{
+      if(!current())return;
+      if (registered) {await unregister(frame_id, {keep_history: true});registered=false;}
+      if(!current())return;
 
-    //create additional rpc target for sending the html
-    let msg_channel_2 = new MessageChannel();
-    let rpc_target = new rpc.RPCTarget(msg_channel_2.port1);
-    rpc_target.onmessage = rpc.message_listener;
-    msg_channel.port1.start();
-    rpc.set_host(iframe_element, msg_channel_2.port2);
-    let send_page = rpc.create_rpc_wrapper(rpc_target, "html");
-
-    //load persisted local storage if needed
-    let iframe_origin = new URL(iframe_url).origin;
-    let local_storage;
-    if (iframe_origin === ctx.location.origin)
-      local_storage = ctx.localStorage._get_entries();
-
-    iframe_url=final_url;
-    const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode});
-    registered = true;
-    loader.child_navigators.set(frame_id, fetch_src);
-    try {
-      await send_page({
-        url: final_url,
-        html: html, 
-        frame_id: frame_id,
-        error: error,
-        ...state,
-        referrer_policy,document_referrer,
-        settings: {},
-        default_settings: loader.default_settings,
-        version: loader.version,
-        is_iframe: true,
-        message_parent:{token:message_token},
-        message_origin:iframe_element.hasAttribute('sandbox')&&!iframe_element.sandbox.contains('allow-same-origin')?'null':undefined
+      //load the frame runtime
+      let loader_blob = new Blob([loader.frame_html], {type: "text/html"});
+      await new Promise((resolve) => {
+        const cleanup=()=>{iframe_element.removeEventListener('load',loaded);controller.signal.removeEventListener('abort',aborted);};
+        const aborted=()=>{cleanup();resolve();};
+        const loaded=event=>{
+          event.stopImmediatePropagation();
+          cleanup();resolve();
+        };
+        iframe_element.addEventListener('load',loaded);
+        controller.signal.addEventListener('abort',aborted,{once:true});
+        src_descriptor.set.call(iframe_element, network.create_blob_url(loader_blob));
       });
-    }
-    catch (error) {
-      let error_msg = util.format_error(error);
-      await send_page({
-        url: final_url,
-        html: html, 
-        frame_id: frame_id,
-        error: error_msg,
-        local_storage: undefined,
-        settings: {},
-        default_settings: loader.default_settings,
-        version: loader.version
-      });
-    }
+      if(!current())return;
 
-    iframe_element.dispatchEvent(new Event("load"));
+      //create the rpc message channel
+      let msg_channel = new MessageChannel();
+      rpc.attach_host(msg_channel.port1, frame_id);
+      rpc.set_host(iframe_element, msg_channel.port2);
+
+      //create additional rpc target for sending the html
+      let msg_channel_2 = new MessageChannel();
+      let rpc_target = new rpc.RPCTarget(msg_channel_2.port1);
+      rpc_target.onmessage = rpc.message_listener;
+      msg_channel.port1.start();
+      rpc.set_host(iframe_element, msg_channel_2.port2);
+      const send_page=options=>rpc.call_procedure(rpc_target,'html',[options],{signal:controller.signal});
+
+      //load persisted local storage if needed
+      let iframe_origin = new URL(final_url).origin;
+      let local_storage;
+      if (iframe_origin === ctx.location.origin)
+        local_storage = ctx.localStorage._get_entries();
+
+      iframe_url=final_url;
+      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode});
+      registered = true;
+      if(!current())return;
+      loader.child_navigators.set(frame_id, fetch_src);
+      try {
+        await send_page({
+          url: final_url,
+          html: html,
+          frame_id: frame_id,
+          error: error,
+          ...state,
+          referrer_policy,document_referrer,
+          settings: {},
+          default_settings: loader.default_settings,
+          version: loader.version,
+          is_iframe: true,
+          message_parent:{token:message_token},
+          message_origin:iframe_element.hasAttribute('sandbox')&&!iframe_element.sandbox.contains('allow-same-origin')?'null':undefined
+        });
+      }
+      catch (error) {
+        if(!current())return;
+        let error_msg = util.format_error(error);
+        await send_page({
+          url: final_url,
+          html: html,
+          frame_id: frame_id,
+          error: error_msg,
+          local_storage: undefined,
+          settings: {},
+          default_settings: loader.default_settings,
+          version: loader.version
+        });
+      }
+
+      if(current())iframe_element.dispatchEvent(new Event("load"));
+    });
+    commit=installation.catch(()=>{});
+    return installation.catch(error=>{if(current())throw error;});
   }
-  
+
   let src_descriptor = intercept_property(iframe_element, "src", {
     get() {
       if(authored_src===null)return '';
@@ -128,11 +161,13 @@ export function rewrite_iframe(iframe_element) {
       authored_src=value;
       let remote=false;
       try{remote=util.url_is_http(value);}catch{}
-      if (!remote || !value)
+      if (!remote || !value){
+        retire();
         src_descriptor.set.call(iframe_element, value);
+      }
       else {
         src_descriptor.set.call(iframe_element, "");
-        fetch_src(value);
+        fetch_src(value).catch(console.error);
       }
     }
   });
@@ -157,7 +192,7 @@ export function rewrite_iframe(iframe_element) {
   proxy_function(iframe_element,'removeAttribute',(target,receiver,args)=>{
     if(receiver!==iframe_element||!args.length)return Reflect.apply(target,receiver,args);
     const name=`${args[0]}`;
-    if(name.toLowerCase()==='src')authored_src=null;
+    if(name.toLowerCase()==='src'){authored_src=null;retire();}
     return Reflect.apply(target,receiver,[name,...args.slice(1)]);
   });
 
