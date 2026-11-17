@@ -9,6 +9,8 @@ export const pending_scripts = [];
 let script_num = 0;
 const classic_types = new Set(["", "application/javascript", "text/javascript", "application/ecmascript", "text/ecmascript"]);
 const records=new WeakMap();
+const parser_scripts=new WeakSet();
+export function mark_parser_script(element){parser_scripts.add(element);}
 const get=globalThis.Element?.prototype.getAttribute,set=globalThis.Element?.prototype.setAttribute,remove=globalThis.Element?.prototype.removeAttribute;
 const N=globalThis.Node?.prototype,append=N?.appendChild,remove_child=N?.removeChild,insert=N?.insertBefore;
 const owner=N&&Object.getOwnPropertyDescriptor(N,'ownerDocument').get,connected=N&&Object.getOwnPropertyDescriptor(N,'isConnected').get;
@@ -29,7 +31,7 @@ export function mark_script_connected(element){
   if(record)record.started=true;
   else if(!view.call(owner.call(element))||element.__rewritten__===true)element.__sandstone_inert__=true;
 }
-function prime_inert_script(element){
+export function prime_inert_script(element){
   // Native preparation in a document with scripting disabled sets the real
   // already-started flag. A private document avoids executing authored code.
   inert??=document.implementation.createHTMLDocument('');
@@ -45,7 +47,7 @@ export function clone_script(source,copy,prime=false,serializing=false){
 }
 export function capture_script(source){
   if(!globalThis.HTMLScriptElement||!(source instanceof HTMLScriptElement))return;
-  const record=records.get(source),started=source.__sandstone_inert__||record&&(record.started||connected.call(source)&&eligible(source,record));
+  const record=records.get(source),started=parser_scripts.has(source)||source.__sandstone_inert__||record&&(record.started||connected.call(source)&&eligible(source,record));
   const type=record?.type(),src=record?.src();
   return (copy,prime=false,serializing=false)=>{
     if(started)copy.__sandstone_inert__=true;

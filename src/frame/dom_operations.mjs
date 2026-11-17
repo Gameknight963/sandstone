@@ -3,6 +3,15 @@
 const hooks=[],construction_hooks=[],constructors=new WeakMap(),parents=new Map();
 const inert_nodes=new WeakSet();
 export const native_attach_shadow=globalThis.Element?.prototype.attachShadow;
+export const native_dom=globalThis.document&&{
+  create:Document.prototype.createElementNS,text:Document.prototype.createTextNode,comment:Document.prototype.createComment,
+  adopt:Document.prototype.adoptNode,append:Node.prototype.appendChild,insert:Node.prototype.insertBefore,remove:Node.prototype.removeChild,
+  attribute:Element.prototype.setAttributeNS,plainAttribute:Element.prototype.setAttribute,attributeNode:Element.prototype.setAttributeNodeNS,
+  inner:Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML').set,
+  data:Object.getOwnPropertyDescriptor(CharacterData.prototype,'data').set,appendData:CharacterData.prototype.appendData,
+  parent:Object.getOwnPropertyDescriptor(Node.prototype,'parentNode').get,owner:Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get,
+  view:Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get,template:Object.getOwnPropertyDescriptor(HTMLTemplateElement.prototype,'content').get
+};
 export function mark_inert_node(node){inert_nodes.add(node);return node;}
 export const is_inert_node=node=>inert_nodes.has(node);
 export const html_constructor_names=[];

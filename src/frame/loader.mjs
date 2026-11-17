@@ -49,6 +49,7 @@ rpc.rpc_handlers["child_navigate"] = (id, url, form_data, navigation) => child_n
 rpc.rpc_handlers.child_window_name=(id,value)=>child_names.get(id)?.(value);
 
 export function eval_script(script_element, script_text) {
+  const previous_script=ctx.document.currentScript;
   ctx.document.currentScript = script_element;
   let script = document.createElement("script");
   script.__rewritten__ = true;
@@ -64,7 +65,7 @@ export function eval_script(script_element, script_text) {
     console.error(e);
   }
   script.remove();
-  ctx.document.currentScript = null;
+  ctx.document.currentScript = previous_script;
   script_element.dispatchEvent(new Event("load"));
 }
 

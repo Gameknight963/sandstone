@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parse,serialize,defaultTreeAdapter as tree} from 'parse5';
+import {parse,parseFragment,serialize,defaultTreeAdapter as tree} from 'parse5';
 import {HTMLInputStream} from '../src/frame/html_input_stream.mjs';
 
 const text=node=>(node.childNodes||[]).map(child=>child.value||text(child)).join('');
@@ -98,4 +98,13 @@ test('Retiring HTML input cancels pending and reentrant parsing without allowing
   assert.throws(()=>new HTMLInputStream({signal:controller.signal}),error=>error===reason);
   const nested=new AbortController(),input=new HTMLInputStream({signal:nested.signal,onScript(){nested.abort(reason);}}),failed=assert.rejects(input.done,error=>error===reason);
   input.write('<script>abort</script><footer>never parsed</footer>');await failed;assert.equal(find(input.document,'footer'),undefined);
+});
+
+test('Fragment input retains table and namespace contexts and publishes completed updates',async()=>{
+  for(const [tag,namespace,source] of [['tbody','http://www.w3.org/1999/xhtml','<tr><td>cell</td></tr>'],['svg','http://www.w3.org/2000/svg','<circle/><foreignObject><p>HTML</p></foreignObject>'],['textarea','http://www.w3.org/1999/xhtml','<b>raw &amp; text']]){
+    const context=tree.createElement(tag,namespace,[]),updates=[],stream=new HTMLInputStream({context,onUpdate:document=>updates.push(serialize(document))});
+    for(let offset=0;offset<source.length;offset+=3)stream.write(source.slice(offset,offset+3));await stream.close();
+    assert.equal(serialize(stream.document),serialize(parseFragment(context,source)));assert.equal(updates.at(-1),serialize(stream.document));
+    assert.ok(updates.length>1);
+  }
 });
