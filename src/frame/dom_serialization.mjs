@@ -14,7 +14,7 @@ const attribute_fields=Object.fromEntries(['name','localName','namespaceURI','pr
 const data=globalThis.CharacterData&&descriptor(CharacterData.prototype,'data').get;
 const content_type=descriptor(D,'contentType')?.get,view=descriptor(D,'defaultView')?.get;
 const create=D?.createElementNS,import_node=D?.importNode,fragment=D?.createDocumentFragment;
-const append=N?.appendChild,set=E?.setAttributeNS,plain_set=E?.setAttribute,remove=E?.removeAttributeNS;
+const append=N?.appendChild,set=E?.setAttributeNS,set_attribute_node=E?.setAttributeNodeNS,remove=E?.removeAttributeNS;
 const element_inner=descriptor(E,'innerHTML'),element_outer=descriptor(E,'outerHTML');
 const shadow_inner=globalThis.ShadowRoot&&descriptor(ShadowRoot.prototype,'innerHTML');
 const NativeSerializer=globalThis.XMLSerializer,native_serialize=NativeSerializer?.prototype.serializeToString;
@@ -34,14 +34,13 @@ function snapshot(source,options){
     const type=kind.call(node);let copy;
     if(type===1){
       const tag=(prefix.call(node)?prefix.call(node)+':':'')+local.call(node);
-      // The HTML parsing APIs can create no-namespace XML elements whose
-      // local name contains a colon. createElementNS rejects those names.
-      copy=namespace.call(node)===null&&tag.includes(':')?import_node.call(inert,node,false):create.call(inert,namespace.call(node),tag);
+      // HTML parsing accepts names that XML-qualified creation rejects or
+      // interprets as a prefix. These cannot name registered custom elements.
+      if(!prefix.call(node)&&local.call(node).includes(':'))copy=import_node.call(inert,node,false);
+      else try{copy=create.call(inert,namespace.call(node),tag);}
+      catch(error){if(error.name!=='InvalidCharacterError')throw error;copy=import_node.call(inert,node,false);}
       mark_inert_node(copy);
-      for(const attribute of attributes.call(node)){
-        const ns=attribute_fields.namespaceURI.call(attribute),name=attribute_fields.name.call(attribute),value=attribute_fields.value.call(attribute);
-        if(ns===null)plain_set.call(copy,name,value);else set.call(copy,ns,name,value);
-      }
+      for(const attribute of attributes.call(node))set_attribute_node.call(copy,clone.call(attribute,false));
     }else if(type===9)copy=inert;
     else if(type===11)copy=options&&xml?attach.call(create.call(inert,'http://www.w3.org/1999/xhtml','div'),{mode:'open'}):fragment.call(inert);
     else copy=import_node.call(inert,node,false);
