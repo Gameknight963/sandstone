@@ -40,12 +40,17 @@ export function prepare_resources(node){
 export function pause_resources(node){walk_resources(node,element=>{set_media_active(element,false);set_svg_active(element,false);});}
 export function mark_connected_scripts(node){walk_resources(node,element=>mark_script_connected(element));}
 export function mark_fragment_scripts(node){walk_resources(node,element=>{if(element instanceof HTMLScriptElement)element.__sandstone_inert__=true;},true);}
-export function copy_resources(source,copy,inactive=false,prime=false){
+export function copy_resource_node(source,copy,inactive=false,prime=false,serializing=false){
   if(source===copy)return;
   const restored=clone_media(source,copy,inactive)||clone_svg_resource(source,copy,inactive);
   if(restored&&!inactive)rewrite_event_attributes(copy);
-  clone_script(source,copy,prime);
-  copy_resource_attributes(source,copy);clone_style(source,copy);
+  clone_script(source,copy,prime,serializing);
+  copy_resource_attributes(source,copy,serializing);
+  if(serializing)capture_style(source,true)?.(copy);else clone_style(source,copy);
+}
+export function copy_resources(source,copy,inactive=false,prime=false){
+  if(source===copy)return;
+  copy_resource_node(source,copy,inactive,prime);
   const originals=[...children.call(source)],copies=[...children.call(copy)];
   for(let i=0;i<Math.min(originals.length,copies.length);i++)copy_resources(originals[i],copies[i],inactive,prime);
   if(source instanceof Element&&copy instanceof Element){const a=clonable_shadow(source),b=shadow_root(copy);if(a&&b)copy_resources(a,b,inactive,prime);}

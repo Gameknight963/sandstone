@@ -6,6 +6,7 @@ import {rewrite_event_attributes} from '../event_attributes.mjs';
 import {is_style_link} from './stylesheet.mjs';
 import {is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
 import {observe_media_container} from './media.mjs';
+import {inline_style_version,remember_inline_style} from '../style_sources.mjs';
 
 const rewritten_elements = new WeakSet();
 
@@ -41,13 +42,19 @@ function rewrite_element_single(element) {
   if (inline_style) {
     const style = get_dom_property(element, "style");
     style.cssText = "";
+    remember_inline_style(element,inline_style);
+    const version=inline_style_version(element);
     let new_css = parse_css(inline_style, ctx.document.baseURI)
     if (typeof new_css === "string") {
       style.cssText = new_css;
+      remember_inline_style(element,inline_style,new_css);
     }
     else {
       promises.push((async () => {
-        style.cssText = await new_css;
+        const css=await new_css;
+        if(inline_style_version(element)!==version)return;
+        style.cssText = css;
+        remember_inline_style(element,inline_style,css);
       })());
     }
   }

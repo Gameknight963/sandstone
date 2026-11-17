@@ -2,6 +2,8 @@ import { ctx, get_dom_property } from '../context.mjs';
 import * as network from '../network.mjs';
 import { prepare_css, restore_css, css_references } from '../css.mjs';
 import { parse_css } from '../rewrite/css.mjs';
+import {style_change,resolved_style,serialized_inline_style} from '../style_sources.mjs';
+import {resource_attribute} from '../resource_attributes.mjs';
 
 const NativeSheet = globalThis.CSSStyleSheet;
 const sheet_bases = new WeakMap();
@@ -71,6 +73,7 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
     declaration = unwrap(declaration);
     const prefix = 'sandstone-css-' + ++sequence + '-';
     const prepared = prepare_css(value === null ? '' : value, prefix, supports);
+    style_change(declaration,prepared.markers);
     const result = operation(declaration, prepared.css);
     if (!prepared.markers.size) return result;
     const expected = snapshot(declaration, prefix);
@@ -82,6 +85,7 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
       const pending = parse_css(accepted, declaration_base(declaration), undefined,
         fontFace ? {...request, fontFace:true} : request);
       Promise.resolve(pending).then(css => {
+        resolved_style(declaration,accepted,css);
         const resolved = scratch_declaration(fontFace);
         text.set.call(resolved, css);
         apply(declaration, expected, resolved);
@@ -129,10 +133,12 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
   for (const owner of new Set(owners.filter(Boolean))) {
     const descriptor = Object.getOwnPropertyDescriptor(owner.prototype, 'style');
     if (!descriptor?.get) continue;
+    const inline=owners.slice(0,3).includes(owner);
+    const remember=element=>{if(inline)resource_attribute(element,'style',()=>serialized_inline_style(element));};
     Object.defineProperty(owner.prototype, 'style', {
       ...descriptor,
-      get() { return wrap(descriptor.get.call(this)); },
-      ...(descriptor.set ? {set(value) { change(descriptor.get.call(this), value, (target, css) => text.set.call(target, css)); }} : {})
+      get() { const declaration=descriptor.get.call(this);remember(this);return wrap(declaration); },
+      ...(descriptor.set ? {set(value) { const declaration=descriptor.get.call(this);remember(this);change(declaration, value, (target, css) => text.set.call(target, css)); }} : {})
     });
   }
   const setAttribute = Element.prototype.setAttribute;

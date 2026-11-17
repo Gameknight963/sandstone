@@ -1,9 +1,3 @@
-import { site_settings } from "../loader.mjs";
-
-export function rewrite_noscript(noscript_element) {
-  if (!site_settings.allow_js)
-    return;
-  let comment = new Comment(noscript_element.innerHTML);
-  noscript_element.innerHTML = "";
-  noscript_element.append(comment);
-}
+// The loader and fragment parsers retain the native scripting-enabled text
+// model. Converting it to comments changes the DOM observed by page scripts.
+export function rewrite_noscript() {}

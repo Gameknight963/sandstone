@@ -1,4 +1,4 @@
-import {parseFragment,serializeOuter,defaultTreeAdapter as tree} from 'parse5';
+import {parse,parseFragment,serializeOuter,defaultTreeAdapter as tree} from 'parse5';
 
 const html='http://www.w3.org/1999/xhtml';
 const attributes=globalThis.Element&&Object.getOwnPropertyDescriptor(Element.prototype,'attributes').get;
@@ -21,9 +21,10 @@ function parsing_context(context){
 // Inert documents have scripting disabled. Replace actual HTML noscript nodes
 // with empty placeholders while native parsing handles every other token, then
 // restore the raw text a scripting-enabled document would have produced.
-export function scripting_html(context,value){
+export function scripting_html(context,value,document=false){
   if(!/<noscript[\t\n\f\r />]/i.test(value))return {value,restore(){}};
-  const parsed=parseFragment(parsing_context(context),value,{scriptingEnabled:true,sourceCodeLocationInfo:true});
+  const options={scriptingEnabled:true,sourceCodeLocationInfo:true};
+  const parsed=document?parse(value,options):parseFragment(parsing_context(context),value,options);
   let marker;
   do{marker='data-sandstone-noscript-'+sequence++;}while(value.toLowerCase().includes(marker));
   const edits=[],contents=[],pending=[parsed];

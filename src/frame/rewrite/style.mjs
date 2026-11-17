@@ -4,6 +4,7 @@ import {prepare_css, restore_css, edit_css_parts, css_references} from '../css.m
 
 const states = new WeakMap();
 const node_markers = new WeakMap();
+const serialized_nodes=new WeakMap();
 const data = globalThis.CharacterData && Object.getOwnPropertyDescriptor(CharacterData.prototype, 'data');
 const getAttribute = globalThis.Element?.prototype.getAttribute;
 const setAttribute = globalThis.Element?.prototype.setAttribute;
@@ -46,11 +47,18 @@ function update(element) {
   for (const node of nodes) for (const entry of node_markers.get(node) || []) markers.set(...entry);
   parts = restore_css(parts.join(''), markers, edits => edit_css_parts(parts, edits), true);
   const source = parts.join('');
+  const serialization_markers=new Map(state.serializationMarkers);
+  const authored_parts=restore_css(source,serialization_markers,edits=>edit_css_parts(parts,edits),true);
   const prepared = prepare_css(source, 'sandstone-style-' + ++sequence + '-', supports);
   state.markers = prepared.markers;
   const safe = edit_css_parts(parts, prepared.edits);
   state.nodes = nodes;
   state.safe = safe;
+  state.serializationParts=authored_parts;
+  state.serializationRendered=safe.join('');
+  state.serializationMarkers=serialization_markers;
+  for(const entry of prepared.markers)state.serializationMarkers.set(...entry);
+  for(let index=0;index<nodes.length;index++)serialized_nodes.set(nodes[index],{rendered:safe[index],source:authored_parts[index],markers:state.serializationMarkers});
   write(nodes, safe);
   for (const node of nodes) node_markers.set(node, state.markers);
   state.pending = undefined;
@@ -62,8 +70,11 @@ function update(element) {
     if (unchanged) {
       with_disabled([element], () => write(nodes, resolved));
       state.safe = resolved;
+      state.serializationRendered=resolved.join('');
       state.markers = new Map();
       const original = css_references(source), rewritten = css_references(resolved.join(''));
+      for(let i=0;i<original.length;i++)if(rewritten[i]&&original[i].url!==rewritten[i].url)state.serializationMarkers.set(rewritten[i].url,serialization_markers.get(original[i].url)||original[i].url);
+      for(let i=0;i<nodes.length;i++)serialized_nodes.set(nodes[i],{rendered:resolved[i],source:authored_parts[i],markers:state.serializationMarkers});
       for (let i = 0; i < original.length; i++) if (original[i].ending && rewritten[i]) state.markers.set(rewritten[i].url, original[i].url);
       for (const node of nodes) node_markers.set(node, state.markers);
     } else if (element.sheet) {
@@ -128,19 +139,22 @@ export function clone_style(source,copy){
   const restored=restore_css(parts.join(''),markers,edits=>edit_css_parts(parts,edits),true);
   if(targets.length===restored.length)write(targets,restored);
 }
-export function capture_style(source){
+export function capture_style(source,serializing=false){
   const state=states.get(source);
   if(!state){
+    const serialized=serializing&&serialized_nodes.get(source);
+    if(serialized)return copy=>data.set.call(copy,data.get.call(source)===serialized.rendered?serialized.source:restore_css(data.get.call(copy),serialized.markers,undefined,true));
     const current=node_markers.get(source);if(!current?.size)return;
     const markers=new Map(current);
     return copy=>data.set.call(copy,restore_css(data.get.call(copy),markers,undefined,true));
   }
   const nodes=text_nodes(source),parts=nodes.map(node=>data.get.call(node)),markers=new Map(state.markers),type=getAttribute.call(source,'type');
+  const serialized=serializing&&parts.join('')===state.serializationRendered?state.serializationParts:undefined;
   for(const node of nodes)for(const entry of node_markers.get(node)||[])markers.set(...entry);
   return (copy,partial=false)=>{
     if(getAttribute.call(copy,'type')==='text/sandstone-pending'){if(type===null)removeAttribute.call(copy,'type');else setAttribute.call(copy,'type',type);}
     const targets=text_nodes(copy),values=partial?targets.map(node=>data.get.call(node)):parts;
-    const restored=restore_css(values.join(''),markers,edits=>edit_css_parts(values,edits),true);
+    const restored=serialized||restore_css(values.join(''),serializing?new Map([...state.serializationMarkers||[],...markers]):markers,edits=>edit_css_parts(values,edits),true);
     if(targets.length===restored.length)write(targets,restored);
   };
 }

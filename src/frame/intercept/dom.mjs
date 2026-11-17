@@ -12,6 +12,7 @@ import {shadow_root} from '../shadow_roots.mjs';
 import {unwrap_document} from '../document_identity.mjs';
 import {range_sources} from './ranges.mjs';
 import {capture_range_copy,perform_range_copy,clone_range_contents} from '../range_copy.mjs';
+import {install_serialization} from '../dom_serialization.mjs';
 const mutate_styles=(nodes,operation)=>mutate_document_base(()=>active_document(node_document(nodes[0]))?mutate_style_sources(nodes,operation):operation());
 const parent_element=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'parentElement').get;
 
@@ -300,3 +301,5 @@ if (globalThis.Audio) {
     }
   });
 }
+
+install_serialization();

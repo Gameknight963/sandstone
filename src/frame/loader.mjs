@@ -12,6 +12,7 @@ import {configure_crypto} from './polyfill/crypto.mjs';
 import {default_referrer_policy} from '../referrer.mjs';
 import {document_referrer_policy,reset_document_referrer_policy} from './intercept/document.mjs';
 import {configure_window_messages} from './window_messages.mjs';
+import {scripting_html} from './scripting_html.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -149,7 +150,9 @@ async function load_html(options) {
   }
 
   let parser = new DOMParser();
-  let html = parser.parseFromString(options.html, "text/html");  
+  const source=site_settings.allow_js?scripting_html(null,options.html,true):{value:options.html,restore(){}};
+  let html = parser.parseFromString(source.value, "text/html");
+  source.restore(html);
   document_referrer_policy(html);
   const base_href = [...html.querySelectorAll('base[href]')].find(node=>node instanceof HTMLBaseElement)?.getAttribute('href');
   base_url=resolve_base_href(base_href,options.url);

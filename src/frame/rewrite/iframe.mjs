@@ -21,7 +21,9 @@ export function rewrite_iframe(iframe_element) {
   let registered = false;
   let iframe_src = iframe_element.src;
   let authored_src = iframe_element.getAttribute('src');
+  const authored_internal=iframe_element.getAttribute('__src');
   resource_attribute(iframe_element,'src',()=>authored_src);
+  resource_attribute(iframe_element,'__src',()=>authored_internal);
   let initial_name=iframe_element.name;
   let window_name=initial_name,opaque_origin=false;
   let iframe_url = "";

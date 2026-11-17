@@ -3,6 +3,7 @@ import * as loader from "../loader.mjs";
 import { ctx, convert_url, intercept_property, proxy_function } from "../context.mjs";
 import { modules, execute_module } from "../polyfill/module.mjs";
 import {schedule_resource_event} from '../resource_events.mjs';
+import {remember_attribute_order} from '../resource_attributes.mjs';
 
 export const pending_scripts = [];
 let script_num = 0;
@@ -39,18 +40,18 @@ function prime_inert_script(element){
   data.set.call(element,'');for(const child of children)append.call(element,child);
   adopt.call(original,element);if(parent)insert.call(parent,element,next);
 }
-export function clone_script(source,copy,prime=false){
-  capture_script(source)?.(copy,prime);
+export function clone_script(source,copy,prime=false,serializing=false){
+  capture_script(source)?.(copy,prime,serializing);
 }
 export function capture_script(source){
   if(!globalThis.HTMLScriptElement||!(source instanceof HTMLScriptElement))return;
   const record=records.get(source),started=source.__sandstone_inert__||record&&(record.started||connected.call(source)&&eligible(source,record));
   const type=record?.type(),src=record?.src();
-  return (copy,prime=false)=>{
+  return (copy,prime=false,serializing=false)=>{
     if(started)copy.__sandstone_inert__=true;
     if(record){
       if(started&&prime)prime_inert_script(copy);
-      const restored=started&&!prime?'application/x-sandstone-script':type;
+      const restored=started&&!prime&&!serializing?'application/x-sandstone-script':type;
       if(restored===null)remove.call(copy,'type');else set.call(copy,'type',restored);
       if(src===null)remove.call(copy,'src');else set.call(copy,'src',src);
     }
@@ -66,6 +67,7 @@ export function should_load(element) {
 }
 
 export function rewrite_script(element) {
+  remember_attribute_order(element,['src','type']);
   const original_type=get.call(element,'type');
   const type = element.type.trim().toLowerCase();
   if (type === "importmap") {
