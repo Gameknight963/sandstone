@@ -68,7 +68,7 @@ export function should_load(element) {
   return loader.site_settings.allow_js && (classic_types.has(element.type.trim().toLowerCase()) || element.type === "module");
 }
 
-export function rewrite_script(element) {
+export function rewrite_script(element,{parser=false,signal,run,sourceElement=element}={}) {
   remember_attribute_order(element,['src','type']);
   const original_type=get.call(element,'type');
   const type = element.type.trim().toLowerCase();
@@ -105,20 +105,21 @@ export function rewrite_script(element) {
       return prepared.then(async record => {
         if (!record) return;
         await execute_module(record);
-        element.dispatchEvent(new Event("load"));
+        sourceElement.dispatchEvent(new Event("load"));
       }).catch(report_error);
     }
     if (!ready) return;
     started = true;
     executed = true;
-    loader.eval_script(element, script_url ? text : element.textContent);
+    return loader.eval_script(sourceElement, script_url ? text : element.textContent,{run});
   };
 
   function report_error(error) {
+    if(signal?.aborted)return;
     const source=script_url||ctx.location.href;
-    schedule_resource_event(element,()=>{
+    schedule_resource_event(sourceElement,()=>{
       console.error(`Script failed: ${source}: ${error.message}`);
-      element.dispatchEvent(new Event("error"));
+      sourceElement.dispatchEvent(new Event("error"));
     });
   }
 
@@ -146,13 +147,14 @@ export function rewrite_script(element) {
       const response = await network.fetch(convert_url(script_url, ctx.document.baseURI), {
         mode:element.crossOrigin === null ? 'no-cors' : 'cors',
         credentials:element.crossOrigin === 'anonymous' ? 'same-origin' : 'include',
-        referrerPolicy:element.referrerPolicy
+        referrerPolicy:element.referrerPolicy,signal
       });
       if (!response.ok) throw new TypeError(`Script request failed: ${response.status}`);
       text = await response.text();
       element.__sandstone_url__ = response.url || convert_url(script_url, ctx.document.baseURI);
+      if(sourceElement!==element)sourceElement.__sandstone_url__=element.__sandstone_url__;
       ready = true;
-      if (loader.is_loaded) element.__sandstone_execute__();
+      if (loader.is_loaded&&!parser) element.__sandstone_execute__();
     } catch (error) {
       report_error(error);
     }
@@ -192,7 +194,7 @@ export function rewrite_script(element) {
       return Reflect.apply(target,receiver,[attribute,...args.slice(1)]);
     });
   }
-  if (!loader.is_loaded) pending_scripts.push([num, element]);
+  if (!loader.is_loaded&&!parser) pending_scripts.push([num, element]);
   if (is_module) {
     prepared = prepare_module();
     return prepared.catch(report_error);

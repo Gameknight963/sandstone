@@ -3,6 +3,7 @@ import * as network from "../network.mjs";
 import { rewrite_srcset } from "../srcset.mjs";
 import {register_media_attributes,render_media_attribute,detach_media_attribute_node,media_placeholder,pending_media_attribute,raw_media_attribute} from '../media_attributes.mjs';
 import {on_dom_construction} from '../dom_operations.mjs';
+import {listen_runtime} from '../runtime_events.mjs';
 
 const prepared = new WeakMap();
 const sessions = new WeakMap();
@@ -303,7 +304,7 @@ export function rewrite_media(element,initial_sources) {
     session.previousCurrentSrc=reflected_current(element,session.readCurrent());
   }
   // Removing a temporary source can produce a native empty-source error.
-  element.addEventListener("error", event => {
+  listen_runtime(element,"error",event=>{
     if (!event.isTrusted) return;
     if (properties.every(key => authored.get(key)===null||pending_media_attribute(element,key))) event.stopImmediatePropagation();
   }, true);

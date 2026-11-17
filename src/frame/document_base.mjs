@@ -1,6 +1,7 @@
 import {resolve_base_href} from '../base_url.mjs';
 
-let fallbackSource,preloadSource,observer,first;
+let fallbackSource,preloadSource,observer,first,scoped;
+export function with_document_base_url(url,operation){const previous=scoped;scoped=url;try{return operation();}finally{scoped=previous;}}
 const frozen=new WeakMap();
 const query=globalThis.Document?.prototype.querySelectorAll;
 const get=globalThis.Element?.prototype.getAttribute;
@@ -22,7 +23,7 @@ export function flush_document_base(delivered=[]) {
 }
 export function document_base_url(){
   flush_document_base();
-  return preloadSource?.()||first&&frozen.get(first)||fallback_url();
+  return scoped||preloadSource?.()||first&&frozen.get(first)||fallback_url();
 }
 export function mutate_document_base(operation){flush_document_base();try{return operation();}finally{flush_document_base();}}
 

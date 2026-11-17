@@ -108,3 +108,18 @@ test('Fragment input retains table and namespace contexts and publishes complete
     assert.ok(updates.length>1);
   }
 });
+
+test('SVG script boundaries include self-closing elements and block later source while external work is pending',async()=>{
+  const source='<svg><script>first</script><script href="external.js"/><script type="module">ignored</script></svg><footer>tail</footer>';
+  for(let split=0;split<=source.length;split++){
+    const seen=[],stream=new HTMLInputStream({onScript(node){seen.push(text(node)||node.attrs.find(attr=>attr.name==='href')?.value);}});
+    stream.write(source.slice(0,split));stream.write(source.slice(split));await stream.close();
+    assert.deepEqual(seen,['first','external.js','ignored'],'split '+split);
+    assert.equal(serialize(stream.document),serialize(parse(source)));
+  }
+  let release;
+  const gate=new Promise(resolve=>{release=resolve;}),stream=new HTMLInputStream({onScript(){return gate;}});
+  stream.write('<svg><script href="external.js"/></svg><footer>tail</footer>');
+  assert.equal(find(stream.document,'footer'),undefined);const done=stream.close();release();await done;
+  assert.equal(text(find(stream.document,'footer')),'tail');
+});

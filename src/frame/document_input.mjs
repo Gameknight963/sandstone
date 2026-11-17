@@ -1,0 +1,178 @@
+import {HTMLDOMStream} from './html_dom_stream.mjs';
+import {native_dom as dom} from './dom_operations.mjs';
+import {listen_runtime,unlisten_runtime,snapshot_runtime_events,restore_runtime_events} from './runtime_events.mjs';
+import {walk_resources} from './resource_nodes.mjs';
+import {forget_document_listeners} from './link_events.mjs';
+import {unwrap_document,wrap_document} from './document_identity.mjs';
+import {rewrite_script} from './rewrite/script.mjs';
+import {flush_import_map} from './polyfill/module.mjs';
+import {ctx} from './context.mjs';
+import * as loader from './loader.mjs';
+import {pending_media_attribute} from './media_attributes.mjs';
+import {pending_style_request} from './style_requests.mjs';
+
+let session,writer,writerOwner,initial,ignoreWrites=0,validation;
+const initial_inputs=new Set();
+const type=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'contentType').get;
+const state=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'readyState').get;
+const link_href=globalThis.HTMLLinkElement&&Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype,'href').get;
+const link_sheet=globalThis.HTMLLinkElement&&Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype,'sheet').get;
+export const input_ready_state=()=>session?.phase;
+const strings=args=>args.map(value=>{if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);}).join('');
+function scoped(input,callback,owner){const previous=writer,previousOwner=writerOwner;writer=input;writerOwner=owner;try{return callback();}finally{writer=previous;writerOwner=previousOwner;}}
+function ignored(callback){ignoreWrites++;try{return callback();}finally{ignoreWrites--;}}
+function nodes(){const values=[globalThis];walk_resources(document,node=>values.push(node));return values;}
+function emit(target,name){target.dispatchEvent(new Event(name,{bubbles:name==='DOMContentLoaded'}));}
+function styles(current){
+  const pending=[];
+  walk_resources(document,node=>{
+    const request=pending_style_request(node);if(!request&&!(node instanceof HTMLLinkElement))return;
+    if(node.disabled||node.media&&!globalThis.matchMedia(node.media).matches)return;
+    if(node instanceof HTMLLinkElement&&!Element.prototype.matches.call(node,'[rel~="stylesheet" i]'))return;
+    const rendered=()=>{
+      if(current.controller.signal.aborted||!(node instanceof HTMLLinkElement)||!node.isConnected||link_sheet.call(node)||!/^data:|^blob:/.test(link_href.call(node)))return;
+      return new Promise(resolve=>{
+        const done=()=>{unlisten_runtime(node,'load',done);unlisten_runtime(node,'error',done);current.controller.signal.removeEventListener('abort',done);resolve();};
+        listen_runtime(node,'load',done);listen_runtime(node,'error',done);current.controller.signal.addEventListener('abort',done,{once:true});
+      });
+    };
+    if(request)pending.push(Promise.resolve(request).then(rendered));
+    else if(node instanceof HTMLLinkElement){const ready=rendered();if(ready)pending.push(ready);}
+  });
+  return pending;
+}
+function images(current){
+  const pending=[];
+  walk_resources(document,node=>{
+    if(!(node instanceof HTMLImageElement)||node.loading==='lazy')return;
+    if(!node.getAttribute('src')&&!node.getAttribute('srcset')&&!(node.parentElement instanceof HTMLPictureElement&&node.parentElement.querySelector('source[srcset]')))return;
+    const waiting=()=>!!node.getAttribute('src')&&pending_media_attribute(node,'src')||!!node.getAttribute('srcset')&&pending_media_attribute(node,'srcset')||node.parentElement instanceof HTMLPictureElement&&[...node.parentElement.querySelectorAll('source[srcset]')].some(source=>!!source.getAttribute('srcset')&&pending_media_attribute(source,'srcset'));
+    if(node.complete&&!waiting())return;
+    pending.push(new Promise(resolve=>{
+      const cleanup=()=>{unlisten_runtime(node,'load',loaded);unlisten_runtime(node,'error',loaded);current.controller.signal.removeEventListener('abort',cleanup);resolve();};
+      const loaded=event=>{if(event.type==='error'&&!event.isTrusted||!waiting())cleanup();};
+      listen_runtime(node,'load',loaded);listen_runtime(node,'error',loaded);current.controller.signal.addEventListener('abort',cleanup,{once:true});
+    }));
+  });
+  return pending;
+}
+
+function prepare_script(current,node,input){
+  if(current.controller.signal.aborted)return;
+  const sourceElement=node,svg=globalThis.SVGScriptElement&&node instanceof SVGScriptElement;
+  if(svg){
+    const type=(node.getAttribute('type')||'').trim().toLowerCase();
+    if(!['','application/javascript','text/javascript','application/ecmascript','text/ecmascript','module'].includes(type))return;
+    // Keep SVG href reflection and currentScript identity on the real node.
+    // The existing HTML executor prepares the request on a private surrogate.
+    const script=document.implementation.createHTMLDocument('').createElement('script');
+    for(const name of ['type','crossorigin','referrerpolicy','async'])if(node.hasAttribute(name))script.setAttribute(name,node.getAttribute(name));
+    const href=node.getAttribute('href')??node.getAttributeNS('http://www.w3.org/1999/xlink','href');
+    if(href!==null)script.setAttribute('src',href);
+    script.textContent=node.textContent;
+    Object.defineProperty(script,'isConnected',{get:()=>sourceElement.isConnected});node=script;
+  }
+  const module=node.type.trim().toLowerCase()==='module',external=node.hasAttribute('src');
+  const deferred=module||external&&node.hasAttribute('defer'),asynchronous=external&&node.hasAttribute('async');
+  const run=callback=>deferred||asynchronous?ignored(callback):scoped(input,callback,current);
+  const pending=rewrite_script(node,{parser:true,signal:current.controller.signal,run,sourceElement});
+  const execute=()=>{
+    if(current.controller.signal.aborted)return;
+    flush_import_map();return module?run_late_script(()=>node.__sandstone_execute__?.()):node.__sandstone_execute__?.();
+  };
+  if(asynchronous){current.async.push(Promise.resolve(pending).then(execute));return;}
+  if(deferred){current.deferred.push(()=>Promise.all([pending,...styles(current)]).then(execute));return;}
+  const blocking=node.__sandstone_execute__?styles(current):[];
+  return pending||blocking.length?Promise.all([pending,...blocking]).then(execute):execute();
+}
+export function run_initial_script(element,execute){
+  const previous=initial,current={element};initial=current;let result;
+  try{result=execute();}finally{initial=previous;}
+  if(!current.state)return result;
+  const input=current.state;
+  return Promise.resolve(result).then(()=>input.stream.finish()).then(()=>{
+    const pending=[...input.deferred,...input.async.map(task=>()=>task)];let remaining=pending.length;
+    if(!remaining)initial_inputs.delete(input);
+    return {written:pending.map(execute=>async()=>{try{return await execute();}finally{if(!--remaining)initial_inputs.delete(input);}})};
+  }).catch(error=>{initial_inputs.delete(input);if(input.controller.signal.aborted)return;throw error;});
+}
+export function run_late_script(execute){
+  ignoreWrites++;let result;try{result=execute();}catch(error){ignoreWrites--;throw error;}
+  if(result&&typeof result.then==='function')return Promise.resolve(result).finally(()=>ignoreWrites--);
+  ignoreWrites--;return result;
+}
+export function run_document_script(element,execute){return element.hasAttribute('src')&&!writer&&!initial?ignored(execute):execute();}
+function insertion(){
+  if(initial.state)return initial.state;
+  const element=initial.element,parent=element.parentNode;
+  const current={controller:new AbortController(),fragment:true,async:[],deferred:[]};initial.state=current;initial_inputs.add(current);
+  current.stream=new HTMLDOMStream(parent,{before:element.nextSibling,signal:current.controller.signal,onScript:(node,input)=>prepare_script(current,node,input)});
+  return current;
+}
+function begin(){
+  const previous=session,targets=nodes(),saved=snapshot_runtime_events(targets);
+  dom.open.call(document);restore_runtime_events(saved);forget_document_listeners(targets);
+  for(const input of initial_inputs)input.controller.abort(new DOMException('The document was replaced','AbortError'));initial_inputs.clear();
+  previous?.controller.abort(new DOMException('The document was replaced','AbortError'));
+  loader.clear_named_elements();
+  const current={controller:new AbortController(),phase:'loading',async:[],deferred:[],finished:null};session=current;
+  current.stream=new HTMLDOMStream(document,{signal:current.controller.signal,onMode:mode=>{
+    // Let the native parser set the document's real layout mode. Its empty
+    // shell is replaced by intercepted nodes before authored code can run.
+    while(document.firstChild)dom.remove.call(document,document.firstChild);
+    const header=mode==='quirks'?'':mode==='limited-quirks'?'<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">':'<!doctype html>';
+    dom.write.call(document,header+'<html>');
+    while(document.firstChild)dom.remove.call(document,document.firstChild);
+  },onScript:(node,input)=>prepare_script(current,node,input)});
+  return current;
+}
+function close(current){
+  if(current.closing)return;current.closing=true;
+  const parsed=current.stream.finish();
+  const live=()=>session===current&&!current.controller.signal.aborted;
+  const interactive=()=>{if(live()&&current.phase==='loading'){current.phase='interactive';emit(document,'readystatechange');}};
+  const complete=()=>{
+    if(!live())return;dom.close.call(document);current.phase='complete';emit(document,'readystatechange');
+    if(!live())return;
+    const loaded=new Event('load');Object.defineProperty(loaded,'target',{value:wrap_document(document)});globalThis.dispatchEvent(loaded);
+    if(live())globalThis.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:false}));
+  };
+  if(current.stream.closed)interactive();
+  if(!live()){current.finished=Promise.resolve();return;}
+  const imageLoads=images(current);
+  if(live()&&current.stream.closed&&!current.stream.pendingResources&&!current.deferred.length&&!current.async.length&&!imageLoads.length){
+    emit(document,'DOMContentLoaded');complete();current.finished=Promise.resolve();return;
+  }
+  current.finished=parsed.then(async()=>{
+    if(!live())return;interactive();
+    if(!live())return;
+    for(const execute of current.deferred){await execute();if(!live())return;}
+    emit(document,'DOMContentLoaded');
+    await Promise.allSettled([...current.async,current.stream.settled(),...imageLoads]);if(!live())return;complete();
+  }).catch(error=>{if(!current.controller.signal.aborted)console.error(error);});
+}
+
+if(globalThis.document){
+  // The proxy dispatches lifecycle events for the virtual document. Hide only
+  // the native parser's own document/window events, never resource load events.
+  for(const name of ['readystatechange','DOMContentLoaded','load','pageshow'])listen_runtime(globalThis,name,event=>{
+    if(session&&event.isTrusted&&(event.target===document||event.target===globalThis))event.stopImmediatePropagation();
+  },true);
+  for(const method of ['open','write','writeln','close']){
+    Document.prototype[method]=new Proxy(dom[method],{apply(target,receiver,args){
+      receiver=unwrap_document(receiver);state.call(receiver);
+      if(receiver!==document||type.call(receiver)!=='text/html'||method==='open'&&args.length>=3)return Reflect.apply(target,receiver,args);
+      if(method==='open'){
+        validation??=document.implementation.createHTMLDocument('');Reflect.apply(dom.open,validation,args);
+        if(!writer&&!initial)begin();return wrap_document(document);
+      }
+      if(method==='close'){if(initial||writerOwner?.fragment)return;if(session)close(session);else Reflect.apply(target,receiver,args);return;}
+      const text=strings(args)+(method==='writeln'?'\n':'');
+      if(writer){writer.write(text);return;}
+      if(ignoreWrites)return;
+      if(initial){insertion().stream.write(text);return;}
+      if(!session||session.stream.closed)begin();
+      session.stream.write(text);
+    }});
+  }
+}

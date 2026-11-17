@@ -7,6 +7,7 @@ import {parse_referrer_policy} from '../../referrer.mjs';
 import {configure_document_base,document_base_url} from '../document_base.mjs';
 import {is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
 import * as ranges from './ranges.mjs';
+import {input_ready_state} from '../document_input.mjs';
 
 configure_document_base(()=>ctx.location?.href||loader.url,()=>loader.is_loaded?undefined:loader.base_url);
 
@@ -83,7 +84,7 @@ class CustomDocument {
   get baseURI() {
     return document_base_url();
   }
-  get readyState() {return loader.ready_state}
+  get readyState() {return input_ready_state()||loader.ready_state}
   get documentURI() {return ctx.location.href}
   get referrer() {return loader.document_referrer}
   get currentScript() {return internal.currentScript&&script_root.call(internal.currentScript) instanceof ShadowRoot?null:internal.currentScript}

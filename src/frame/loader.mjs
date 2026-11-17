@@ -14,6 +14,7 @@ import {document_referrer_policy,reset_document_referrer_policy} from './interce
 import {configure_window_messages} from './window_messages.mjs';
 import {scripting_html} from './scripting_html.mjs';
 import {defer_declarative_roots} from './declarative_html.mjs';
+import {run_initial_script,run_late_script,run_document_script,input_ready_state} from './document_input.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -43,12 +44,14 @@ export let is_iframe = false;
 export let cookie_cross_site = false;
 export let site_settings = {};
 export let default_settings = {};
+const named_elements=new Map();
+export function clear_named_elements(){for(const [name,node] of named_elements)if(ctx[name]===node)delete ctx[name];named_elements.clear();}
 export const child_navigators = new Map();
 export const child_names = new Map();
 rpc.rpc_handlers["child_navigate"] = (id, url, form_data, navigation) => child_navigators.get(id)?.(url, form_data, navigation);
 rpc.rpc_handlers.child_window_name=(id,value)=>child_names.get(id)?.(value);
 
-export function eval_script(script_element, script_text) {
+export function eval_script(script_element, script_text,{run=callback=>run_document_script(script_element,callback)}={}) {
   const previous_script=ctx.document.currentScript;
   ctx.document.currentScript = script_element;
   let script = document.createElement("script");
@@ -59,7 +62,7 @@ export function eval_script(script_element, script_text) {
       sourceURL:script_element.__sandstone_url__ || ctx.location.href
     });
     script.innerHTML = rewritten_js;
-    document.body.append(script);
+    run(()=>(document.body||document.head||document.documentElement).append(script));
   }
   catch (e) {
     console.error(e);
@@ -73,23 +76,24 @@ async function evaluate_scripts(order) {
   let deferred = [];
   const initial = pending_scripts.splice(0).sort((a, b) => (order.get(a[1])??Infinity)-(order.get(b[1])??Infinity)||a[0]-b[0]);
   for (let [num, script_element] of initial) {
+    if(input_ready_state())return;
     // Scripts parsed in template contents carry a native force-async flag.
     // Initial shadow declarations instead follow normal parser script rules.
     const asynchronous=order.has(script_element)?script_element.hasAttribute('async'):script_element.async;
     if (script_element.__sandstone_module__ || script_element.hasAttribute('src')&&(script_element.defer || asynchronous)) {
-      deferred.push(script_element)
+      deferred.push(()=>run_late_script(()=>script_element.__sandstone_execute__()));
     }
     else {
-      script_element.__sandstone_execute__();
+      const written=await run_initial_script(script_element,()=>script_element.__sandstone_execute__());
+      if(written?.written)deferred.push(...written.written);
     }
   }
   pending_scripts.length = 0;
+  if(input_ready_state())return;
   ready_state = "interactive";
   ctx.document.dispatchEvent(new Event("readystatechange"));
 
-  for (let script_element of deferred) {
-    await script_element.__sandstone_execute__();
-  }
+  for(const execute of deferred){if(input_ready_state())return;await execute();}
 }
 
 export function set_frame_id(id) {
@@ -181,6 +185,7 @@ async function load_html(options) {
     let element = id_elements[i];
     if (ctx_proto.hasOwnProperty(element.id)) continue;
     ctx[element.id] = element;
+    named_elements.set(element.id,element);
   }
 
   //apply the rewritten html
@@ -191,6 +196,7 @@ async function load_html(options) {
   if (site_settings.allow_js) {
     await evaluate_scripts(script_order);
   }
+  if(input_ready_state()){ctx.history._restored(options.history);return;}
 
   //trigger load events
   is_loaded = true;

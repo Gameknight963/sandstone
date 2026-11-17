@@ -5,6 +5,7 @@ import * as parser from "../parser.mjs";
 import { ctx, update_ctx, run_script, convert_url } from "../context.mjs";
 import { modules } from "./module.mjs";
 import { prefetch_worker_scripts } from "../worker_scripts.mjs";
+import {listen_runtime,unlisten_runtime} from '../runtime_events.mjs';
 
 const NativeWorker = globalThis.Worker;
 const native_import_scripts = globalThis.importScripts?.bind(globalThis);
@@ -154,7 +155,7 @@ export class FakeWorker extends EventTarget {
     this.#receiver = channel.port2;
     for (const type of ["message", "messageerror", "error"]) handler(this, type);
     this.#unload = () => this.terminate();
-    globalThis.addEventListener("beforeunload", this.#unload, {once: true});
+    listen_runtime(globalThis,"beforeunload",this.#unload,{once:true});
     this.#start().catch(error => { if (!this.#terminated) { this.#error(error); this.terminate(); } });
   }
 
@@ -277,7 +278,7 @@ export class FakeWorker extends EventTarget {
     this.#receiver?.close();
     this.#unregister();
     if (this.#bootstrap) URL.revokeObjectURL(this.#bootstrap);
-    globalThis.removeEventListener("beforeunload", this.#unload);
+    unlisten_runtime(globalThis,"beforeunload",this.#unload);
   }
   get [Symbol.toStringTag]() { return "Worker"; }
 }

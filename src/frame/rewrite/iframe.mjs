@@ -91,13 +91,13 @@ export function rewrite_iframe(iframe_element) {
       let loader_blob = new Blob([loader.frame_html], {type: "text/html"});
       const runtime_url=network.create_blob_url(loader_blob);
       await new Promise((resolve) => {
-        const cleanup=()=>{iframe_element.removeEventListener('load',loaded);controller.signal.removeEventListener('abort',aborted);};
+        const cleanup=()=>{unlisten_runtime(iframe_element,'load',loaded);controller.signal.removeEventListener('abort',aborted);};
         const aborted=()=>{cleanup();resolve();};
         const loaded=event=>{
           event.stopImmediatePropagation();
           cleanup();resolve();
         };
-        iframe_element.addEventListener('load',loaded);
+        listen_runtime(iframe_element,'load',loaded);
         controller.signal.addEventListener('abort',aborted,{once:true});
         src_descriptor.set.call(iframe_element, runtime_url);
       });
@@ -234,3 +234,4 @@ export function rewrite_iframe(iframe_element) {
   }
   iframe_element.src = authored_src;
 }
+import {listen_runtime,unlisten_runtime} from '../runtime_events.mjs';

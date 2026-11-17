@@ -1,4 +1,4 @@
-import {Parser} from 'parse5';
+import {Parser,defaultTreeAdapter,Token} from 'parse5';
 
 // Parser input for document.open/write/close. Keep unconsumed source outside
 // the tokenizer at script boundaries: a reentrant write must parse its own
@@ -22,11 +22,26 @@ export class HTMLInputStream {
       this.#pending={node,inTemplate:this.#parser.openElements.tmplCount>0};
       this.#parser.tokenizer.pause();
     };
+    // parse5 exposes HTML script boundaries, but SVG scripts leave the stack
+    // through the foreign-content rules instead. Publish both at the token
+    // boundary, before the caller can parse the following authored markup.
+    const adapter=options.treeAdapter||defaultTreeAdapter,wrapped=Object.create(adapter);
+    const svgScript=node=>adapter.isElementNode(node)&&adapter.getNamespaceURI(node)==='http://www.w3.org/2000/svg'&&adapter.getTagName(node)==='script';
+    wrapped.onItemPop=(node,parent)=>{
+      adapter.onItemPop?.(node,parent);
+      if(svgScript(node)&&this.#parser.currentToken?.type===Token.TokenType.END_TAG&&this.#parser.currentToken.tagName==='script')script(node);
+    };
+    for(const method of ['appendChild','insertBefore'])wrapped[method]=(...args)=>{
+      adapter[method](...args);
+      if(svgScript(args[1])&&this.#parser.currentToken?.selfClosing)script(args[1]);
+    };
+    options.treeAdapter=wrapped;
     if(context!==undefined){this.#parser=Parser.getFragmentParser(context,options);this.#parser.scriptHandler=script;this.#root=this.#parser.treeAdapter.getFirstChild(this.#parser.document);}
     else{this.#parser=new Parser(options,undefined,null,script);this.#root=this.#parser.document;}
     if(signal){this.#signal=signal;this.#abort=()=>this.#fail(signal.reason);signal.addEventListener('abort',this.#abort,{once:true});}
   }
   get document(){return this.#root;}
+  get closed(){return this.#ended||this.#failed;}
   write(text){this.#write(text,false);}
   #write(text,insert){
     if(this.#failed)throw this.#error;

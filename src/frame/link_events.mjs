@@ -3,10 +3,16 @@
 // after dispatch, including when propagation stops before document/window.
 import {unwrap_global_target} from './global_functions.mjs';
 import {on_shadow_root} from './shadow_roots.mjs';
+import {listen_runtime,unlisten_runtime} from './runtime_events.mjs';
 let finish_listener=()=>{};
+let forget_listeners=()=>{};
 export function finish_event_listener(event){finish_listener(event);}
+export function forget_document_listeners(nodes){forget_listeners(nodes);}
 export function install_link_events({enabled,activate,submit}) {
   const records=new WeakMap(),prepared=new WeakSet(),listeners=new WeakMap();
+  const active_entries=new WeakMap();
+  const untrack=(target,entry)=>active_entries.get(target)?.delete(entry);
+  forget_listeners=nodes=>{for(const node of nodes){for(const entry of active_entries.get(node)||[]){entry.active=false;entry.cleanup?.();}active_entries.delete(node);listeners.delete(node);}};
   const pending=new Set(),submitter=globalThis.SubmitEvent&&Object.getOwnPropertyDescriptor(SubmitEvent.prototype,'submitter').get;
   const eventProto=Event.prototype,targetProto=EventTarget.prototype;
   const prevented=Object.getOwnPropertyDescriptor(eventProto,'defaultPrevented');
@@ -42,8 +48,8 @@ export function install_link_events({enabled,activate,submit}) {
     // Listeners added while this phase is running are excluded from its native
     // snapshot. Keep its existing tail in that snapshot, too.
     if(state.has(capture)&&[...pending].some(record=>record.event.currentTarget===node))return;
-    if(state.has(capture))remove.call(node,'submit',tail,capture);
-    add.call(node,'submit',tail,capture);state.add(capture);
+    if(state.has(capture))unlisten_runtime(node,'submit',tail,capture);
+    listen_runtime(node,'submit',tail,capture);state.add(capture);
   }
   function gate(event){
     if(!enabled())return;
@@ -76,7 +82,7 @@ export function install_link_events({enabled,activate,submit}) {
     // window capture listener. Install before their author listeners.
     while(node instanceof Element){
       if(Element.prototype.matches.call(node,'a, area, form')){
-        if(!prepared.has(node)){prepared.add(node);add.call(node,node instanceof HTMLFormElement?'submit':'click',gate,true);}
+        if(!prepared.has(node)){prepared.add(node);listen_runtime(node,node instanceof HTMLFormElement?'submit':'click',gate,true);}
         return;
       }
       node=node.parentElement||node.getRootNode()?.host;
@@ -117,7 +123,7 @@ export function install_link_events({enabled,activate,submit}) {
     if(!entry?.active){
       entry={active:false,passive:!!normalized.passive,once:!!normalized.once};
       entry.callback=function(event){
-        if(entry.once){entry.active=false;entry.cleanup?.();}
+        if(entry.once){entry.active=false;entry.cleanup?.();untrack(receiver,entry);}
         const record=records.get(event),previous=record?.passive;
         if(record)record.passive=entry.passive;
         try{return typeof listener==='function'?listener.call(this,event):listener.handleEvent(event);}
@@ -128,8 +134,9 @@ export function install_link_events({enabled,activate,submit}) {
     const active=entry.active,result=Reflect.apply(target,receiver,[type,entry.callback,normalized]);
     if(!active){
       entry.active=!normalized.signal?.aborted;
+      if(entry.active){let entries=active_entries.get(receiver);if(!entries){entries=new Set();active_entries.set(receiver,entries);}entries.add(entry);}
       if(entry.active&&normalized.signal){
-        const aborted=()=>{entry.active=false;};
+        const aborted=()=>{entry.active=false;untrack(receiver,entry);};
         add.call(normalized.signal,'abort',aborted,{once:true});
         entry.cleanup=()=>remove.call(normalized.signal,'abort',aborted);
       }
@@ -145,7 +152,7 @@ export function install_link_events({enabled,activate,submit}) {
     if(!tracked(type)||!listener||!['function','object'].includes(typeof listener))return Reflect.apply(target,receiver,[type,...args.slice(1)]);
     const normalized=listener_options(options,false),capture=normalized.capture;
     const entry=listeners.get(receiver)?.get(listener)?.get(type+':'+capture);
-    if(entry){entry.active=false;entry.cleanup?.();return Reflect.apply(target,receiver,[type,entry.callback,normalized]);}
+    if(entry){entry.active=false;entry.cleanup?.();untrack(receiver,entry);return Reflect.apply(target,receiver,[type,entry.callback,normalized]);}
     return Reflect.apply(target,receiver,[type,listener,normalized]);
   }});
   const dispatch=targetProto.dispatchEvent;
@@ -190,9 +197,9 @@ export function install_link_events({enabled,activate,submit}) {
   const shadow_events=new WeakSet();
   on_shadow_root(root=>{
     if(shadow_events.has(root))return;
-    shadow_events.add(root);add.call(root,'click',gate,true);add.call(root,'submit',gate,true);prepare_tail(root,true);prepare_tail(root,false);
+    shadow_events.add(root);listen_runtime(root,'click',gate,true);listen_runtime(root,'submit',gate,true);prepare_tail(root,true);prepare_tail(root,false);
   });
-  add.call(globalThis,'click',gate,true);
-  add.call(globalThis,'submit',gate,true);
+  listen_runtime(globalThis,'click',gate,true);
+  listen_runtime(globalThis,'submit',gate,true);
   prepare_tail(globalThis,true);prepare_tail(globalThis,false);
 }

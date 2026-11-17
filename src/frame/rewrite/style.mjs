@@ -1,6 +1,7 @@
 import {ctx} from '../context.mjs';
 import {parse_css} from './css.mjs';
 import {prepare_css, restore_css, edit_css_parts, css_references} from '../css.mjs';
+import {track_style_request} from '../style_requests.mjs';
 
 const states = new WeakMap();
 const node_markers = new WeakMap();
@@ -86,6 +87,7 @@ function update(element) {
       fill_rules(element.sheet, replacements);
     }
   }).catch(console.error);
+  track_style_request(element,state.pending);
 }
 
 function snapshot(element) {

@@ -6,32 +6,49 @@ import {prepare_resources} from './resource_nodes.mjs';
 import {rewrite_element} from './rewrite/element.mjs';
 import {prime_inert_script,mark_parser_script,capture_script} from './rewrite/script.mjs';
 import {mutate_styles} from './rewrite/style.mjs';
+import {document_base_url,with_document_base_url} from './document_base.mjs';
+import {resolve_base_href} from '../base_url.mjs';
 
 const html='http://www.w3.org/1999/xhtml';
 const attribute=(node,name)=>node.attrs?.find(attribute=>!attribute.namespace&&attribute.name===name)?.value;
 const qualified=attribute=>attribute.prefix?attribute.prefix+':'+attribute.name:attribute.name;
 const escaped=value=>value.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/\r/g,'&#13;');
+const query_document=globalThis.Document?.prototype.querySelectorAll,query_element=globalThis.Element?.prototype.querySelectorAll;
 
 // Materialize parser mutations through an inactive document. New subtrees must
 // receive resource interception before adoption can start image/media loads.
 // Existing nodes are updated only when the parser changes them, preserving
 // authored edits, listeners, form state and node identity between input writes.
 export class HTMLDOMStream {
-  #input;#target;#document;#inert;#before;#callback;#states=new Map();#resources=[];#syncing=false;
-  constructor(target,{before=null,onScript,signal}={}){
-    if(!(target instanceof Element||target instanceof DocumentFragment))throw new TypeError('An element or document fragment is required');
+  #input;#target;#document;#inert;#before;#callback;#mode;#modeSet=false;#states=new Map();#resources=[];#pending=new Set();#syncing=false;
+  constructor(target,{before=null,onScript,onMode,signal}={}){
+    if(!(target instanceof Document||target instanceof Element||target instanceof DocumentFragment))throw new TypeError('A document, element or document fragment is required');
     if(onScript!==undefined&&typeof onScript!=='function')throw new TypeError('onScript must be a function');
-    this.#document=dom.owner.call(target);this.#inert=this.#document.implementation.createHTMLDocument('');
-    this.#target=target instanceof HTMLTemplateElement?dom.template.call(target):target;this.#before=before;this.#callback=onScript;
-    this.#input=new HTMLInputStream({context:parsing_context(target),signal,onUpdate:()=>this.#sync(),onScript:(node,_context,input)=>{
+    this.#document=target instanceof Document?target:dom.owner.call(target);this.#inert=this.#document.implementation.createHTMLDocument('');
+    this.#target=target instanceof HTMLTemplateElement?dom.template.call(target):target;this.#before=before;this.#callback=onScript;this.#mode=onMode;
+    this.#input=new HTMLInputStream({context:target instanceof Document?undefined:parsing_context(target),signal,onUpdate:()=>this.#sync(),onScript:(node,_context,input)=>{
       this.#sync();const state=this.#states.get(node);mark_parser_script(state.node);
       if(state.inert||!this.#callback)return;
       return this.#callback(state.node,{write:text=>{input.write(text);this.#sync();},get target(){return target;}});
     }});
+    // A new document.open can discard this input before anyone calls close.
+    // Keep that cancellation handled; finish/close still expose the rejection.
+    this.#input.done.catch(()=>{});
     this.#states.set(this.#input.document,{node:this.#target,physical:false,inert:target instanceof HTMLTemplateElement||!dom.view.call(this.#document)});
   }
   write(text){this.#input.write(text);}
-  async close(){await this.#input.close();this.#sync();await Promise.allSettled(this.#resources);return this.#target;}
+  get closed(){return this.#input.closed;}
+  get pendingResources(){return this.#pending.size;}
+  finish(){return this.#input.close();}
+  settled(){return Promise.allSettled(this.#resources);}
+  async close(){await this.finish();this.#sync();await this.settled();return this.#target;}
+  #prepare(node){
+    const operation=()=>{prepare_resources(node);return rewrite_element(node);};
+    if([...query_document.call(this.#document,'base[href]')].some(node=>node instanceof HTMLBaseElement))return operation();
+    const candidates=[...(node instanceof HTMLBaseElement?[node]:[]),...(node instanceof Element?query_element.call(node,'base[href]'):[])];
+    const base=candidates.find(node=>node instanceof HTMLBaseElement&&node.hasAttribute('href'));
+    return base?with_document_base_url(resolve_base_href(base.getAttribute('href'),document_base_url()),operation):operation();
+  }
   #element(ast){
     try{
       const node=dom.create.call(this.#inert,ast.namespaceURI,ast.tagName,attribute(ast,'is')?{is:attribute(ast,'is')}:undefined);
@@ -55,9 +72,10 @@ export class HTMLDOMStream {
     let node,physical=true,inert=parent.inert;
     if(ast.nodeName==='#text')node=dom.text.call(this.#inert,ast.value);
     else if(ast.nodeName==='#comment')node=dom.comment.call(this.#inert,ast.data);
+    else if(ast.nodeName==='#documentType')node=dom.doctype.call(this.#document.implementation,ast.name,ast.publicId,ast.systemId);
     else{
       node=this.#element(ast);
-      if(ast.namespaceURI===html&&ast.tagName==='script'){
+      if((ast.namespaceURI===html||ast.namespaceURI==='http://www.w3.org/2000/svg')&&ast.tagName==='script'){
         prime_inert_script(node);node.removeAttribute('type');node.__rewritten__=true;
         if(inert)node.__sandstone_inert__=true;
       }
@@ -83,6 +101,10 @@ export class HTMLDOMStream {
     if(this.#syncing)return;this.#syncing=true;
     const seen=new Set();
     try{
+      if(!this.#modeSet&&this.#target instanceof Document&&this.#input.document.childNodes.some(node=>node.tagName==='html'||node.nodeName==='#documentType')){
+        this.#modeSet=true;this.#mode?.(this.#input.document.mode);
+        for(const state of this.#states.values())if(state.parent?.node===this.#target)state.parent=undefined;
+      }
       const visit=(ast,parent,position,siblings)=>{
         let state=this.#states.get(ast);if(!state)state=this.#create(ast,parent);
         seen.add(ast);
@@ -104,10 +126,10 @@ export class HTMLDOMStream {
         if(ast.content)visit(ast.content,state,0,[]);
         if(!parent||!state.physical)return;
         if(state.parent===parent)return;
-        const target=parent.node,document=dom.owner.call(target);
+        const target=parent.node,document=target instanceof Document?target:dom.owner.call(target);
         if(dom.view.call(document)&&dom.owner.call(node)!==document){
-          prepare_resources(node);const pending=rewrite_element(node);
-          if(pending){const resource=Promise.resolve(pending);resource.catch(()=>{});this.#resources.push(resource);}
+          const pending=this.#prepare(node);
+          if(pending){const resource=Promise.resolve(pending);this.#pending.add(resource);resource.then(()=>this.#pending.delete(resource),()=>this.#pending.delete(resource));this.#resources.push(resource);}
           dom.adopt.call(document,node);
         }
         let before=null;

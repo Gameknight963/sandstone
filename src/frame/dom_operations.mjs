@@ -10,7 +10,9 @@ export const native_dom=globalThis.document&&{
   inner:Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML').set,
   data:Object.getOwnPropertyDescriptor(CharacterData.prototype,'data').set,appendData:CharacterData.prototype.appendData,
   parent:Object.getOwnPropertyDescriptor(Node.prototype,'parentNode').get,owner:Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get,
-  view:Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get,template:Object.getOwnPropertyDescriptor(HTMLTemplateElement.prototype,'content').get
+  view:Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get,template:Object.getOwnPropertyDescriptor(HTMLTemplateElement.prototype,'content').get,
+  open:Document.prototype.open,write:Document.prototype.write,writeln:Document.prototype.writeln,close:Document.prototype.close,
+  doctype:DOMImplementation.prototype.createDocumentType
 };
 export function mark_inert_node(node){inert_nodes.add(node);return node;}
 export const is_inert_node=node=>inert_nodes.has(node);

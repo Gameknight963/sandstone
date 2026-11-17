@@ -1,4 +1,5 @@
 import {unwrap_global_target} from './frame/global_functions.mjs';
+import {listen_runtime,unlisten_runtime} from './frame/runtime_events.mjs';
 
 export let role = null;
 export const rpc_handlers = {};
@@ -205,7 +206,7 @@ export function wait_on_frame(frame,{signal,url=frame.src}={}) {
   const id=Math.random()+':'+Math.random();
   return new Promise((resolve,reject)=>{
     let timer,finished=false;
-    const cleanup=()=>{finished=true;clearTimeout(timer);globalThis.removeEventListener('message',receive);signal?.removeEventListener('abort',abort);};
+    const cleanup=()=>{finished=true;clearTimeout(timer);unlisten_runtime(globalThis,'message',receive);signal?.removeEventListener('abort',abort);};
     const abort=()=>{cleanup();reject(signal.reason||new DOMException('The operation was aborted','AbortError'));};
     const receive=event=>{
       const message=event.data;
@@ -218,7 +219,7 @@ export function wait_on_frame(frame,{signal,url=frame.src}={}) {
       if(!finished)timer=setTimeout(ping,50);
     };
     if(signal?.aborted){abort();return;}
-    globalThis.addEventListener('message',receive);
+    listen_runtime(globalThis,'message',receive);
     signal?.addEventListener('abort',abort,{once:true});
     ping();
   });
@@ -263,5 +264,5 @@ export function set_on_attach(callback) {
 if (self.parent !== globalThis || typeof globalThis.importScripts === "function") {
   host = new RPCTarget();
   host.onmessage = message_listener;
-  self.addEventListener("message", host_set_handler);
+  listen_runtime(self,"message",host_set_handler);
 }

@@ -1,6 +1,7 @@
 import {run_script} from './context.mjs';
 import {finish_event_listener} from './link_events.mjs';
 import {is_inert_node} from './dom_operations.mjs';
+import {listen_runtime} from './runtime_events.mjs';
 
 const states=new WeakMap(),supported=new Set(),nativeHandlers=new WeakMap();
 let assigning=0;
@@ -130,9 +131,9 @@ if(globalThis.Element){
   HTMLElement.prototype.click=new Proxy(click,{apply(target,receiver,args){prepare(receiver);return Reflect.apply(target,receiver,args);}});
   const capture=event=>{for(const node of event.composedPath())if(node instanceof Element)rewrite_event_attributes(node);};
   const add=EventTarget.prototype.addEventListener;
-  for(const name of supported)add.call(globalThis,name.slice(2),capture,true);
+  for(const name of supported)listen_runtime(globalThis,name.slice(2),capture,true);
   const attachShadow=Element.prototype.attachShadow;
   if(attachShadow)Element.prototype.attachShadow=new Proxy(attachShadow,{apply(target,receiver,args){
-    const root=Reflect.apply(target,receiver,args);for(const name of supported)add.call(root,name.slice(2),capture,true);return root;
+    const root=Reflect.apply(target,receiver,args);for(const name of supported)listen_runtime(root,name.slice(2),capture,true);return root;
   }});
 }

@@ -113,7 +113,7 @@ export function configure_window_messages(options){
 if(post){
   // Receive on the native posted-message task. Tokens are shared over the
   // private loader channel and bind the envelope to its actual source Window.
-  globalThis.addEventListener('message',event=>{
+  listen_runtime(globalThis,'message',event=>{
     const value=data.get.call(event),target=unwrap_global_target(source.get.call(event));
     const peer=peers.get(target)||value?.sandstone_message&&descendant_peer(target,value.sandstone_message);
     if(!peer||!value||typeof value!=='object'||value.sandstone_message!==peer.token)return;
@@ -129,3 +129,4 @@ if(post){
     });
   }
 }
+import {listen_runtime} from './runtime_events.mjs';

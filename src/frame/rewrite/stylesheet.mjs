@@ -5,6 +5,7 @@ import {parse_referrer_policy} from '../../referrer.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {schedule_resource_event} from '../resource_events.mjs';
 import {resource_attribute} from '../resource_attributes.mjs';
+import {track_style_request} from '../style_requests.mjs';
 
 export function is_style_link(element){
   return Element.prototype.matches.call(element,'[rel~="stylesheet" i], [rel~="preload" i][as="style" i]');
@@ -76,6 +77,7 @@ export function rewrite_stylesheet(element,initialHref) {
         blob_url = network.create_blob_url(new Blob([css], {type: "text/css"}), response.url || url, request_context);
         descriptor.set.call(element, blob_url);
       })().catch(error=>failed(error,current));
+      track_style_request(element,pending);
     }
   });
   for(const name of ['getAttribute','hasAttribute','setAttribute','removeAttribute']){

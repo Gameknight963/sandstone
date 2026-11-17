@@ -111,7 +111,7 @@ export function rewrite_svg_resource(element,source){
     if(original)methods.setAttributeNS.call(mirror,slot.ns,qualified(original),value(original));
   }
   states.set(element,state);strings.set(animated(element),state);maps.set(attributes.call(element),state);
-  element.addEventListener('error',event=>{if(event.isTrusted&&(!state.local||state.pending))event.stopImmediatePropagation();},true);
+  listen_runtime(element,'error',event=>{if(event.isTrusted&&(!state.local||state.pending))event.stopImmediatePropagation();},true);
   return refresh(state,true);
 }
 export function clone_svg_resource(source,copy,inactive=false){
@@ -242,3 +242,4 @@ if(E&&base){
     Object.defineProperty(Constructor.prototype,'crossOrigin',{...property,set:new Proxy(property.set,{apply(target,receiver,args){const result=Reflect.apply(target,receiver,args);const state=states.get(receiver);if(state)refresh(state);return result;}})});
   }
 }
+import {listen_runtime} from './runtime_events.mjs';
