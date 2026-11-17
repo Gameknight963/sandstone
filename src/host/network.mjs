@@ -8,6 +8,8 @@ import { streaming_http_session } from "./http_session.mjs";
 import { relay_websocket_class, websocket_options } from "./websocket.mjs";
 import { BeaconQueue } from './beacon.mjs';
 import {KeepaliveRequests} from './keepalive.mjs';
+import {http_cache} from './http_cache.mjs';
+export {http_cache} from './http_cache.mjs';
 
 export const ws_connections = {};
 export let session = null;
@@ -20,7 +22,7 @@ rpc_handlers.fetch_keepalive_abort = (...args) => keepalives.abort(...args);
 rpc_handlers.fetch_keepalive_done = (...args) => keepalives.completed(...args);
 
 export async function fetch(url, options, context) {
-  return fetch_with_cookies((url, init) => session.fetch(url, init), site_data, url, options, context);
+  return fetch_with_cookies((url, init) => http_cache.fetch((url,init)=>session.fetch(url,init),url,init,context), site_data, url, options, context);
 }
 
 export function set_websocket(url) {

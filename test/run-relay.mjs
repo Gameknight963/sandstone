@@ -7,6 +7,7 @@ import {server as wisp} from '../example/node_modules/@mercuryworkshop/wisp-js/s
 import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
 import {font_fixture, font_script, constructor_font_script} from './font-fixture.mjs';
 import {keepalive_fixture,keepalive_quota_script,keepalive_finish_script,keepalive_unload_script,keepalive_abort_script,keepalive_worker_script} from './keepalive-fixture.mjs';
+import {cache_fixture,cache_script} from './cache-fixture.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -17,12 +18,14 @@ const contextRequests=[];
 const cssRequests=[];
 const fonts=font_fixture();
 const keepalive=keepalive_fixture();
+const cacheFixture=cache_fixture();
 const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
 const server=create_relay_server((request,response)=>{
   const url=new URL(request.url,'http://localhost');
   const client=url.searchParams.get('client');
   if(fonts.handle(request,response,url))return;
   if(keepalive.handle(request,response,url))return;
+  if(cacheFixture.handle(request,response,url))return;
   if(url.pathname.startsWith('/css-context/')){
     const policy=url.searchParams.get('policy')||'';
     const query='?client='+encodeURIComponent(client)+'&policy='+encodeURIComponent(policy);
@@ -277,6 +280,13 @@ try{
   assert.equal(nativeRequestContexts.find(value=>value.label==='meta').referrer,null);
   await nativePage.goto(origin+'/request-context/source?policy=origin&meta=no-referrer&script=meta-native');
   const nativeDeclaredMeta=contextValues('meta-native');assert.equal(nativeDeclaredMeta.length,1);assert.equal(nativeDeclaredMeta[0].referrer,null);
+  await nativePage.goto(origin+'/cache/page?client=cache-native');
+  const nativeCache=JSON.parse(await nativePage.evaluate(source=>eval(source),cache_script('cache-native')));
+  const nativeCacheRequests=cacheFixture.values('cache-native');
+  assert.equal(nativeCache[0].body,nativeCache[1].body);assert.equal(nativeCache[3].status,200);
+  await nativePage.goto(origin+'/cache/document?client=reload-native&item=document');
+  assert.equal(await nativePage.evaluate(()=>documentVersion),1);cacheFixture.bump('reload-native','document');
+  await nativePage.reload();assert.equal(await nativePage.evaluate(()=>documentVersion),2);
   await nativePage.goto(origin+'/keepalive/page?client=keep-native');
   const nativeKeepaliveQuota=JSON.parse(await nativePage.evaluate(source=>eval(source),keepalive_quota_script('keep-native')));
   assert.deepEqual(nativeKeepaliveQuota,{beacon:false,second:'TypeError',status:200});
@@ -384,6 +394,28 @@ try{
   const metaClient='declared-meta-'+storageDenied;
   await page.evaluate(url=>main_frame.navigate_to(url),origin+'/request-context/source?policy=origin&meta=no-referrer&script='+metaClient);
   assert.deepEqual(contextValues(metaClient),nativeDeclaredMeta,'Declared meta policy was ignored during initial script downloads');
+  const cacheClient='cache-'+storageDenied;
+  await page.evaluate(url=>main_frame.navigate_to(url),origin+'/cache/page?client='+cacheClient);
+  const actualCache=JSON.parse(await page.evaluate(async source=>{
+    let timer;
+    try{return await Promise.race([main_frame.eval_js(source),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('HTTP cache fixture timed out')),15000);})]);}
+    finally{clearTimeout(timer);}
+  },cache_script(cacheClient)));
+  assert.deepEqual(actualCache,nativeCache,'HTTP cache response bodies, validators, modes or HEAD handling differ from native Chromium');
+  const actualCacheRequests=cacheFixture.values(cacheClient);
+  // HTTP permits retaining multiple Vary representations and cached HEAD
+  // metadata. Chromium evicts those more aggressively; response parity above
+  // covers them, and the remaining requests compare exact cache behavior.
+  const comparableCacheRequests=values=>values.filter(value=>!['vary','head'].includes(value.item));
+  assert.deepEqual(comparableCacheRequests(actualCacheRequests),comparableCacheRequests(nativeCacheRequests),'HTTP cache request reuse or conditional headers differ from native Chromium');
+  assert.equal(actualCacheRequests.filter(value=>value.item==='vary').length,2,'Matching Vary representations were fetched repeatedly');
+  const reloadClient='reload-'+storageDenied;
+  await page.evaluate(url=>main_frame.navigate_to(url),origin+'/cache/document?client='+reloadClient+'&item=document');
+  assert.equal(await page.evaluate(()=>main_frame.eval_js('documentVersion')),1);cacheFixture.bump(reloadClient,'document');
+  const reloadNavigation=await page.evaluate(()=>{const id=main_frame.navigation_id;main_frame.eval_js('location.reload();true').catch(()=>{});return id;});
+  await page.waitForFunction(id=>main_frame.navigation_id>id&&!main_frame.is_navigating,reloadNavigation);
+  assert.equal(await page.evaluate(()=>main_frame.eval_js('documentVersion')),2,'location.reload reused a fresh cached document');
+  assert.equal(cacheFixture.values(reloadClient)[1].cache,'max-age=0');
   const keepClient='keep-'+storageDenied;
   await page.evaluate(url=>main_frame.navigate_to(url),origin+'/keepalive/page?client='+keepClient);
   const actualKeepaliveQuota=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),keepalive_quota_script(keepClient)));

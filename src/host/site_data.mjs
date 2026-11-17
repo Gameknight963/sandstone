@@ -1,4 +1,5 @@
 import { Cookie, CookieJar, domainMatch } from "tough-cookie";
+import {http_cache} from './http_cache.mjs';
 
 const storage_key = "sandstone_site_data_v1";
 
@@ -92,6 +93,7 @@ export class SiteDataStore {
   }
 
   clear(hostname, {cookies = true, localStorage = true} = {}) {
+    http_cache.clear(hostname);
     if (localStorage) {
       for (const origin of Object.keys(this.local)) {
         if (new URL(origin).hostname === hostname) delete this.local[origin];

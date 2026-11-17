@@ -3,6 +3,12 @@
 export function streaming_http_session(HTTPSession) {
   return class StreamingHTTPSession extends HTTPSession {
     relay_streams = new Map();
+    static create_response(body, info) {
+      // A 304 response must have a null body, including while its native
+      // transfer is still finishing. libcurl.js otherwise throws before fetch
+      // can resolve, leaving conditional requests pending forever.
+      return super.create_response(info.status === 304 ? null : body, info);
+    }
     static async create_options(params) {
       const lastID = params.event_source_last_id;
       delete params.event_source_last_id;

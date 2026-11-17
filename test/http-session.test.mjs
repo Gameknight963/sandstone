@@ -12,6 +12,13 @@ class Session {
 const HTTPSession=streaming_http_session(Session);
 const bytes=value=>new TextEncoder().encode(value);
 
+test('Not Modified responses have null bodies even when libcurl supplies a stream',()=>{
+  class NativeSession extends Session {static create_response(body,info){return new Response(body,info);}}
+  const Adapter=streaming_http_session(NativeSession);
+  const response=Adapter.create_response(new ReadableStream(),{status:304,headers:{ETag:'"cached"'}});
+  assert.equal(response.status,304);assert.equal(response.body,null);assert.equal(response.headers.get('etag'),'"cached"');
+});
+
 test('HTTP responses open at final headers, before any body arrives',async()=>{
   const session=new HTTPSession();let body;const errors=[];
   const handle=session.stream_response('https://test/',stream=>body=stream,error=>errors.push(error));

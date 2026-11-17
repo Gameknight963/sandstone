@@ -155,6 +155,7 @@ export class ProxyFrame {
             body: form_data.body
           }
         }
+        if (navigation.history_mode === 'reload') options.cache = 'no-cache';
         let response = await network.fetch(url, options, {url:source_url,top_url:source_url,referrerPolicy:source_policy,navigation:true});
         html = await response.text();
         url = response.url;

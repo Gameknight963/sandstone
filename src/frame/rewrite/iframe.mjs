@@ -26,6 +26,7 @@ export function rewrite_iframe(iframe_element) {
     try {
       let response = await network.fetch(iframe_url, {
         mode:'navigate',sandstone_frame_id:navigation.from_child ? frame_id : loader.frame_id,
+        cache:navigation.history_mode === 'reload' ? 'no-cache' : 'default',
         referrerPolicy:navigation.referrerPolicy || iframe_element.referrerPolicy || document_referrer_policy(),
         ...(form_data ? {
         method: "POST", headers: form_data.headers || {"Content-Type": form_data.enctype}, body: form_data.body
