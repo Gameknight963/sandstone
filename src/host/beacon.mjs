@@ -61,6 +61,6 @@ export class BeaconQueue {
       this.pending.delete(request);
       lease.release();
     }
-    return {cookies: this.cookies(entry.context.url)};
+    return {cookies: this.cookies(entry.context.url,entry.context)};
   }
 }

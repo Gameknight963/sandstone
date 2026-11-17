@@ -14,7 +14,7 @@ export function get_cookie() {
 }
 export function set_cookie(value) {
   try {
-    const text=String(value),parsed=storage_cookie(text);
+    const text=String(value),parsed=storage_cookie(text,{crossSite:loader.cookie_cross_site});
     if(!parsed)return;
     cookies.setCookieSync(parsed, loader.url, {http: false, ignoreError: true});
     cookie_set(loader.frame_id, text).catch(console.error);

@@ -10,13 +10,15 @@ import { BeaconQueue } from './beacon.mjs';
 import {KeepaliveRequests} from './keepalive.mjs';
 import {http_cache} from './http_cache.mjs';
 import {Downloads} from './download.mjs';
+import {frame_cross_site} from './frame_context.mjs';
 export {http_cache} from './http_cache.mjs';
 
 export const ws_connections = {};
 export let session = null;
-export const beacons = new BeaconQueue({fetch: (...args) => fetch(...args), cookies: url => site_data.documentCookies(url)});
-export const keepalives = new KeepaliveRequests({queue:beacons,fetch:(...args)=>fetch(...args),cookies:url=>site_data.documentCookies(url)});
-export const downloads=new Downloads({fetch:(...args)=>fetch(...args),contexts:beacons.contexts,cookies:url=>site_data.documentCookies(url)});
+const context_cookies=(url,context)=>site_data.documentCookies(url,{crossSite:!!context?.cross_site});
+export const beacons = new BeaconQueue({fetch: (...args) => fetch(...args), cookies: context_cookies});
+export const keepalives = new KeepaliveRequests({queue:beacons,fetch:(...args)=>fetch(...args),cookies:context_cookies});
+export const downloads=new Downloads({fetch:(...args)=>fetch(...args),contexts:beacons.contexts,cookies:context_cookies});
 rpc_handlers.download_request=(...args)=>downloads.request(...args);
 rpc_handlers.download_blob=(...args)=>downloads.blob(...args);
 rpc_handlers.beacon = (context, url, body, options) => beacons.send(context, url, body, options);
@@ -51,7 +53,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options) {
     response = await fetch(url, {...options, signal: request.controller.signal}, {
       url: options?.mode === 'navigate' && frame.pending_navigation?.source_url || (frame.url.origin === "null" && frame.origin && frame.origin !== "null" ? frame.origin + "/" : frame.url.href),
       top_url: iframes[frame.root_id]?.url?.href || frame.url.href,
-      navigation: options?.mode === 'navigate', nested: true
+      navigation: options?.mode === 'navigate', nested: true,cross_site:frame_cross_site(frame,iframes)
     });
     request.reader = response.body?.getReader();
   } catch (error) {
@@ -64,7 +66,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options) {
     has_body: !!request.reader,
     headers: [],
     items: {},
-    cookies: site_data.documentCookies(frame.url.href)
+    cookies: site_data.documentCookies(frame.url.href,{crossSite:frame_cross_site(frame,iframes)})
   };  
   for (let key of keys) {
     payload.items[key] = response[key];
@@ -107,7 +109,7 @@ rpc_handlers["ws_new"] = function (frame_id, url, protocols) {
   if (!frame) throw new TypeError('Unknown frame');
   const source = frame.url.origin === 'null' && frame.origin && frame.origin !== 'null' ? frame.origin + '/' : frame.url.href;
   const options = websocket_options(site_data, url, {
-    url: source, top_url: iframes[frame.root_id]?.url.href || source, userAgent: navigator.userAgent
+    url: source, top_url: iframes[frame.root_id]?.url.href || source, userAgent: navigator.userAgent,cross_site:frame_cross_site(frame,iframes)
   });
   const RelayWebSocket = relay_websocket_class(libcurl.CurlWebSocket);
   let ws = new RelayWebSocket(url, protocols, options);
@@ -124,8 +126,8 @@ rpc_handlers["ws_new"] = function (frame_id, url, protocols) {
   //set up event listeners to forward to the frame
   for (let event_name of ["open", "message", "close", "error"]) {
     ws["on" + event_name] = (data) => {
-      if (event_name === 'open') data = {protocol: ws.protocol || '', cookies: site_data.documentCookies(source)};
-      if (event_name === 'error') data = {cookies: site_data.documentCookies(source)};
+      if (event_name === 'open') data = {protocol: ws.protocol || '', cookies: site_data.documentCookies(source,{crossSite:frame_cross_site(frame,iframes)})};
+      if (event_name === 'error') data = {cookies: site_data.documentCookies(source,{crossSite:frame_cross_site(frame,iframes)})};
       if (event_name === 'close' || event_name === 'error') ws_info.ended = true;
       ws_info.events.push([event_name, data]);
       ws_info.callback?.();

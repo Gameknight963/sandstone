@@ -61,10 +61,10 @@ export class SiteDataStore {
     } catch { return undefined; }
   }
 
-  documentCookies(url) {
+  documentCookies(url, {crossSite=false} = {}) {
     const data = this.cookies.serializeSync();
     const hostname = new URL(url).hostname;
-    data.cookies = data.cookies.filter(cookie => !cookie.httpOnly &&
+    data.cookies = data.cookies.filter(cookie => !cookie.httpOnly && (!crossSite||cookie.sameSite==='none'&&cookie.secure) &&
       (cookie.hostOnly ? cookie.domain === hostname : domainMatch(hostname, cookie.domain)));
     return data;
   }

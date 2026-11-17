@@ -45,7 +45,7 @@ export class KeepaliveRequests {
       return {has_body,request_referrer:response.request_referrer,
         headers:[...response.headers].filter(([name])=>!['set-cookie','set-cookie2'].includes(name.toLowerCase())),
         items:Object.fromEntries(['ok','redirected','status','statusText','type','url'].map(name=>[name,response[name]])),
-        cookies:this.cookies(lease.entry.context.url)};
+        cookies:this.cookies(lease.entry.context.url,lease.entry.context)};
     } catch (error) {
       record.error = error;
       this.finish(record);

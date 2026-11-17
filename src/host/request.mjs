@@ -33,7 +33,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
     const credentials = options.credentials || "include";
     const allowed = credentials === "include" || (credentials === "same-origin" && url.origin === source.origin && !cors);
     const safe_method = /^(GET|HEAD)$/i.test(options.method || "GET");
-    const sameSiteContext = same_site(top, source) && same_site(top, url) && !crossSiteRedirect ? "strict" : context.navigation && !context.nested && safe_method ? "lax" : "none";
+    const sameSiteContext = !context.cross_site && same_site(top, source) && same_site(top, url) && !crossSiteRedirect ? "strict" : context.navigation && !context.nested && safe_method ? "lax" : "none";
     // Font loads send their document Origin even for a same-origin URL.
     const origin = request_origin(source.href,url.href,{method:options.method,mode,policy,tainted,cors: cors || destination === 'font'});
     if (origin !== null) headers.set('origin',origin);

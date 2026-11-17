@@ -36,6 +36,7 @@ export let is_loaded = false;
 export let ready_state = "loading";
 export let base_url;
 export let is_iframe = false;
+export let cookie_cross_site = false;
 export let site_settings = {};
 export let default_settings = {};
 export const child_navigators = new Map();
@@ -117,6 +118,7 @@ async function load_html(options) {
   beacon_context = options.beacon_context;
   version = options.version;
   is_iframe = options.is_iframe || false;
+  cookie_cross_site = !!options.cookie_cross_site;
   default_settings = options.default_settings;
   site_settings = {...default_settings, ...options.settings};
   network.known_urls[location.href] = options.url;

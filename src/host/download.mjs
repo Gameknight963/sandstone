@@ -24,7 +24,7 @@ export class Downloads {
     try{if(new URL(options.referrer).origin===new URL(context.url).origin)referrer=options.referrer;}catch{}
     const response=await this.fetch(target.href,{mode:'navigate',credentials:'include',referrerPolicy:options.referrerPolicy,referrer},context);
     const filename=await this.response(response,target.href,hint);
-    return {filename,cookies:this.cookies?.(context.url)};
+    return {filename,cookies:this.cookies?.(context.url,context)};
   }
   async response(response,url,hint) {
     if(!response.ok){await response.body?.cancel();throw new TypeError('Download failed: '+response.status);}

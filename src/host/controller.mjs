@@ -7,6 +7,7 @@ import {crypto_service} from './crypto.mjs';
 import { NavigationHistory } from "../history.mjs";
 import {parse_referrer_policy,default_referrer_policy} from '../referrer.mjs';
 import {is_download} from '../download.mjs';
+import {frame_cross_site} from './frame_context.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 
@@ -281,7 +282,7 @@ rpc.rpc_handlers["session_storage"] = async (frame_id, entries) => {
 
 rpc.rpc_handlers["cookie_set"] = async (frame_id, value) => {
   const frame = iframes[frame_id];
-  if (frame) site_data.setCookie(frame.url.href, value, false);
+  if (frame) site_data.setCookie(frame.url.href, value, false,{crossSite:frame_cross_site(frame,iframes)});
 };
 
 rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) => {
@@ -304,18 +305,19 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
       const port = parent_id === root.id ? root.rpc_target.target : root.rpc_target.extra_frame_targets.get(parent_id);
       if (!port) throw new DOMException("Parent frame is disconnected", "InvalidStateError");
       const result=await rpc.call_procedure(port, "child_navigate", [child_id, child.url.href, form_data, {...navigation,from_child:true}]);
-      if(result?.download){child.url=previous_url;child.pending_navigation=null;return {...result,cookies:site_data.documentCookies(previous_url.href)};}
+      if(result?.download){child.url=previous_url;child.pending_navigation=null;return {...result,cookies:site_data.documentCookies(previous_url.href,{crossSite:frame_cross_site(child,iframes)})};}
     },
     on_url_change() {}
   };
   iframes[child_id] = child;
   child.history.navigate(url, {mode: saved?.navigation?.history_mode || "push"});
   return {
-    beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href,nested:true}),
+    beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href,nested:true,cross_site:frame_cross_site(child,iframes)}),
+    cookie_cross_site:frame_cross_site(child,iframes),
     crypto_available: crypto_service.methods,
     local_storage: site_data.local[child.origin],
     session_storage: child.session_storage[child.origin],
-    cookies: site_data.documentCookies(child.origin === "null" ? child.url.href : child.origin + "/"),
+    cookies: site_data.documentCookies(child.origin === "null" ? child.url.href : child.origin + "/",{crossSite:frame_cross_site(child,iframes)}),
     history: {...child.history.snapshot(), traversed: !!saved?.navigation?.traversed, restored: saved?.navigation?.history_mode === "reload"}
   };
 };

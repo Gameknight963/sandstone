@@ -4,6 +4,8 @@ import {SiteDataStore} from '../src/host/site_data.mjs';
 import {cookie_header} from '../src/host/cookie_policy.mjs';
 import {fetch_with_cookies} from '../src/host/request.mjs';
 import {websocket_options} from '../src/host/websocket.mjs';
+import {frame_cross_site} from '../src/host/frame_context.mjs';
+import {storage_cookie} from '../src/cookie.mjs';
 
 test('Default SameSite cookies use Lax and allow only recent unsafe top-level navigation',async()=>{
   const store=new SiteDataStore(),url='https://target.test/';
@@ -22,6 +24,23 @@ test('Default SameSite cookies use Lax and allow only recent unsafe top-level na
     assert.equal(cookie,expected);
   }
   assert.equal(websocket_options(store,'wss://target.test/',{url:'https://source.test/'}).headers.Cookie,'none=n');
+});
+
+test('Cross-site ancestors constrain nested cookie snapshots, script writes and requests',async()=>{
+  const frames={root:{root_id:'root',url:'https://site.test/'},middle:{root_id:'root',parent_id:'root',url:'https://other.test/'},leaf:{root_id:'root',parent_id:'middle',url:'https://site.test/'}};
+  assert.equal(frame_cross_site(frames.root,frames),false);
+  assert.equal(frame_cross_site(frames.middle,frames),true);
+  assert.equal(frame_cross_site(frames.leaf,frames),true);
+  const store=new SiteDataStore();
+  store.setCookie(frames.root.url,'default=d; Path=/');
+  store.setCookie(frames.root.url,'none=n; SameSite=None; Secure; Path=/');
+  assert.deepEqual(store.documentCookies(frames.root.url,{crossSite:true}).cookies.map(cookie=>cookie.key),['none']);
+  assert.equal(storage_cookie('script=blocked',{crossSite:true}),undefined);
+  assert.equal(storage_cookie('script=allowed; SameSite=None; Secure',{crossSite:true}).value,'allowed');
+  let cookie;
+  await fetch_with_cookies(async(url,options)=>{cookie=options.headers.cookie;return new Response('ok');},store,frames.root.url,{}, {url:frames.root.url,top_url:frames.root.url,cross_site:true});
+  assert.equal(cookie,'none=n');
+  assert.equal(websocket_options(store,'wss://site.test/',{url:frames.root.url,cross_site:true}).headers.Cookie,'none=n');
 });
 
 test('Cookie storage rejects insecure None attributes and cross-site response writes without deleting valid cookies',async()=>{
