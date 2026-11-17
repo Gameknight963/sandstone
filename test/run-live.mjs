@@ -14,7 +14,8 @@ const sites=[
   {id:'wikipedia',url:'https://en.wikipedia.org/wiki/Main_Page'},
   {id:'github',url:'https://github.com/octocat/Hello-World'},
   {id:'react',url:'https://react.dev/learn'},
-  {id:'vue',url:'https://vuejs.org/guide/introduction.html'}
+  {id:'vue',url:'https://vuejs.org/guide/introduction.html'},
+  {id:'svelte',url:'https://svelte.dev/docs/svelte/overview'}
 ];
 const selected=process.argv.slice(2);
 for(const id of selected)if(!sites.some(site=>site.id===id))throw new Error('Unknown live site: '+id+'; choose '+sites.map(site=>site.id).join(', '));
@@ -54,6 +55,28 @@ async function wait(page,proxy,expression){
 const summary=(page,proxy)=>read(page,proxy,'({title:document.title,heading:document.querySelector("h1")?.textContent.trim()||"",links:document.links.length})');
 async function interact(page,proxy,site){
   const surface=proxy?page.frameLocator('iframe[frame-id]'):page;
+  if(site.id==='svelte'){
+    // Current Svelte stores delegated handlers under a symbol on the element.
+    // SSR paints this button before hydration installs its click handler.
+    await wait(page,proxy,'(()=>{const button=document.querySelector(\'button[aria-label="Toggle dark mode"]\');return !!button&&Reflect.ownKeys(button).some(key=>typeof key==="symbol"&&typeof button[key]?.click==="function");})()');
+    const theme=surface.locator('button[aria-label="Toggle dark mode"]:visible').first();
+    const pressed=await theme.getAttribute('aria-pressed');
+    await theme.click();
+    await wait(page,proxy,'Array.from(document.querySelectorAll(\'button[aria-label="Toggle dark mode"]\')).some(button=>button.getAttribute("aria-pressed")!=='+JSON.stringify(pressed)+')');
+    await (proxy?page.evaluate(()=>main_frame.eval_js('window.liveNavigationMarker="persisted"')):page.evaluate(()=>window.liveNavigationMarker='persisted'));
+    await surface.locator('a[href="/docs/svelte/getting-started"]:visible').first().click();
+    await wait(page,proxy,'location.pathname==="/docs/svelte/getting-started"&&document.querySelector("h1")?.textContent.trim()==="Getting started"');
+    await surface.getByPlaceholder('Search',{exact:true}).fill('onMount');
+    await surface.locator('a[href="/docs/svelte/lifecycle-hooks#onMount"]:visible').first().click();
+    await wait(page,proxy,'location.pathname==="/docs/svelte/lifecycle-hooks"&&location.hash==="#onMount"&&document.querySelector("h1")?.textContent.trim()==="Lifecycle hooks"');
+    await (proxy?page.evaluate(()=>main_frame.eval_js('history.back();true')):page.evaluate(()=>history.back()));
+    await wait(page,proxy,'location.pathname==="/docs/svelte/getting-started"&&document.querySelector("h1")?.textContent.trim()==="Getting started"');
+    await (proxy?page.evaluate(()=>main_frame.eval_js('history.forward();true')):page.evaluate(()=>history.forward()));
+    await wait(page,proxy,'location.pathname==="/docs/svelte/lifecycle-hooks"&&location.hash==="#onMount"&&document.querySelector("h1")?.textContent.trim()==="Lifecycle hooks"');
+    const result=await read(page,proxy,'({path:location.pathname,hash:location.hash,title:document.title,heading:document.querySelector("h1").textContent.trim(),clientNavigation:window.liveNavigationMarker==="persisted",theme:document.querySelector(\'button[aria-label="Toggle dark mode"]\').getAttribute("aria-pressed")})');
+    assert.equal(result.clientNavigation,true,'Svelte navigation reloaded the document');
+    return result;
+  }
   if(site.id==='vue'){
     await wait(page,proxy,'!!document.getElementById("app")?.__vue_app__');
     await surface.getByRole('button',{name:'Count is: 0',exact:true}).click();
