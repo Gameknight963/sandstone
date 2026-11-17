@@ -3,6 +3,8 @@ import * as network from "../network.mjs";
 import * as loader from "../loader.mjs";
 import * as util from "../../util.mjs";
 import * as rpc from "../../rpc.mjs";
+import {parse_referrer_policy} from '../../referrer.mjs';
+import {document_referrer_policy} from '../intercept/document.mjs';
 
 export function rewrite_iframe(iframe_element) {
   const frame_id = Math.random() + "";
@@ -12,8 +14,7 @@ export function rewrite_iframe(iframe_element) {
   let iframe_src = iframe_element.src;
   let iframe_url = "";
 
-  let fetch_src = async (value, form_data = null) => {
-    if (registered) await unregister(frame_id, {keep_history: true});
+  let fetch_src = async (value, form_data = null, navigation = {}) => {
     //download the proxied html
     iframe_element.setAttribute("__src", value);
     iframe_url = convert_url(value, ctx.location.href);
@@ -21,16 +22,23 @@ export function rewrite_iframe(iframe_element) {
     let final_url = iframe_url;
     let error; //possible network error
     let html;
+    let referrer_policy, document_referrer;
     try {
-      let response = await network.fetch(iframe_url, form_data ? {
+      let response = await network.fetch(iframe_url, {
+        mode:'navigate',sandstone_frame_id:navigation.from_child ? frame_id : loader.frame_id,
+        referrerPolicy:navigation.referrerPolicy || iframe_element.referrerPolicy || document_referrer_policy(),
+        ...(form_data ? {
         method: "POST", headers: form_data.headers || {"Content-Type": form_data.enctype}, body: form_data.body
-      } : undefined);
+      } : {})});
       html = await response.text();
       final_url = response.url;
+      referrer_policy = parse_referrer_policy(response.headers.get('referrer-policy'));
+      document_referrer = response.request_referrer || '';
     }
     catch (e) {
       error = util.format_error(e);
     }
+    if (registered) {await unregister(frame_id, {keep_history: true});registered=false;}
     
     //load the frame runtime
     let loader_blob = new Blob([loader.frame_html], {type: "text/html"});
@@ -71,6 +79,7 @@ export function rewrite_iframe(iframe_element) {
         frame_id: frame_id,
         error: error,
         ...state,
+        referrer_policy,document_referrer,
         settings: {},
         default_settings: loader.default_settings,
         version: loader.version,

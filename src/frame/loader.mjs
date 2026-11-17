@@ -8,8 +8,13 @@ import { pending_scripts } from "./rewrite/script.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
 import { flush_import_map } from "./polyfill/module.mjs";
 import {configure_crypto} from './polyfill/crypto.mjs';
+import {default_referrer_policy} from '../referrer.mjs';
+import {document_referrer_policy,reset_document_referrer_policy} from './intercept/document.mjs';
 
-export const navigate = rpc.create_rpc_wrapper(rpc.host, "navigate");
+const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
+export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
+  return navigate_rpc(id,url,reload,form_data,{referrerPolicy:document_referrer_policy(),...navigation});
+}
 export const local_storage = rpc.create_rpc_wrapper(rpc.host, "local_storage");
 export const session_storage = rpc.create_rpc_wrapper(rpc.host, "session_storage");
 
@@ -21,6 +26,8 @@ export let url; //the proxied page url
 export let frame_id; //the current frame id
 export let beacon_context;
 export let crypto_available = false;
+export let referrer_policy = default_referrer_policy;
+export let document_referrer = '';
 export let frame_html; //the html for the frame runtime
 export let version; //the sandstone version
 export let is_loaded = false;
@@ -30,7 +37,7 @@ export let is_iframe = false;
 export let site_settings = {};
 export let default_settings = {};
 export const child_navigators = new Map();
-rpc.rpc_handlers["child_navigate"] = (id, url, form_data) => child_navigators.get(id)?.(url, form_data);
+rpc.rpc_handlers["child_navigate"] = (id, url, form_data, navigation) => child_navigators.get(id)?.(url, form_data, navigation);
 
 export function eval_script(script_element, script_text) {
   ctx.document.currentScript = script_element;
@@ -78,6 +85,8 @@ export function set_url(_url) {
 }
 
 export function set_worker_context(options) {
+  referrer_policy = options.referrer_policy || default_referrer_policy;
+  reset_document_referrer_policy(referrer_policy);
   crypto_available = options.crypto_available || false;
   if (!options.probe) configure_crypto(crypto_available);
   url = options.url;
@@ -97,6 +106,9 @@ function get_frame_html() {
 }
 
 async function load_html(options) {
+  referrer_policy = options.referrer_policy || default_referrer_policy;
+  reset_document_referrer_policy(referrer_policy);
+  document_referrer = options.document_referrer || '';
   crypto_available = options.crypto_available || false;
   configure_crypto(crypto_available);
   beacon_context = options.beacon_context;
@@ -124,6 +136,7 @@ async function load_html(options) {
 
   let parser = new DOMParser();
   let html = parser.parseFromString(options.html, "text/html");  
+  document_referrer_policy(html);
   const base_href = html.querySelector("base[href]")?.getAttribute("href");
   if (base_href !== undefined && base_href !== null) {
     try { base_url = new URL(base_href, options.url).href; } catch {}
@@ -150,7 +163,9 @@ async function load_html(options) {
     }
     else {
       const original_href = convert_url(element.getAttribute("href") || "", ctx.document.baseURI);
-      ctx.location.assign(original_href);
+      const target = new URL(original_href), current = new URL(ctx.location.href);
+      if (target.origin === current.origin && target.pathname === current.pathname && target.search === current.search && (target.hash !== current.hash || target.hash)) ctx.location.assign(original_href);
+      else navigate(frame_id,original_href,true,null,{referrerPolicy:element.relList.contains('noreferrer') ? 'no-referrer' : element.referrerPolicy || document_referrer_policy()}).catch(console.error);
     }
   });
 

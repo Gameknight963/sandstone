@@ -25,7 +25,7 @@ export class BeaconQueue {
     }
   }
 
-  async send(id, url, body) {
+  async send(id, url, body, options = {}) {
     const entry = this.contexts.get(id);
     if (!entry || !(body instanceof Blob) || entry.queued + body.size > 65536) return false;
     const target = new URL(url);
@@ -40,6 +40,8 @@ export class BeaconQueue {
       const response = await this.fetch(target.href, {
         method: 'POST', body: await body.arrayBuffer(),
         headers: {Origin: new URL(entry.context.url).origin, ...(body.type ? {'Content-Type': body.type} : {})},
+        mode:!body.type || /^(text\/plain|application\/x-www-form-urlencoded|multipart\/form-data)(?:;|$)/i.test(body.type) ? 'no-cors' : 'cors',
+        referrerPolicy:options.referrerPolicy,
         credentials: 'include', redirect: 'follow', signal: controller.signal
       }, entry.context);
       await response.body?.cancel();

@@ -3,6 +3,7 @@ import * as loader from "./loader.mjs";
 import { create_websocket_class } from "./websocket.mjs";
 import { ctx } from "./context.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
+import {document_referrer_policy} from './intercept/document.mjs';
 
 export const rpc_fetch = rpc.create_rpc_wrapper(rpc.host, "fetch");
 const rpc_fetch_read = rpc.create_rpc_wrapper(rpc.host, "fetch_read");
@@ -37,6 +38,9 @@ export async function fetch(url, options) {
   }
 
   const params = {...options};
+  if (!params.referrerPolicy) params.referrerPolicy = document_referrer_policy();
+  const frame_id = params.sandstone_frame_id || loader.frame_id;
+  delete params.sandstone_frame_id;
   const signal = params.signal;
   delete params.signal;
   signal?.throwIfAborted();
@@ -44,32 +48,32 @@ export async function fetch(url, options) {
   let stream_controller;
   const cleanup = () => signal?.removeEventListener("abort", abort);
   const abort = () => {
-    rpc_fetch_abort(loader.frame_id, request_id).catch(() => {});
+    rpc_fetch_abort(frame_id, request_id).catch(() => {});
     stream_controller?.error(signal.reason);
     cleanup();
   };
   signal?.addEventListener("abort", abort, {once: true});
   try {
-    const pending = rpc_fetch(loader.frame_id, request_id, url.href, params);
+    const pending = rpc_fetch(frame_id, request_id, url.href, params);
     const fetch_data = signal ? await new Promise((resolve, reject) => {
       const reject_abort = () => reject(signal.reason);
       signal.addEventListener("abort", reject_abort, {once: true});
       pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", reject_abort));
     }) : await pending;
     signal?.throwIfAborted();
-    load_cookies(fetch_data.cookies);
+    if (frame_id === loader.frame_id) load_cookies(fetch_data.cookies);
     const body = fetch_data.has_body ? new ReadableStream({
       start(controller) { stream_controller = controller; },
       async pull(controller) {
         try {
-          const chunk = await rpc_fetch_read(loader.frame_id, request_id);
+          const chunk = await rpc_fetch_read(frame_id, request_id);
           if (chunk.done) { cleanup(); controller.close(); }
           else controller.enqueue(chunk.value);
         } catch (error) { cleanup(); controller.error(error); }
       },
-      cancel() { cleanup(); return rpc_fetch_abort(loader.frame_id, request_id); }
+      cancel() { cleanup(); return rpc_fetch_abort(frame_id, request_id); }
     }) : null;
-    if (!body) { cleanup(); await rpc_fetch_abort(loader.frame_id, request_id); }
+    if (!body) { cleanup(); await rpc_fetch_abort(frame_id, request_id); }
     return restore_response({...fetch_data, body});
   } catch (error) { cleanup(); throw error; }
 };
@@ -83,6 +87,7 @@ function restore_response(data) {
   for (const [key, value] of Object.entries({url, redirected, type})) {
     Object.defineProperty(response, key, {value});
   }
+  if (data.request_referrer !== undefined) Object.defineProperty(response,'request_referrer',{value:data.request_referrer});
   const clone = response.clone.bind(response);
   Object.defineProperty(response, "clone", {value: () => {
     const copy = clone();

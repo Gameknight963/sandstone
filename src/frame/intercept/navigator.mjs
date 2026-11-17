@@ -3,12 +3,13 @@ import {ctx} from '../context.mjs';
 import * as loader from '../loader.mjs';
 import * as rpc from '../../rpc.mjs';
 import {load_cookies} from '../polyfill/cookie.mjs';
+import {document_referrer_policy} from './document.mjs';
 
 if (typeof Navigator !== 'undefined') {
   const send = create_beacon_sender({
     base: () => ctx.document.baseURI,
     dispatch(url, body) {
-      return rpc.call_procedure(rpc.host, 'beacon', [loader.beacon_context, url, body]).then(result => load_cookies(result?.cookies));
+      return rpc.call_procedure(rpc.host, 'beacon', [loader.beacon_context, url, body,{referrerPolicy:document_referrer_policy()}]).then(result => load_cookies(result?.cookies));
     }
   });
   Navigator.prototype.sendBeacon = function sendBeacon(url, body) {

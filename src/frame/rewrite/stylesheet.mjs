@@ -22,7 +22,11 @@ export function rewrite_stylesheet(element) {
       }
       const url = remote;
       pending = (async () => {
-        const response = await network.fetch(url);
+        const response = await network.fetch(url, {
+          mode:element.crossOrigin === null ? 'no-cors' : 'cors',
+          credentials:element.crossOrigin === 'anonymous' ? 'same-origin' : 'include',
+          referrerPolicy:element.referrerPolicy
+        });
         if (!response.ok) throw new TypeError(`Stylesheet request failed: ${response.status}`);
         const css = await parse_css(await response.text(), response.url || url);
         if (current !== generation) return;

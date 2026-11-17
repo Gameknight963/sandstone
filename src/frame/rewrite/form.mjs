@@ -14,6 +14,7 @@ function method_for(form, submitter) {
 async function submit(form, submitter) {
   const action = attribute(submitter, "formaction") ?? attribute(form, "action") ?? ctx.location.href;
   const method = method_for(form, submitter);
+  const navigation = /(?:^|\s)noreferrer(?:\s|$)/i.test(attribute(form,'rel') || '') ? {referrerPolicy:'no-referrer'} : {};
   if (method === "dialog") return;
   const url = new URL(convert_url(action || ctx.location.href, ctx.document.baseURI));
   const data = submitter ? new FormData(form, submitter) : new FormData(form);
@@ -21,7 +22,7 @@ async function submit(form, submitter) {
   for (const [key, value] of data) params.append(key, typeof value === "string" ? value : value.name);
   if (method === "get") {
     url.search = params.toString();
-    return loader.navigate(loader.frame_id, url.href);
+    return loader.navigate(loader.frame_id, url.href,true,null,navigation);
   }
   const enctype = attribute(submitter, "formenctype") !== null ? submitter.formEnctype || "application/x-www-form-urlencoded" : enctype_descriptor.get.call(form);
   let body = data;
@@ -34,7 +35,7 @@ async function submit(form, submitter) {
   const request = await serialize_request(url.href, {method: "POST", body, headers}, ctx.location.href);
   return loader.navigate(loader.frame_id, url.href, true, {
     method: "POST", headers: request.options.headers, body: request.options.body
-  });
+  },navigation);
 }
 
 if (form_prototype) {

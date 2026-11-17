@@ -11,7 +11,7 @@ import { BeaconQueue } from './beacon.mjs';
 export const ws_connections = {};
 export let session = null;
 export const beacons = new BeaconQueue({fetch: (...args) => fetch(...args), cookies: url => site_data.documentCookies(url)});
-rpc_handlers.beacon = (context, url, body) => beacons.send(context, url, body);
+rpc_handlers.beacon = (context, url, body, options) => beacons.send(context, url, body, options);
 
 export async function fetch(url, options, context) {
   return fetch_with_cookies((url, init) => session.fetch(url, init), site_data, url, options, context);
@@ -37,7 +37,9 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options) {
   let response;
   try {
     response = await fetch(url, {...options, signal: request.controller.signal}, {
-      url: frame.url.origin === "null" && frame.origin && frame.origin !== "null" ? frame.origin + "/" : frame.url.href
+      url: options?.mode === 'navigate' && frame.pending_navigation?.source_url || (frame.url.origin === "null" && frame.origin && frame.origin !== "null" ? frame.origin + "/" : frame.url.href),
+      top_url: iframes[frame.root_id]?.url?.href || frame.url.href,
+      navigation: options?.mode === 'navigate', nested: true
     });
     request.reader = response.body?.getReader();
   } catch (error) {
@@ -46,6 +48,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options) {
   }
   var keys = ["ok", "redirected", "status", "statusText", "type", "url"];
   var payload = {
+    request_referrer: response.request_referrer,
     has_body: !!request.reader,
     headers: [],
     items: {},

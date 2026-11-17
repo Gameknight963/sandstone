@@ -69,7 +69,11 @@ export function rewrite_script(element) {
     if (!enabled || !script_url) return;
     ready = false;
     try {
-      const response = await network.fetch(convert_url(script_url, ctx.document.baseURI));
+      const response = await network.fetch(convert_url(script_url, ctx.document.baseURI), {
+        mode:element.crossOrigin === null ? 'no-cors' : 'cors',
+        credentials:element.crossOrigin === 'anonymous' ? 'same-origin' : 'include',
+        referrerPolicy:element.referrerPolicy
+      });
       if (!response.ok) throw new TypeError(`Script request failed: ${response.status}`);
       text = await response.text();
       element.__sandstone_url__ = response.url || convert_url(script_url, ctx.document.baseURI);

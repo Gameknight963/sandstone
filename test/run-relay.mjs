@@ -11,10 +11,27 @@ import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
 const held=new Map(),requests=[],closed=[],sockets=new Set(),timers=new Set();
 const authRequests=[];
 const beaconRequests=[],heldBeacons=new Map();
+const contextRequests=[];
 const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
 const server=create_relay_server((request,response)=>{
   const url=new URL(request.url,'http://localhost');
   const client=url.searchParams.get('client');
+  if(url.pathname==='/request-context/source'){
+    response.writeHead(200,{'Content-Type':'text/html','Set-Cookie':'ctx_session=secret; HttpOnly; SameSite=Strict; Path=/',...(url.searchParams.has('policy')?{'Referrer-Policy':url.searchParams.get('policy')}:{})});
+    const meta=url.searchParams.has('meta')?'<meta name="referrer" content='+JSON.stringify(url.searchParams.get('meta'))+'>':'';
+    const script=url.searchParams.has('script')?'<script src="/request-context/script?client='+encodeURIComponent(url.searchParams.get('script'))+'&label=declared-meta"></script>':'';
+    response.end('<!doctype html><title>Request context fixture</title>'+meta+script+'<body>Request context fixture</body>');return;
+  }
+  if(url.pathname.startsWith('/request-context/')){
+    const cors={'Access-Control-Allow-Origin':request.headers.origin||'*','Access-Control-Allow-Credentials':'true','Access-Control-Allow-Methods':'GET, POST','Access-Control-Allow-Headers':'content-type'};
+    if(request.method==='OPTIONS'){response.writeHead(204,cors);response.end();return;}
+    const chunks=[];request.on('data',chunk=>chunks.push(chunk));request.on('end',()=>{
+      contextRequests.push({client,label:url.searchParams.get('label'),method:request.method,origin:request.headers.origin??null,referrer:request.headers.referer??null,cookie:request.headers.cookie?.split('; ').filter(value=>value.startsWith('ctx_')).join('; ')||'',body:Buffer.concat(chunks).toString()});
+      if(url.pathname==='/request-context/redirect')response.writeHead(307,{...cors,Location:url.searchParams.get('target'),...(url.searchParams.has('policy')?{'Referrer-Policy':url.searchParams.get('policy')}:{})});
+      else response.writeHead(200,{...cors,'Content-Type':url.pathname.endsWith('/script')?'application/javascript':'text/plain'});
+      response.end(url.pathname.endsWith('/script')?'':'received');
+    });return;
+  }
   if(url.pathname==='/beacon'){
     const chunks=[];
     request.on('data',chunk=>chunks.push(chunk));
@@ -158,6 +175,34 @@ const beaconScript=client=>`(()=>{
   }
   return JSON.stringify(values);
 })()`;
+const contextScript=client=>`(async()=>{
+  const own=${JSON.stringify(origin)},cross=own.replace('127.0.0.1','localhost'),client=${JSON.stringify(client)};
+  const endpoint=(base,label)=>base+'/request-context/echo?client='+client+'&label='+label;
+  const cases=[
+    ['get',own,{}],['post',own,{method:'POST',body:'saved'}],['cross-get',cross,{}],['cross-post',cross,{method:'POST',body:'saved'}],
+    ['no-cors',cross,{method:'POST',body:'saved',mode:'no-cors'}],['no-referrer',own,{referrerPolicy:'no-referrer',method:'POST',body:'saved'}],
+    ['private-no-cors',cross,{referrerPolicy:'no-referrer',method:'POST',body:'saved',mode:'no-cors'}],['origin-only',own,{referrerPolicy:'origin'}],
+    ['chosen',own,{referrer:'/request-context/chosen#fragment',referrerPolicy:'unsafe-url'}],['empty',own,{referrer:''}],['unsafe',cross,{referrerPolicy:'unsafe-url'}]
+  ];
+  for(const [label,base,options] of cases){const response=await fetch(endpoint(base,label),options);await response.arrayBuffer();}
+  for(const [label,base,target,policy] of [['out',own,cross,''],['back',cross,own,''],['policy-change',own,cross,'no-referrer']]){
+    const url=new URL(base+'/request-context/redirect');url.searchParams.set('client',client);url.searchParams.set('label',label+'-start');url.searchParams.set('target',endpoint(target,label+'-finish'));if(policy)url.searchParams.set('policy',policy);
+    await (await fetch(url,{method:'POST',body:'redirected'})).arrayBuffer();
+  }
+  let blocked;try{await fetch(endpoint(cross,'blocked'),{mode:'same-origin'});}catch(error){blocked=error.name;}
+  const meta=document.createElement('meta');meta.name='referrer';meta.content='no-referrer';document.head.append(meta);
+  await (await fetch(endpoint(own,'meta'),{method:'POST',body:'meta'})).arrayBuffer();
+  meta.content='invalid, origin';await (await fetch(endpoint(own,'meta-invalid'))).arrayBuffer();
+  meta.remove();await (await fetch(endpoint(own,'meta-removed'))).arrayBuffer();
+  return JSON.stringify({blocked,policy:document.referrerPolicy});
+})()`;
+const contextValues=client=>contextRequests.filter(value=>value.client===client).map(({client,...value})=>({...value,body:value.body.replace('client='+encodeURIComponent(client)+'&','')}));
+const formCases=[['same','POST',false,'origin'],['cross','POST',true,'origin'],['private','POST',false,'no-referrer'],['get-cross','GET',true,'origin']];
+const submitFormScript=(client,label,method,target)=>`(()=>{
+  const form=document.createElement('form');form.method=${JSON.stringify(method)};form.action=${JSON.stringify(target+'/request-context/echo?client='+client+'&label='+label)};
+  for(const [name,value] of [['client',${JSON.stringify(client)}],['label',${JSON.stringify(label)}],['saved','yes']]){const input=document.createElement('input');input.name=name;input.value=value;form.append(input);}
+  document.body.append(form);setTimeout(()=>form.requestSubmit(),0);return true;
+})()`;
 async function waitBeacons(client,count){
   const deadline=Date.now()+10000;
   while(beaconRequests.filter(value=>value.client===client).length<count){
@@ -185,6 +230,28 @@ try{
   const beaconBaseline=JSON.parse(await nativePage.evaluate(source=>eval(source),beaconScript('native')));
   assert.deepEqual(beaconBaseline,[true,true,true,true,true,true,false,'TypeError','TypeError','TypeError']);
   await waitBeacons('native',6);const nativeBeaconBodies=await beaconBodies('native');
+  await nativePage.goto(origin+'/request-context/source?policy=origin#fragment');
+  const nativeContextResult=JSON.parse(await nativePage.evaluate(source=>eval(source),contextScript('native')));
+  const nativeRequestContexts=contextValues('native');
+  assert.equal(nativeRequestContexts.find(value=>value.label==='post').origin,origin);
+  assert.equal(nativeRequestContexts.find(value=>value.label==='meta').referrer,null);
+  await nativePage.goto(origin+'/request-context/source?policy=origin&meta=no-referrer&script=meta-native');
+  const nativeDeclaredMeta=contextValues('meta-native');assert.equal(nativeDeclaredMeta.length,1);assert.equal(nativeDeclaredMeta[0].referrer,null);
+  await nativeContext.addCookies([{url:origin.replace('127.0.0.1','localhost'),name:'ctx_target_strict',value:'s',sameSite:'Strict'},{url:origin.replace('127.0.0.1','localhost'),name:'ctx_target_lax',value:'l',sameSite:'Lax'}]);
+  for(const [label,method,cross,policy] of formCases){
+    await nativePage.goto(origin+'/request-context/source?policy='+policy);
+    await nativePage.evaluate(source=>eval(source),submitFormScript('forms-native',label,method,cross?origin.replace('127.0.0.1','localhost'):origin));
+    await nativePage.waitForURL(url=>url.pathname==='/request-context/echo'&&url.searchParams.get('label')===label);
+  }
+  const nativeFormContexts=contextValues('forms-native');
+  await nativePage.goto(origin+'/request-context/source?policy=origin');
+  const nativeChildAttached=nativePage.waitForEvent('frameattached');
+  await nativePage.evaluate(url=>{const child=document.createElement('iframe');child.src=url;document.body.append(child);},origin.replace('127.0.0.1','localhost')+'/request-context/source?policy=origin');
+  const nativeChild=await nativeChildAttached;await nativeChild.waitForURL(url=>url.pathname==='/request-context/source');
+  const nativeChildReferrer=await nativeChild.evaluate(()=>document.referrer);
+  await nativeChild.evaluate(source=>eval(source),submitFormScript('child-form-native','child','POST',origin));
+  await nativeChild.waitForURL(url=>url.pathname==='/request-context/echo');
+  const nativeChildContext=contextValues('child-form-native');
   await nativeContext.close();
   for(const storageDenied of [false,true]){
   const client='proxy-'+storageDenied,workerClient='worker-'+storageDenied;
@@ -197,7 +264,11 @@ try{
   const direct=[],errors=[];
   page.on('request',request=>{if(/^https?:/.test(request.url()))direct.push(request.url());});
   page.on('pageerror',error=>errors.push(error.message));
-  page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
+  page.on('console',message=>{
+    // This fixture deliberately delivers a comma-separated meta policy. Its
+    // native validation diagnostic is expected; script/runtime errors are not.
+    if(message.type()==='error'&&!message.text().startsWith('Failed to set referrer policy: A policy specified by a meta element must contain only one token.'))errors.push(message.text());
+  });
   await page.goto(pathToFileURL(fileURLToPath(new URL('../example/bundled.html',import.meta.url))).href);
   await page.waitForFunction(()=>globalThis.main_frame&&!main_frame.is_navigating);
   await page.evaluate(async origin=>{
@@ -212,6 +283,42 @@ try{
   assert.deepEqual(beaconResult,beaconBaseline,'sendBeacon synchronous behavior differs from native Chromium');
   await waitBeacons(beaconClient,6);
   assert.deepEqual(await beaconBodies(beaconClient),nativeBeaconBodies,'Beacon payloads differ from native Chromium');
+  await page.evaluate(origin=>main_frame.navigate_to(origin+'/request-context/source?policy=origin#fragment'),origin);
+  const contextClient='context-'+storageDenied;
+  const actualContext=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),contextScript(contextClient)));
+  assert.deepEqual(actualContext,nativeContextResult);
+  assert.deepEqual(contextValues(contextClient),nativeRequestContexts,'Origin/referrer/cookie headers differ from native Chromium');
+  const metaClient='declared-meta-'+storageDenied;
+  await page.evaluate(url=>main_frame.navigate_to(url),origin+'/request-context/source?policy=origin&meta=no-referrer&script='+metaClient);
+  assert.deepEqual(contextValues(metaClient),nativeDeclaredMeta,'Declared meta policy was ignored during initial script downloads');
+  await page.evaluate(origin=>{
+    for(const cookie of ['ctx_target_strict=s; SameSite=Strict; Path=/','ctx_target_lax=l; SameSite=Lax; Path=/'])sandstone.controller.site_data.setCookie(origin.replace('127.0.0.1','localhost')+'/',cookie);
+  },origin);
+  const formClient='forms-'+storageDenied;
+  for(const [label,method,cross,policy] of formCases){
+    await page.evaluate(url=>main_frame.navigate_to(url),origin+'/request-context/source?policy='+policy);
+    await page.evaluate(source=>main_frame.eval_js(source),submitFormScript(formClient,label,method,cross?origin.replace('127.0.0.1','localhost'):origin));
+    await page.waitForFunction(label=>!main_frame.is_navigating&&main_frame.url.pathname==='/request-context/echo'&&main_frame.url.searchParams.get('label')===label,label);
+    assert.equal(await page.evaluate(()=>main_frame.eval_js('document.referrer')),nativeFormContexts.find(value=>value.label===label).referrer||'','Virtual document.referrer differs from the navigation referrer');
+  }
+  assert.deepEqual(contextValues(formClient),nativeFormContexts,'Form submission Origin/referrer/SameSite cookies differ from native Chromium');
+  await page.evaluate(url=>main_frame.navigate_to(url),origin+'/request-context/source?policy=origin');
+  const childSource=origin.replace('127.0.0.1','localhost')+'/request-context/source?policy=origin';
+  await page.evaluate(url=>main_frame.eval_js('const child=document.createElement("iframe");child.src='+JSON.stringify(url)+';document.body.append(child);true'),childSource);
+  let virtualChild;
+  const childDeadline=Date.now()+10000;
+  while(!virtualChild&&Date.now()<childDeadline){
+    for(const frame of page.frames())if(await frame.evaluate(url=>globalThis.sandstone_frame?.loader.url===url&&sandstone_frame.loader.ready_state==='complete',childSource).catch(()=>false)){virtualChild=frame;break;}
+    if(!virtualChild)await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  assert.ok(virtualChild,'Nested request-context fixture did not load');
+  assert.equal(await virtualChild.evaluate(()=>sandstone_frame.context.run_script('document.referrer')),nativeChildReferrer);
+  const childFormClient='child-form-'+storageDenied;
+  await virtualChild.evaluate(source=>sandstone_frame.context.run_script(source),submitFormScript(childFormClient,'child','POST',origin));
+  const childSubmitDeadline=Date.now()+10000;
+  while(!contextValues(childFormClient).length){if(Date.now()>childSubmitDeadline)throw new Error('Nested form did not reach the relay');await new Promise(resolve=>setTimeout(resolve,10));}
+  assert.deepEqual(contextValues(childFormClient),nativeChildContext,'Nested form used its parent or destination as the initiating origin');
+  await page.evaluate(origin=>main_frame.navigate_to(origin+'/page'),origin);
   const echoed=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),websocketScript));
   assert.deepEqual(echoed,{values:[[98,108,111,98,32,102,105,114,115,116],'text second',[2,3],'last'],state:3,buffered:0});
   const workerEcho=JSON.parse(await page.evaluate(source=>main_frame.eval_js(`new Promise((resolve,reject)=>{
@@ -310,7 +417,7 @@ try{
   assert.deepEqual(direct,[],'A relayed connection made a direct HTTP request');
   assert.deepEqual(errors,[],'A relayed connection produced a browser error');
   assert.ok(closed.some(value=>value.client===client&&value.count===3));
-    console.log(JSON.stringify({storageDenied,passed:['native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','native request cleanup'],events:proxied,direct}));
+    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','native request cleanup'],events:proxied,direct}));
   await context.close();
   }
 }finally{

@@ -8,7 +8,7 @@ export const FakeEventSource = create_event_source_class({
     const headers = {...options.headers};
     const event_source_last_id = headers['Last-Event-ID'];
     delete headers['Last-Event-ID'];
-    return network.fetch(url, {...options, headers, event_source_last_id});
+    return network.fetch(url, {...options, mode:'cors', headers, event_source_last_id});
   },
   onUnload(callback) {
     globalThis.addEventListener('unload', callback, {once: true});

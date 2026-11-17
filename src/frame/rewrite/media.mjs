@@ -57,8 +57,10 @@ export function rewrite_media(element) {
         const url = new URL(source, base());
         if (["data:", "blob:"].includes(url.protocol)) return url.href;
         if (!resources.has(url.href)) resources.set(url.href, (async () => {
+          const crossOrigin = element.crossOrigin ?? (element instanceof HTMLSourceElement ? element.parentElement?.crossOrigin : null);
           const response = await network.fetch(url.href, {
-            signal: controller.signal, credentials: element.crossOrigin === "anonymous" ? "same-origin" : "include"
+            signal: controller.signal, credentials: crossOrigin === "anonymous" ? "same-origin" : "include",
+            mode: crossOrigin == null ? 'no-cors' : 'cors', referrerPolicy:element.referrerPolicy
           });
           if (!response.ok) throw new TypeError(`Media request failed: ${response.status}`);
           const blob = await response.blob();

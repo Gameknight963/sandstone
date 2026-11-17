@@ -2,10 +2,31 @@ import { ctx, get_handler_keys, create_obj_proxy, intercept_property, proxy_func
 import { get_cookie, set_cookie } from "../polyfill/cookie.mjs";
 import * as loader from "../loader.mjs";
 import { rewrite_media } from "../rewrite/media.mjs";
+import {parse_referrer_policy} from '../../referrer.mjs';
 
 function prepare_media(element) {
   if (element.matches("img, source, video, audio, input, track")) rewrite_media(element);
   return element;
+}
+
+let active_referrer_policy, seen_referrer_meta = new WeakMap();
+export function reset_document_referrer_policy(policy) {
+  active_referrer_policy = policy;
+  seen_referrer_meta = new WeakMap();
+}
+export function document_referrer_policy(root = globalThis.document) {
+  if (!active_referrer_policy) active_referrer_policy = loader.referrer_policy;
+  for (const meta of root?.querySelectorAll('meta[name]') || []) {
+    const name = meta.name.toLowerCase(), value = meta.content.trim().toLowerCase(), signature = name+'\0'+value;
+    if (seen_referrer_meta.get(meta) === signature) continue;
+    seen_referrer_meta.set(meta,signature);
+    if (name !== 'referrer') continue;
+    const mapped = ({never:'no-referrer',always:'unsafe-url',default:'strict-origin-when-cross-origin'})[value] || value;
+    if (parse_referrer_policy(mapped) === mapped) active_referrer_policy = mapped;
+  }
+  // Removing a meta element or setting an invalid policy does not restore the
+  // old policy in a native document. Retain the last valid delivered policy.
+  return active_referrer_policy;
 }
 
 const internal = {
@@ -36,6 +57,7 @@ class CustomDocument {
   }
   get readyState() {return loader.ready_state}
   get documentURI() {return ctx.location.href}
+  get referrer() {return loader.document_referrer}
   get currentScript() {return internal.currentScript}
   set currentScript(value) {internal.currentScript = value}
   get activeElement() {return internal.activeElement || document.body}

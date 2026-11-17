@@ -5,6 +5,7 @@ import { site_data } from "./site_data.mjs";
 import { indexed_db } from "./indexeddb.mjs";
 import {crypto_service} from './crypto.mjs';
 import { NavigationHistory } from "../history.mjs";
+import {parse_referrer_policy,default_referrer_policy} from '../referrer.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 
@@ -115,6 +116,8 @@ export class ProxyFrame {
 
     console.log("navigating to", url);
     if (navigation_id !== this.navigation_id) return;
+    const source_url = navigation.initiated ? this.url?.href : undefined;
+    const source_policy = navigation.referrerPolicy || this.referrer_policy || default_referrer_policy;
     this.url = new URL(url);
     
     this.iframe.style.backgroundColor = "#222222";
@@ -136,6 +139,7 @@ export class ProxyFrame {
 
     let html = null;
     let error = false;
+    let referrer_policy = default_referrer_policy, document_referrer = '';
 
     if (typeof this.special_pages[url] === "string") {
       html = this.special_pages[url];
@@ -151,9 +155,11 @@ export class ProxyFrame {
             body: form_data.body
           }
         }
-        let response = await network.fetch(url, options, {url, navigation: true});
+        let response = await network.fetch(url, options, {url:source_url,top_url:source_url,referrerPolicy:source_policy,navigation:true});
         html = await response.text();
         url = response.url;
+        referrer_policy = parse_referrer_policy(response.headers.get('referrer-policy'));
+        document_referrer = response.request_referrer || '';
       }
       catch (e) {
         error = util.format_error(e);
@@ -161,6 +167,8 @@ export class ProxyFrame {
     }
     if (navigation_id !== this.navigation_id) return;
     this.url = new URL(url);
+    this.referrer_policy = referrer_policy;
+    this.document_referrer = document_referrer;
     this.history.navigate(url, {mode: navigation.history_mode || "push"});
     
     let settings = this.site_settings.find((item) => {
@@ -184,6 +192,7 @@ export class ProxyFrame {
         frame_id: this.id,
         beacon_context,
         crypto_available: crypto_service.methods,
+        referrer_policy, document_referrer,
         error: error,
         settings: settings,
         default_settings: this.default_settings,
@@ -203,6 +212,7 @@ export class ProxyFrame {
         frame_id: this.id,
         beacon_context,
         crypto_available: crypto_service.methods,
+        referrer_policy, document_referrer,
         error: error_msg,
         settings: settings,
         default_settings: this.default_settings,
@@ -222,7 +232,7 @@ rpc.rpc_handlers["navigate"] = async (frame_id, url, reload=true, form_data=null
   if (!frame) return;
 
   if (reload) {
-    await frame.navigate_to(url, form_data, navigation);
+    await frame.navigate_to(url, form_data, {...navigation,initiated:true});
   }
   else {
     frame.url = new URL(url);
@@ -280,12 +290,13 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
     session_storage: parent.session_storage,
     history: saved?.history || new NavigationHistory(),
     async navigate_to(url, form_data, navigation = {}) {
+      navigation = {...navigation,source_url:child.url.href};
       child.url = new URL(url, child.url);
       child.history.save_scroll(navigation.scroll);
       child.pending_navigation = navigation;
       const port = parent_id === root.id ? root.rpc_target.target : root.rpc_target.extra_frame_targets.get(parent_id);
       if (!port) throw new DOMException("Parent frame is disconnected", "InvalidStateError");
-      await rpc.call_procedure(port, "child_navigate", [child_id, child.url.href, form_data]);
+      await rpc.call_procedure(port, "child_navigate", [child_id, child.url.href, form_data, {...navigation,from_child:true}]);
     },
     on_url_change() {}
   };
