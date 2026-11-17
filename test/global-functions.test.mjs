@@ -72,3 +72,15 @@ test('Virtual global getters run once and preserve virtual overrides', () => {
   assert.equal(overrides.custom, 'updated');
   assert.equal(target.custom, undefined);
 });
+
+test('Explicit undefined overrides hide native features without reading their getters',()=>{
+  let reads=0;
+  const target={method(){}};
+  Object.defineProperty(target,'feature',{get(){reads++;throw new Error('Native feature must stay hidden');}});
+  const overrides={get feature(){return undefined;}};
+  const virtual=create_obj_proxy(overrides,['method'],target);
+  assert.equal(virtual.feature,undefined);assert.equal(reads,0);
+  assert.equal(typeof virtual.method,'function');
+  virtual.method=undefined;
+  assert.equal(virtual.method,undefined);assert.equal(typeof target.method,'function');
+});

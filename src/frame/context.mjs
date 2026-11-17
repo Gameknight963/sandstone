@@ -91,6 +91,8 @@ export class CustomCTX {
   get sessionStorage() {if(internal.storage_unavailable)throw new DOMException('Storage origin is unavailable','SecurityError');return internal.sessionStorage}
   get WebSocket() {return network.WebSocket}
   get BroadcastChannel(){return polyfill.BroadcastChannel;}
+  get MutationObserver(){return Object.hasOwn(internal,'MutationObserver')?internal.MutationObserver:intercept.mutation_observer.MutationObserver;}
+  set MutationObserver(value){internal.MutationObserver=value;}
   get indexedDB() {return polyfill.idb.indexedDB}
   get IDBFactory() {return polyfill.idb.IDBFactory}
   get IDBDatabase() {return polyfill.idb.IDBDatabase}

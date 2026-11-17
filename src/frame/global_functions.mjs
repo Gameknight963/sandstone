@@ -29,7 +29,7 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value) {
   const proxy = new Proxy(target, {
     get: (_, key) => {
       const replacement = obj[key];
-      if (replacement !== undefined) return replacement;
+      if (replacement !== undefined || key in obj) return replacement;
       const native_value = target[key];
       const value = map_value ? map_value(native_value,key) : native_value;
       if (typeof value === 'function' && !value.prototype) {

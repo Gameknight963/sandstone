@@ -9,6 +9,7 @@ import {copy_resources,prepare_resources,pause_resources,mark_connected_scripts,
 import {detach_media_attribute} from '../rewrite/media.mjs';
 import {detach_svg_attribute} from '../svg_resources.mjs';
 import {shadow_root} from '../shadow_roots.mjs';
+import {unwrap_document} from '../document_identity.mjs';
 const mutate_styles=(nodes,operation)=>mutate_document_base(()=>active_document(node_document(nodes[0]))?mutate_style_sources(nodes,operation):operation());
 
 function prepare(node,full=true) {
@@ -30,6 +31,7 @@ function execute(node) {
 function intercept(target, key, first_only = false) {
   if (!target || typeof target[key] !== "function") return;
   proxy_function(target, key, (original, receiver, args) => {
+    receiver=unwrap_document(receiver);args=args.map(unwrap_document);
     const nodes = first_only ? args.slice(0, 1) : args;
     // A fragment is empty after insertion; retain its children for execution.
     const inserted = nodes.flatMap(node => node?.nodeType === 11 ? [...node.childNodes] : [node]);
@@ -100,9 +102,10 @@ if (globalThis.Node) {
     for (const key of prototype === Node.prototype ? ['removeChild', 'normalize'] : ['before', 'after', 'replaceWith', 'remove']) {
       if (!Object.hasOwn(prototype, key)) continue;
       const original = prototype[key];
-      prototype[key] = function(...args) {
-        return mutate_styles([this, ...(key === 'normalize' ? [this] : args)], () => Reflect.apply(original, this, args));
-      };
+      prototype[key] = new Proxy(original,{apply(target,receiver,args){
+        receiver=unwrap_document(receiver);args=args.map(unwrap_document);
+        return mutate_styles([receiver, ...(key === 'normalize' ? [receiver] : args)], () => Reflect.apply(target, receiver, args));
+      }});
     }
   }
   for (const [prototype, keys] of [[Node.prototype, ['textContent', 'nodeValue']], [CharacterData.prototype, ['data']], [HTMLElement.prototype, ['innerText']]]) {
