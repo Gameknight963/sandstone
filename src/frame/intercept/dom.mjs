@@ -264,10 +264,15 @@ if (globalThis.Node) {
 }
 
 if (globalThis.Image) {
+  const prototype=HTMLImageElement.prototype;
   globalThis.Image = new Proxy(globalThis.Image, {
-    construct(target, args) {
-      const image = Reflect.construct(target, args);
-      prepare(image);
+    construct(target, args,newTarget) {
+      const image = Reflect.construct(target, args,newTarget);
+      const original=Object.getPrototypeOf(image);
+      // Prepare native resources without invoking subclass accessors. Restore
+      // newTarget's prototype before its instance fields and constructor run.
+      if(original!==prototype)Object.setPrototypeOf(image,prototype);
+      try{prepare(image);}finally{if(original!==prototype)Object.setPrototypeOf(image,original);}
       return image;
     }
   });

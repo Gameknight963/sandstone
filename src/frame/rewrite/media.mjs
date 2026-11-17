@@ -14,6 +14,39 @@ const attr_value=globalThis.Attr&&Object.getOwnPropertyDescriptor(Attr.prototype
 const dispatch=globalThis.EventTarget?.prototype.dispatchEvent;
 const attribute=globalThis.Element?.prototype.getAttribute;
 let policy_observer;
+const image_prototype=globalThis.HTMLImageElement?.prototype;
+const image_properties=image_prototype&&Object.fromEntries(['src','srcset','currentSrc'].map(key=>[key,Object.getOwnPropertyDescriptor(image_prototype,key)]));
+const well_formed=String.prototype.toWellFormed;
+
+function reflected_source(element,key,native){
+  const session=sessions.get(element),value=session?.authored.get(key);
+  if(value===null||value===undefined)return native;
+  if(key==='srcset')return value;
+  try{return new URL(value,session.base()).href;}catch{return value;}
+}
+if(image_properties)for(const [key,property] of Object.entries(image_properties)){
+  const descriptor={...property,get:new Proxy(property.get,{apply(target,receiver,args){
+    const native=Reflect.apply(target,receiver,args);
+    if(key==='currentSrc')return network.known_urls[native]||sessions.get(receiver)?.aliases.get(native)||native;
+    return reflected_source(receiver,key,native);
+  }})};
+  if(property.set)descriptor.set=new Proxy(property.set,{apply(target,receiver,args){
+    if(!args.length)return Reflect.apply(target,receiver,args);
+    property.get.call(receiver);
+    // Web IDL rejects Symbols, and src is a USVString while srcset is DOMString.
+    let value=`${args[0]}`;
+    if(key==='src')value=well_formed?well_formed.call(value):value.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g,part=>part.length===2?part:'\uFFFD');
+    if(!sessions.has(receiver)){
+      const original=Object.getPrototypeOf(receiver);
+      if(original!==image_prototype)Object.setPrototypeOf(receiver,image_prototype);
+      try{rewrite_media(receiver);}finally{if(original!==image_prototype)Object.setPrototypeOf(receiver,original);}
+    }
+    const session=sessions.get(receiver),state=session.states.get(key);
+    if(!state){session.authored.set(key,value);return;}
+    return state.update(value);
+  }});
+  Object.defineProperty(image_prototype,key,descriptor);
+}
 
 function request_element(element,key){
   if(!(element instanceof HTMLSourceElement))return element;
@@ -126,11 +159,12 @@ export function rewrite_media(element,initial_sources) {
   prepared.set(element,null);
   const get = element.getAttribute.bind(element);
   const remove = element.removeAttribute.bind(element);
-  const properties = ["src", "srcset", "poster"].filter(key => key in element);
+  const properties = element instanceof HTMLImageElement?['src','srcset']:["src", "srcset", "poster"].filter(key => key in element);
   const authored = new Map(initial_sources||properties.map(key => [key, get(key)]));
   prepared.set(element,authored);
   const states = new Map();
-  const session={authored,states,active:true,crossOrigin:cross_origin(element)},aliases=new Map();sessions.set(element,session);
+  const base = () => owner.call(element)===document?ctx.document.baseURI:native_base.call(element);
+  const aliases=new Map(),session={authored,states,active:true,crossOrigin:cross_origin(element),aliases,base};sessions.set(element,session);
   if(element instanceof HTMLImageElement){
     observe_policy(element,{attributes:true,attributeFilter:['crossorigin']});
   }
@@ -138,7 +172,6 @@ export function rewrite_media(element,initial_sources) {
   if(element instanceof HTMLSourceElement)observe_media_container(element.parentElement);
   // Clear every source before starting asynchronous work, including picture sources.
   for (const key of properties) remove(key);
-  const base = () => owner.call(element)===document?ctx.document.baseURI:native_base.call(element);
 
   for (const key of properties) {
     const state = {generation: 0, urls: [], controller: null,waiting:false,requestElement:null};
@@ -216,7 +249,7 @@ export function rewrite_media(element,initial_sources) {
         } finally { done(); }
       })();
     }
-    descriptor = intercept_property(element, key, {
+    descriptor = element instanceof HTMLImageElement?image_properties[key]:intercept_property(element, key, {
       get() {
         const value = authored.get(key);
         if (value === null || value === undefined) return descriptor.get.call(element);
@@ -229,7 +262,7 @@ export function rewrite_media(element,initial_sources) {
     state.release = release;
   }
 
-  if ("currentSrc" in element) {
+  if (!(element instanceof HTMLImageElement)&&"currentSrc" in element) {
     let current = intercept_property(element, "currentSrc", {
       get() {
         const value = current.get.call(element);
