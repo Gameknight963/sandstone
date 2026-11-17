@@ -3,6 +3,7 @@ import * as loader from '../loader.mjs';
 import {document_referrer_policy} from './document.mjs';
 import {download} from '../downloads.mjs';
 import {install_link_events} from '../link_events.mjs';
+import {install_hyperlinks} from '../hyperlinks.mjs';
 
 function activate(element) {
   if(!element.hasAttribute('href'))return;
@@ -20,5 +21,6 @@ function activate(element) {
 }
 
 if(globalThis.document){
+  install_hyperlinks(()=>ctx.document.baseURI);
   install_link_events({enabled:()=>loader.is_loaded,activate});
 }

@@ -19,6 +19,8 @@ const historyTest = await readFile(new URL("history.playwright.js", import.meta.
 const verifyHistory = runInThisContext(`(${historyTest})`);
 const linkTest=await readFile(new URL('links.playwright.js',import.meta.url),'utf8');
 const verifyLinks=runInThisContext(`(${linkTest})`);
+const hyperlinkTest=await readFile(new URL('hyperlinks.playwright.js',import.meta.url),'utf8');
+const verifyHyperlinks=runInThisContext(`(${hyperlinkTest})`);
 const cssTest = await readFile(new URL("css.playwright.js", import.meta.url), "utf8");
 const verifyCSS = runInThisContext(`(${cssTest})`);
 const mediaTest = await readFile(new URL("media.playwright.js", import.meta.url), "utf8");
@@ -81,6 +83,7 @@ try {
     result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
     result.passed.push(...await timed(verifyLinks(page), 'Link event fixture'));
+    result.passed.push(...await timed(verifyHyperlinks(page), 'Hyperlink URL fixture'));
     result.passed.push(...await timed(verifyCSS(page), "CSS fixture"));
     result.passed.push(...await timed(verifyMedia(page), "Media fixture"));
     result.passed.push(...await timed(verifyForms(page), "Form fixture"));
