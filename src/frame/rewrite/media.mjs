@@ -11,6 +11,7 @@ const view=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototy
 const set=globalThis.Element?.prototype.setAttribute,remove_attribute=globalThis.Element?.prototype.removeAttribute;
 const attr_owner=globalThis.Attr&&Object.getOwnPropertyDescriptor(Attr.prototype,'ownerElement').get;
 const attr_value=globalThis.Attr&&Object.getOwnPropertyDescriptor(Attr.prototype,'value');
+const dispatch=globalThis.EventTarget?.prototype.dispatchEvent;
 
 function source_pending(element) {
   const parent = element.parentElement;
@@ -137,7 +138,7 @@ export function rewrite_media(element,initial_sources) {
           descriptor.set.call(element, rewritten);
         } catch (error) {
           release(urls);
-          if (generation === state.generation && !controller.signal.aborted) element.dispatchEvent(new Event("error"));
+          if (generation === state.generation && !controller.signal.aborted) dispatch.call(element,new Event("error"));
         } finally { done(); }
       })();
     }

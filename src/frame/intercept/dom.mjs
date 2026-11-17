@@ -270,3 +270,26 @@ if (globalThis.Image) {
     }
   });
 }
+
+if (globalThis.Audio) {
+  const prototype=HTMLAudioElement.prototype;
+  globalThis.Audio=new Proxy(globalThis.Audio,{
+    construct(target,args,newTarget){
+      // Native construction reads newTarget.prototype before converting the URL.
+      // Supplying no URL keeps the native loader idle until the relay is ready.
+      const audio=Reflect.construct(target,[],newTarget);
+      const source=args[0]===undefined?undefined:`${args[0]}`;
+      const original=Object.getPrototypeOf(audio);
+      // Reflect.construct also accepts unrelated newTarget prototypes. Prepare
+      // the native audio object before restoring that authored prototype.
+      if(!prototype.isPrototypeOf(audio))Object.setPrototypeOf(audio,prototype);
+      try {
+        prepare(audio);
+        if(source!==undefined)Object.getOwnPropertyDescriptor(audio,'src').set.call(audio,source);
+      } finally {
+        if(Object.getPrototypeOf(audio)!==original)Object.setPrototypeOf(audio,original);
+      }
+      return audio;
+    }
+  });
+}
