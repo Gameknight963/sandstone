@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {chromium} from 'playwright-core';
 import {server as wisp} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
 import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
-import {font_fixture, font_script} from './font-fixture.mjs';
+import {font_fixture, font_script, constructor_font_script} from './font-fixture.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -280,6 +280,11 @@ try{
   assert.deepEqual(nativeFonts.map(value=>[value.count,value.status,value.width]),Array.from({length:6},()=>[1,'loaded',60]));
   const nativeFontRequests=fonts.values('font-native');
   assert.equal(nativeFontRequests.length,6);
+  await nativePage.goto(origin+'/fonts/page?client=constructor-native');
+  const nativeConstructorFonts=JSON.parse(await nativePage.evaluate(source=>eval(source),constructor_font_script('constructor-native')));
+  assert.equal(nativeConstructorFonts.lazy,'unloaded');assert.equal(nativeConstructorFonts.width,60);assert.equal(nativeConstructorFonts.automatic.width,60);
+  assert.deepEqual(nativeConstructorFonts.worker,{status:'loaded',has:true,identity:true,width:60});
+  const nativeConstructorRequests=fonts.values('constructor-native').filter(value=>value.path.includes('/ctor-'));
   const nativeCSS=new Map();
   for(const policy of ['', 'unsafe-url', 'no-referrer', 'link-no-referrer']){
     const client='css-native-'+policy;
@@ -347,6 +352,11 @@ try{
   const actualFonts=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),font_script(fontClient)));
   assert.deepEqual(actualFonts,nativeFonts,'Relayed CSS fonts did not load and render like native fonts');
   assert.deepEqual(fonts.values(fontClient),nativeFontRequests,'CSS font Origin/referrer/cookie headers differ from native Chromium');
+  const constructorClient='constructor-'+storageDenied;
+  await page.evaluate(url=>main_frame.navigate_to(url),origin+'/fonts/page?client='+constructorClient);
+  const actualConstructorFonts=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),constructor_font_script(constructorClient)));
+  assert.deepEqual(actualConstructorFonts,nativeConstructorFonts,'FontFace loading, membership, rendering or events differ from native Chromium');
+  assert.deepEqual(fonts.values(constructorClient).filter(value=>value.path.includes('/ctor-')),nativeConstructorRequests,'FontFace request headers differ from native Chromium');
   for(const policy of ['', 'unsafe-url', 'no-referrer', 'link-no-referrer']){
     const client='css-'+storageDenied+'-'+policy;
     await page.evaluate(url=>main_frame.navigate_to(url),origin+'/css-context/page?client='+client+'&policy='+policy);

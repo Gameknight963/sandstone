@@ -5,4 +5,5 @@ export * as navigator from "./navigator.mjs";
 export * as mutation_observer from "./mutation_observer.mjs";
 export * as function from "./function.mjs";
 import './crypto.mjs';
+import './fonts.mjs';
 export { FakeCSSStyleSheet } from "./cssom.mjs";
