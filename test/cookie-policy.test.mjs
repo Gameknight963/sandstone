@@ -23,3 +23,18 @@ test('Default SameSite cookies use Lax and allow only recent unsafe top-level na
   }
   assert.equal(websocket_options(store,'wss://target.test/',{url:'https://source.test/'}).headers.Cookie,'none=n');
 });
+
+test('Cookie storage rejects insecure None attributes and cross-site response writes without deleting valid cookies',async()=>{
+  const store=new SiteDataStore(),url='https://target.test/';
+  store.setCookie(url,'session=valid; SameSite=None; Secure; Path=/');
+  store.setCookie(url,'session=deleted; SameSite=None; Max-Age=0; Path=/');
+  assert.equal(store.cookies.getCookieStringSync(url),'session=valid');
+  for(const [navigation,nested,expected] of [[false,false,'session=valid; none=n'],[true,true,'session=valid; none=n'],[true,false,'session=valid; none=n; default=d; lax=l; strict=s']]){
+    await fetch_with_cookies(async()=>new Response('ok',{headers:{'Set-Cookie':'default=d; Path=/'}}),store,url,{}, {url:'https://source.test/',navigation,nested});
+    for(const value of ['none=n; SameSite=None; Secure','lax=l; SameSite=Lax','strict=s; SameSite=Strict'])store.setCookie(url,value+'; Path=/',true,{crossSite:true,topLevel:navigation&&!nested});
+    assert.equal(store.cookies.getCookieStringSync(url),expected);
+  }
+  const options=websocket_options(store,'wss://target.test/',{url:'https://source.test/'});
+  options.onHeader('set-cookie','session=deleted; Max-Age=0; Path=/');
+  assert.match(store.cookies.getCookieStringSync(url),/session=valid/);
+});

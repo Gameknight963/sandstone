@@ -1,5 +1,6 @@
 import { Cookie, CookieJar, domainMatch } from "tough-cookie";
 import {http_cache} from './http_cache.mjs';
+import {storage_cookie} from '../cookie.mjs';
 
 const storage_key = "sandstone_site_data_v1";
 
@@ -50,9 +51,11 @@ export class SiteDataStore {
     this.persist();
   }
 
-  setCookie(url, value, http = true) {
+  setCookie(url, value, http = true, policy = {}) {
     try {
-      const cookie = this.cookies.setCookieSync(String(value), url, {http, ignoreError: true});
+      const parsed=storage_cookie(value,policy);
+      if(!parsed)return undefined;
+      const cookie = this.cookies.setCookieSync(parsed, url, {http, ignoreError: true});
       this.persist();
       return cookie;
     } catch { return undefined; }

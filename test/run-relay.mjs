@@ -10,6 +10,7 @@ import {font_fixture, font_script, constructor_font_script} from './font-fixture
 import {keepalive_fixture,keepalive_quota_script,keepalive_finish_script,keepalive_unload_script,keepalive_abort_script,keepalive_worker_script} from './keepalive-fixture.mjs';
 import {cache_fixture,cache_script} from './cache-fixture.mjs';
 import {download_fixture,verify_downloads,prepare_downloads} from './download-fixture.mjs';
+import {cookie_fixture,verify_cookie_storage} from './cookie-fixture.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -30,6 +31,7 @@ const server=create_relay_server((request,response)=>{
   if(keepalive.handle(request,response,url))return;
   if(cacheFixture.handle(request,response,url))return;
   if(downloadFixture.handle(request,response,url))return;
+  if(cookie_fixture(request,response,url))return;
   if(url.pathname.startsWith('/css-context/')){
     const policy=url.searchParams.get('policy')||'';
     const query='?client='+encodeURIComponent(client)+'&policy='+encodeURIComponent(policy);
@@ -287,6 +289,7 @@ try{
   const nativeRequestContexts=contextValues('native');
   assert.equal(nativeRequestContexts.find(value=>value.label==='post').origin,origin);
   assert.equal(nativeRequestContexts.find(value=>value.label==='meta').referrer,null);
+  const nativeCookieStorage=await verify_cookie_storage(url=>nativePage.goto(url),source=>nativePage.evaluate(source=>eval(source),source),origin);
   await nativePage.goto(origin+'/request-context/source?policy=origin&meta=no-referrer&script=meta-native');
   const nativeDeclaredMeta=contextValues('meta-native');assert.equal(nativeDeclaredMeta.length,1);assert.equal(nativeDeclaredMeta[0].referrer,null);
   await nativePage.goto(origin+'/downloads/page?client=downloads-native');
@@ -419,6 +422,7 @@ try{
   const actualContext=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),contextScript(contextClient)));
   assert.deepEqual(actualContext,nativeContextResult);
   assert.deepEqual(contextValues(contextClient),nativeRequestContexts,'Origin/referrer/cookie headers differ from native Chromium');
+  assert.deepEqual(await verify_cookie_storage(url=>page.evaluate(url=>main_frame.navigate_to(url),url),source=>page.evaluate(source=>main_frame.eval_js(source),source),origin),nativeCookieStorage,'Stored cookie visibility differs from native Chromium');
   const metaClient='declared-meta-'+storageDenied;
   await page.evaluate(url=>main_frame.navigate_to(url),origin+'/request-context/source?policy=origin&meta=no-referrer&script='+metaClient);
   assert.deepEqual(contextValues(metaClient),nativeDeclaredMeta,'Declared meta policy was ignored during initial script downloads');

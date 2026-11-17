@@ -53,7 +53,7 @@ export function websocket_options(store, input, {url, top_url = url, userAgent})
   return {
     headers,
     onHeader(name, value) {
-      if (name === 'set-cookie') store.setCookie(target.href, value);
+      if (name === 'set-cookie') store.setCookie(target.href, value,true,{crossSite:sameSiteContext==='none'});
     }
   };
 }

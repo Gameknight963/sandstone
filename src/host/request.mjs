@@ -50,7 +50,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
       for (const [key, value] of raw) {
         if (key.toLowerCase() === "set-cookie") setCookies.push(value);
       }
-      for (const value of new Set(setCookies)) data.setCookie(url.href, value);
+      for (const value of new Set(setCookies)) data.setCookie(url.href, value,true,{crossSite:sameSiteContext==='none',topLevel:context.navigation&&!context.nested});
     }
     const location = response.headers.get("location");
     if (!location || ![301, 302, 303, 307, 308].includes(response.status) || redirect === "manual") {
