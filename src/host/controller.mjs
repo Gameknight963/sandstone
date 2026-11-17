@@ -310,7 +310,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
     on_url_change() {}
   };
   iframes[child_id] = child;
-  child.history.navigate(url, {mode: saved?.navigation?.history_mode || "push"});
+  child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push"});
   return {
     beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href,nested:true,cross_site:frame_cross_site(child,iframes)}),
     cookie_cross_site:frame_cross_site(child,iframes),

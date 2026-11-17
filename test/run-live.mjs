@@ -12,7 +12,8 @@ const sites=[
   {id:'hn',url:'https://news.ycombinator.com/'},
   {id:'mdn',url:'https://developer.mozilla.org/en-US/docs/Web/JavaScript'},
   {id:'wikipedia',url:'https://en.wikipedia.org/wiki/Main_Page'},
-  {id:'github',url:'https://github.com/octocat/Hello-World'}
+  {id:'github',url:'https://github.com/octocat/Hello-World'},
+  {id:'react',url:'https://react.dev/learn'}
 ];
 const selected=process.argv.slice(2);
 for(const id of selected)if(!sites.some(site=>site.id===id))throw new Error('Unknown live site: '+id+'; choose '+sites.map(site=>site.id).join(', '));
@@ -52,6 +53,14 @@ async function wait(page,proxy,expression){
 const summary=(page,proxy)=>read(page,proxy,'({title:document.title,heading:document.querySelector("h1")?.textContent.trim()||"",links:document.links.length})');
 async function interact(page,proxy,site){
   const surface=proxy?page.frameLocator('iframe[frame-id]'):page;
+  if(site.id==='react'){
+    // This article initializes lazy embedded examples while navigating away;
+    // their contentWindow.location requests must also stay behind the relay.
+    await page.waitForTimeout(1200);
+    await surface.locator('a[href="/learn/installation"]:visible').first().click();
+    await wait(page,proxy,'location.pathname==="/learn/installation"&&document.title.includes("Installation")');
+    return read(page,proxy,'({path:location.pathname,title:document.title})');
+  }
   if(site.id==='github'){
     await surface.locator('a[href="/octocat/Hello-World/blob/master/README"]:visible').first().click();
     await wait(page,proxy,'location.pathname==="/octocat/Hello-World/blob/master/README"&&Array.from(document.querySelectorAll("a")).some(link=>link.textContent.trim()==="Raw")');

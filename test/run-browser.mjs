@@ -37,6 +37,8 @@ const cssomTest = await readFile(new URL("cssom.playwright.js", import.meta.url)
 const verifyCSSOM = runInThisContext(`(${cssomTest})`);
 const cryptoTest = await readFile(new URL('crypto.playwright.js',import.meta.url),'utf8');
 const verifyCrypto = runInThisContext(`(${cryptoTest})`);
+const iframeWindowTest=await readFile(new URL('iframe-window.playwright.js',import.meta.url),'utf8');
+const verifyIframeWindow=runInThisContext(`(${iframeWindowTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 async function timed(operation, label) {
@@ -88,6 +90,7 @@ try {
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
     result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
+    result.passed.push(...await timed(verifyIframeWindow(page), 'Frame window fixture'));
     result.passed.push(...await timed(verifyLinks(page), 'Link event fixture'));
     result.passed.push(...await timed(verifyAttributes(page), 'Event attribute fixture'));
     result.passed.push(...await timed(verifyHyperlinks(page), 'Hyperlink URL fixture'));
