@@ -2,6 +2,7 @@ import {ctx} from './context.mjs';
 import * as network from './network.mjs';
 import {schedule_resource_event} from './resource_events.mjs';
 import * as loader from './loader.mjs';
+import {relay_svg_document} from './svg_documents.mjs';
 
 const svg='http://www.w3.org/2000/svg',xlink='http://www.w3.org/1999/xlink';
 const states=new WeakMap(),strings=new WeakMap(),maps=new WeakMap();
@@ -31,10 +32,13 @@ function canonical(state,node){const source=attr(state.mirror,ns(node),local(nod
 function detached(state,node){if(node&&!owner(node)&&state.values.has(node))fields.value.set.call(node,state.values.get(node));}
 
 export function is_svg_resource(element){
-  return !!(globalThis.SVGImageElement&&element instanceof SVGImageElement||globalThis.SVGFEImageElement&&element instanceof SVGFEImageElement);
+  return !!(globalThis.SVGImageElement&&element instanceof SVGImageElement||globalThis.SVGFEImageElement&&element instanceof SVGFEImageElement||globalThis.SVGUseElement&&element instanceof SVGUseElement);
 }
 
 function render(state,url,authored_values=false){
+  // An empty use href can resolve to the physical base URL. A bare local
+  // fragment disables the native load while retaining the authored Attr node.
+  if(state.symbol&&!authored_values&&!url)url='#';
   state.local=authored_values?'':url;
   for(const slot of slots){
     const authored=attr(state.mirror,slot.ns,slot.name),current=attr(state.element,slot.ns,slot.name);
@@ -47,6 +51,8 @@ function render(state,url,authored_values=false){
   }
 }
 function release(state){
+  for(const url of state.resources||[]){URL.revokeObjectURL(url);delete network.known_urls[url];delete network.stylesheet_contexts[url];}
+  state.resources=[];
   if(!state.blob)return;
   URL.revokeObjectURL(state.blob);delete network.known_urls[state.blob];delete network.known_urls[state.local];state.blob=null;
 }
@@ -58,30 +64,36 @@ function refresh(state,intended_active){
   }
   state.active=true;
   const source=base.get.call(animated(state.mirror)),cors=state.cors?methods.getAttribute.call(state.element,'crossorigin'):null;
-  const mode=cors===null?'no-cors':'cors',credentials=cors===null||cors.toLowerCase()==='use-credentials'?'include':'same-origin';
+  const mode=state.symbol?'same-origin':cors===null?'no-cors':'cors',credentials=state.symbol?'same-origin':cors===null||cors.toLowerCase()==='use-credentials'?'include':'same-origin';
   let url;
   try{url=source?new URL(source,ctx.document.baseURI):null;}catch{}
+  const same_document=state.symbol&&url?.hash&&url.href.slice(0,-url.hash.length)===ctx.location.href.split('#')[0];
   const key=JSON.stringify([url?.href??source,mode,credentials]);
   if(state.key===key){render(state,state.local);return state.pending;}
   state.key=key;state.cancelError?.();state.controller?.abort();release(state);
   const generation=++state.generation,controller=state.controller=new AbortController();
-  if(!source||source.startsWith('#')&&state.localFragment||url&&['data:','blob:'].includes(url.protocol)){
-    render(state,source.startsWith('#')&&state.localFragment?source:url?.href||source);
+  if(!source||same_document||source.startsWith('#')&&state.localFragment||!state.symbol&&url&&['data:','blob:'].includes(url.protocol)){
+    render(state,same_document?url.hash:source.startsWith('#')&&state.localFragment?source:url?.href||source);
     state.pending=null;return;
   }
   render(state,'');
   state.pending=(async()=>{
     try{
-      if(!url||!['http:','https:'].includes(url.protocol))throw new TypeError('Invalid SVG image URL');
+      if(!url||!['http:','https:',...(state.symbol?['data:','blob:']:[])].includes(url.protocol))throw new TypeError('Invalid SVG resource URL');
       const response=await network.fetch(url.href,{signal:controller.signal,mode,credentials});
       if(!response.ok){await response.body?.cancel();throw new TypeError('SVG image request failed: '+response.status);}
-      const blob=await response.blob();controller.signal.throwIfAborted();
+      let blob=await response.blob();controller.signal.throwIfAborted();
+      if(state.symbol)blob=await relay_svg_document(blob,response.url||url.href,{
+        fetch:network.fetch,signal:controller.signal,referrerPolicy:response.headers.get('referrer-policy')||undefined,
+        createURL:(blob,url,context)=>{controller.signal.throwIfAborted();const local=network.create_blob_url(blob,url,context);state.resources.push(local);return local;}
+      });
       if(state.generation!==generation)return;
       state.blob=network.create_blob_url(blob,url.href);
       const local=state.blob+url.hash;network.known_urls[local]=url.href;
       render(state,local);
     }catch(error){
       if(state.generation!==generation||controller.signal.aborted)return;
+      release(state);
       state.key=null;
       state.cancelError=schedule_resource_event(state.element,()=>{if(state.generation===generation)state.element.dispatchEvent(new Event('error'));});
     }finally{if(state.generation===generation)state.pending=null;}
@@ -92,7 +104,8 @@ function refresh(state,intended_active){
 export function rewrite_svg_resource(element,source){
   if(states.has(element))return states.get(element).pending;
   inert??=document.implementation.createHTMLDocument('');
-  const mirror=inert.createElementNS(svg,element.localName),state={element,mirror,values:new WeakMap(),generation:0,local:'',key:null,cors:!!descriptor(Object.getPrototypeOf(element),'crossOrigin'),localFragment:!!(globalThis.SVGFEImageElement&&element instanceof SVGFEImageElement)};
+  const symbol=!!(globalThis.SVGUseElement&&element instanceof SVGUseElement);
+  const mirror=inert.createElementNS(svg,element.localName),state={element,mirror,values:new WeakMap(),generation:0,local:'',key:null,cors:!!descriptor(Object.getPrototypeOf(element),'crossOrigin'),symbol,localFragment:symbol||!!(globalThis.SVGFEImageElement&&element instanceof SVGFEImageElement)};
   for(const slot of slots){
     const original=attr(source?.mirror||element,slot.ns,slot.name);
     if(original)methods.setAttributeNS.call(mirror,slot.ns,qualified(original),value(original));

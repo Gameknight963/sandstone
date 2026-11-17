@@ -48,7 +48,7 @@ async page=>{
       };
     },{origin,assetOrigin,blank,resources,image,blue,failure});
     const differences=[];
-    for(const tag of ['image','feImage'])for(const [name,source] of cases){const expected=await run(false,tag,source),actual=await run(true,tag,source);if(JSON.stringify(actual)!==JSON.stringify(expected))differences.push({tag,name,expected,actual});}
+    for(const tag of ['image','feImage','use'])for(const [name,source] of cases){const expected=await run(false,tag,source),actual=await run(true,tag,source);if(JSON.stringify(actual)!==JSON.stringify(expected))differences.push({tag,name,expected,actual});}
     for(const tag of ['image','feImage'])for(const [index,cors] of [null,'','anonymous','use-credentials','invalid'].entries()){
       const path='/cors-'+tag+'-'+index+'.svg';
       const source=`(()=>{const svg=${JSON.stringify(svg)},root=document.createElementNS(svg,'svg'),image=document.createElementNS(svg,${JSON.stringify(tag)});root.setAttribute('width','32');root.setAttribute('height','32');image.setAttribute('width','32');image.setAttribute('height','32');image.href.baseVal=${JSON.stringify(assetOrigin+path)};

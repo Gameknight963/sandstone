@@ -37,6 +37,8 @@ const mediaTest = await readFile(new URL("media.playwright.js", import.meta.url)
 const verifyMedia = runInThisContext(`(${mediaTest})`);
 const svgResourceTest=await readFile(new URL('svg-resources.playwright.js',import.meta.url),'utf8');
 const verifySVGResources=runInThisContext(`(${svgResourceTest})`);
+const svgUseTest=await readFile(new URL('svg-use.playwright.js',import.meta.url),'utf8');
+const verifySVGUse=runInThisContext(`(${svgUseTest})`);
 const formTest = await readFile(new URL("forms.playwright.js", import.meta.url), "utf8");
 const verifyForms = runInThisContext(`(${formTest})`);
 const formEventTest=await readFile(new URL('form-events.playwright.js',import.meta.url),'utf8');
@@ -186,6 +188,7 @@ try {
     result.passed.push(...await timed(verifyCSS(page), "CSS fixture"));
     result.passed.push(...await timed(verifyMedia(page), "Media fixture"));
     result.passed.push(...await timed(verifySVGResources(page), 'SVG resource fixture'));
+    result.passed.push(...await timed(verifySVGUse(page), 'SVG symbol fixture'));
     result.passed.push(...await timed(verifyForms(page), "Form fixture"));
     result.passed.push(...await timed(verifyFormEvents(page), 'Form event fixture'));
     result.passed.push(...await timed(verifyXHR(page), "XHR fixture"));
