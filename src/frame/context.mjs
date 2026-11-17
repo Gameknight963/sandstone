@@ -204,9 +204,12 @@ export function update_ctx(options = {}) {
   delete globalThis.caches;
   // Native Navigation targets the physical sandbox document. Hide its feature
   // flags until it can use virtual history, so routers use their History fallback.
-  // Peer connections would also bypass the relay entirely.
-  for (const key of ["navigation", "NavigationPrecommitController", "RTCPeerConnection", "webkitRTCPeerConnection"]) {
-    try { Object.defineProperty(globalThis, key, {value: undefined, configurable: true}); } catch {}
+  // Native network APIs without relay adapters must not connect directly.
+  // WebSocketStream needs backpressure and close metadata the current socket
+  // transport cannot supply; SharedWorker cannot run in this opaque origin.
+  // Remove configurable properties so `in` checks also select site fallbacks.
+  for (const key of ["navigation", "NavigationPrecommitController", "RTCPeerConnection", "webkitRTCPeerConnection", "WebSocketStream", "WebTransport", "SharedWorker"]) {
+    try { if(!Reflect.deleteProperty(globalThis,key))Object.defineProperty(globalThis,key,{value:undefined,configurable:true}); } catch {}
   }
 
   globalThis.__ctx__ = ctx.__proxy__;

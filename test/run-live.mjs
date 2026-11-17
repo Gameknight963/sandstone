@@ -106,9 +106,11 @@ async function interact(page,proxy,site){
     const dark=await read(page,proxy,'document.documentElement.classList.contains("dark")');
     await surface.locator('button[aria-label="Toggle dark mode"]:visible').first().click();
     await wait(page,proxy,'document.documentElement.classList.contains("dark")==='+JSON.stringify(!dark));
+    await (proxy?page.evaluate(()=>main_frame.eval_js('window.liveNavigationMarker="persisted"')):page.evaluate(()=>window.liveNavigationMarker='persisted'));
     await surface.locator('a[href="/guide/essentials/reactivity-fundamentals.html"]:visible').first().click();
     await wait(page,proxy,'location.pathname==="/guide/essentials/reactivity-fundamentals.html"&&document.querySelector("h1")?.textContent.includes("Reactivity Fundamentals")');
-    return {...await read(page,proxy,'({path:location.pathname,heading:document.querySelector("h1").textContent.trim(),dark:document.documentElement.classList.contains("dark"),font:getComputedStyle(document.querySelector("h1")).fontFamily,fontSize:getComputedStyle(document.querySelector("h1")).fontSize})'),counter:counter.trim()};
+    const result={...await read(page,proxy,'({path:location.pathname,heading:document.querySelector("h1").textContent.trim(),dark:document.documentElement.classList.contains("dark"),font:getComputedStyle(document.querySelector("h1")).fontFamily,fontSize:getComputedStyle(document.querySelector("h1")).fontSize,clientNavigation:window.liveNavigationMarker==="persisted"})'),counter:counter.trim()};
+    assert.equal(result.clientNavigation,true,'Vue navigation reloaded the document');return result;
   }
   if(site.id==='react'){
     // Compile the final embedded example and exercise shared React state before
@@ -119,9 +121,11 @@ async function interact(page,proxy,site){
     await button.waitFor({state:'visible',timeout:25000});await button.click();
     await counter.getByRole('button',{name:'Clicked 1 times',exact:true}).first().waitFor();
     const counters=await counter.locator('button').allTextContents();
+    await (proxy?page.evaluate(()=>main_frame.eval_js('window.liveNavigationMarker="persisted"')):page.evaluate(()=>window.liveNavigationMarker='persisted'));
     await surface.locator('a[href="/learn/installation"]:visible').first().click();
     await wait(page,proxy,'location.pathname==="/learn/installation"&&document.title.includes("Installation")');
-    return {...await read(page,proxy,'({path:location.pathname,title:document.title})'),counters};
+    const result={...await read(page,proxy,'({path:location.pathname,title:document.title,clientNavigation:window.liveNavigationMarker==="persisted"})'),counters};
+    assert.equal(result.clientNavigation,true,'React navigation reloaded the document');return result;
   }
   if(site.id==='github'){
     await surface.locator('a[href="/octocat/Hello-World/blob/master/README"]:visible').first().click();

@@ -78,6 +78,8 @@ const svgResourceTest=await readFile(new URL('svg-resources.playwright.js',impor
 const verifySVGResources=runInThisContext(`(${svgResourceTest})`);
 const svgScriptTest=await readFile(new URL('svg-scripts.playwright.js',import.meta.url),'utf8');
 const verifySVGScripts=runInThisContext(`(${svgScriptTest})`);
+const networkAPITest=await readFile(new URL('network-api-exposure.playwright.js',import.meta.url),'utf8');
+const verifyNetworkAPIs=runInThisContext(`(${networkAPITest})`);
 const svgUseTest=await readFile(new URL('svg-use.playwright.js',import.meta.url),'utf8');
 const verifySVGUse=runInThisContext(`(${svgUseTest})`);
 const formTest = await readFile(new URL("forms.playwright.js", import.meta.url), "utf8");
@@ -203,6 +205,7 @@ try {
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
+    result.passed.push(...await timed(verifyNetworkAPIs(page), 'Native network API exposure fixture'));
     result.passed.push(...await timed(verifyWorkerBundles(page), 'Worker bundle fixture'));
     result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
