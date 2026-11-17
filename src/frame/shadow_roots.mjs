@@ -1,6 +1,8 @@
 import {on_dom_construction,native_attach_shadow} from './dom_operations.mjs';
 
 const roots=new WeakMap();
+const observers=new Set();
+export function on_shadow_root(callback){observers.add(callback);}
 const get=globalThis.Element&&Object.getOwnPropertyDescriptor(Element.prototype,'shadowRoot').get;
 const clonable=globalThis.ShadowRoot&&Object.getOwnPropertyDescriptor(ShadowRoot.prototype,'clonable')?.get;
 const host=globalThis.ShadowRoot&&Object.getOwnPropertyDescriptor(ShadowRoot.prototype,'host').get;
@@ -19,10 +21,10 @@ const internals=new WeakMap(),internals_get=globalThis.ElementInternals&&Object.
 export function shadow_root(element){
   let root=roots.get(element)||get.call(element);
   const attached=internals.get(element);if(!root&&attached&&internals_get)root=internals_get.call(attached);
-  if(root)roots.set(element,root);return root;
+  if(root)remember_shadow_root(element,root);return root;
 }
-export function remember_shadow_root(host,root){roots.set(host,root);}
-export function remember_declarative_root(host,root,native=false){roots.set(host,root);declarative.add(root);if(native)native_declarative.add(root);}
+export function remember_shadow_root(host,root){roots.set(host,root);for(const callback of observers)callback(root);}
+export function remember_declarative_root(host,root,native=false){remember_shadow_root(host,root);declarative.add(root);if(native)native_declarative.add(root);}
 export const is_declarative_root=root=>declarative.has(root);
 export const shadow_mode=root=>closed_copies.has(root)?'closed':mode.call(root);
 export function remember_shadow_mode(root,value){if(value==='closed'&&mode.call(root)==='open')closed_copies.add(root);}
@@ -33,7 +35,7 @@ export function capture_shadow_state(root){
 export function track_shadow_root(root){
   while(host&&root&&kind.call(root)===11){
     let element;try{element=host.call(root);}catch{return;}
-    roots.set(element,root);root=getRoot.call(element);
+    remember_shadow_root(element,root);root=getRoot.call(element);
   }
 }
 export function clonable_shadow(element){const root=shadow_root(element);return root&&clonable?.call(root)?root:null;}
@@ -61,7 +63,7 @@ if(globalThis.Element){
     }});
     const root=Reflect.apply(target,receiver,converted);remember_shadow_mode(root,logical);
     if(root===existing){declarative.delete(root);native_declarative.delete(root);}
-    roots.set(receiver,root);return root;
+    remember_shadow_root(receiver,root);return root;
   }});
   const property=Object.getOwnPropertyDescriptor(Element.prototype,'shadowRoot');
   Object.defineProperty(Element.prototype,'shadowRoot',{...property,get:new Proxy(property.get,{apply(target,receiver,args){const root=Reflect.apply(target,receiver,args);return root&&closed_copies.has(root)?null:root;}})});

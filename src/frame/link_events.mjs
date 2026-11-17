@@ -2,6 +2,7 @@
 // internal cancellation to page listeners. Run the virtual default action only
 // after dispatch, including when propagation stops before document/window.
 import {unwrap_global_target} from './global_functions.mjs';
+import {on_shadow_root} from './shadow_roots.mjs';
 let finish_listener=()=>{};
 export function finish_event_listener(event){finish_listener(event);}
 export function install_link_events({enabled,activate,submit}) {
@@ -184,10 +185,13 @@ export function install_link_events({enabled,activate,submit}) {
   HTMLElement.prototype.click=new Proxy(click,{apply(target,receiver,args){prepare(receiver);const result=Reflect.apply(target,receiver,args);flush();return result;}});
   const requestSubmit=HTMLFormElement.prototype.requestSubmit;
   if(requestSubmit)HTMLFormElement.prototype.requestSubmit=new Proxy(requestSubmit,{apply(target,receiver,args){prepare(receiver);const result=Reflect.apply(target,receiver,args);flush();return result;}});
-  const attachShadow=Element.prototype.attachShadow;
-  if(attachShadow)Element.prototype.attachShadow=new Proxy(attachShadow,{apply(target,receiver,args){
-    const root=Reflect.apply(target,receiver,args);add.call(root,'click',gate,true);add.call(root,'submit',gate,true);prepare_tail(root,true);prepare_tail(root,false);return root;
-  }});
+  // Declarative parsing and native cloning create roots without attachShadow.
+  // Observe every discovered root before authored handlers can stop its events.
+  const shadow_events=new WeakSet();
+  on_shadow_root(root=>{
+    if(shadow_events.has(root))return;
+    shadow_events.add(root);add.call(root,'click',gate,true);add.call(root,'submit',gate,true);prepare_tail(root,true);prepare_tail(root,false);
+  });
   add.call(globalThis,'click',gate,true);
   add.call(globalThis,'submit',gate,true);
   prepare_tail(globalThis,true);prepare_tail(globalThis,false);

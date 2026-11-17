@@ -6,7 +6,7 @@ import {mutate_document_base} from '../document_base.mjs';
 import {reconcile_iframes} from '../iframe_lifecycle.mjs';
 import {html_fragment,range_fragment,setter_fragment,setter_input,parsed_document} from '../html_fragments.mjs';
 import {template_host} from '../template_hosts.mjs';
-import {copy_resources,capture_resources,prepare_resources,pause_resources,mark_connected_scripts,mark_fragment_scripts,node_document,active_document,connected_node,walk_resources} from '../resource_nodes.mjs';
+import {copy_resources,capture_resources,prepare_resources,pause_resources,mark_connected_scripts,mark_fragment_scripts,node_document,active_document,connected_node} from '../resource_nodes.mjs';
 import {perform_node_copy} from '../node_copy.mjs';
 import {detach_media_attribute,observe_media_container} from '../rewrite/media.mjs';
 import {detach_svg_attribute} from '../svg_resources.mjs';
@@ -23,7 +23,6 @@ function prepare(node,full=true) {
   if(!full)return;
   const pending = rewrite.element(node);
   pending?.catch(console.error);
-  walk_resources(node,element=>{if(element instanceof Element){const root=shadow_root(element);if(root)rewrite.element(root)?.catch(console.error);}});
 }
 
 function execute(node) {
