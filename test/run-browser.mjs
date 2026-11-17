@@ -45,6 +45,8 @@ const audioTest=await readFile(new URL('audio.playwright.js',import.meta.url),'u
 const verifyAudio=runInThisContext(`(${audioTest})`);
 const mediaPolicyTest=await readFile(new URL('media-policy.playwright.js',import.meta.url),'utf8');
 const verifyMediaPolicy=runInThisContext(`(${mediaPolicyTest})`);
+const pictureLifecycleTest=await readFile(new URL('picture-lifecycle.playwright.js',import.meta.url),'utf8');
+const verifyPictureLifecycle=runInThisContext(`(${pictureLifecycleTest})`);
 const svgResourceTest=await readFile(new URL('svg-resources.playwright.js',import.meta.url),'utf8');
 const verifySVGResources=runInThisContext(`(${svgResourceTest})`);
 const svgUseTest=await readFile(new URL('svg-use.playwright.js',import.meta.url),'utf8');
@@ -202,6 +204,7 @@ try {
     result.passed.push(...await timed(verifyMedia(page), "Media fixture"));
     result.passed.push(...await timed(verifyAudio(page), 'Audio constructor fixture'));
     result.passed.push(...await timed(verifyMediaPolicy(page), 'Media policy fixture'));
+    result.passed.push(...await timed(verifyPictureLifecycle(page), 'Picture lifecycle fixture'));
     result.passed.push(...await timed(verifySVGResources(page), 'SVG resource fixture'));
     result.passed.push(...await timed(verifySVGUse(page), 'SVG symbol fixture'));
     result.passed.push(...await timed(verifyForms(page), "Form fixture"));

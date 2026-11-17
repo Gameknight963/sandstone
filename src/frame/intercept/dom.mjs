@@ -6,13 +6,14 @@ import {mutate_document_base} from '../document_base.mjs';
 import {reconcile_iframes} from '../iframe_lifecycle.mjs';
 import {html_fragment,range_fragment} from '../html_fragments.mjs';
 import {copy_resources,prepare_resources,pause_resources,mark_connected_scripts,mark_fragment_scripts,node_document,active_document,connected_node,walk_resources} from '../resource_nodes.mjs';
-import {detach_media_attribute} from '../rewrite/media.mjs';
+import {detach_media_attribute,observe_media_container} from '../rewrite/media.mjs';
 import {detach_svg_attribute} from '../svg_resources.mjs';
 import {shadow_root} from '../shadow_roots.mjs';
 import {unwrap_document} from '../document_identity.mjs';
 import {range_sources} from './ranges.mjs';
 import {capture_range_copy,perform_range_copy,clone_range_contents} from '../range_copy.mjs';
 const mutate_styles=(nodes,operation)=>mutate_document_base(()=>active_document(node_document(nodes[0]))?mutate_style_sources(nodes,operation):operation());
+const parent_element=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'parentElement').get;
 
 function prepare(node,full=true) {
   prepare_resources(node);
@@ -38,6 +39,7 @@ function intercept(target, key, first_only = false) {
     // A fragment is empty after insertion; retain its children for execution.
     const inserted = nodes.flatMap(node => node?.nodeType === 11 ? [...node.childNodes] : [node]);
     const active=active_document(node_document(receiver)),full=active&&connected_node(receiver);
+    observe_media_container(receiver);observe_media_container(parent_element.call(receiver));
     const result = mutate_styles([receiver, ...nodes], () => {
       if(active)for (const node of nodes) prepare(node,full);
       return Reflect.apply(original, receiver, args);

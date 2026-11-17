@@ -15,11 +15,14 @@ const dispatch=globalThis.EventTarget?.prototype.dispatchEvent;
 const attribute=globalThis.Element?.prototype.getAttribute;
 let policy_observer;
 
-function request_element(element){
+function request_element(element,key){
   if(!(element instanceof HTMLSourceElement))return element;
   const parent=element.parentElement;
-  if(parent instanceof HTMLPictureElement)return [...parent.children].find(child=>child instanceof HTMLImageElement)||element;
-  return parent instanceof HTMLMediaElement?parent:element;
+  if(parent instanceof HTMLPictureElement&&key!=='src'){
+    const image=[...parent.children].find(child=>child instanceof HTMLImageElement);
+    if(image&&[...parent.children].indexOf(element)<[...parent.children].indexOf(image))return image;
+  }
+  return parent instanceof HTMLMediaElement&&key!=='srcset'?parent:null;
 }
 function cross_origin(element){
   const target=request_element(element);
@@ -41,6 +44,29 @@ function refresh_image_policy(element){
     state.crossOrigin=policy;
     for(const [key,value] of state.authored)if(value!==null)state.states.get(key).update(value,state.active);
   }
+}
+function refresh_source(element){
+  const session=sessions.get(element);if(!session)return;
+  for(const [key,value] of session.authored){
+    const state=session.states.get(key),target=request_element(element,key);
+    if(value!==null&&(state.waiting?!!target:state.requestElement!==target))state.update(value,session.active);
+  }
+}
+function observe_policy(element,options){
+  policy_observer??=new MutationObserver(records=>{
+    const sources=new Set();
+    for(const record of records){
+      if(record.type==='attributes')refresh_image_policy(record.target);
+      else{
+        for(const node of [...record.target.children,...record.removedNodes])if(node instanceof HTMLSourceElement)sources.add(node);
+      }
+    }
+    for(const source of sources)refresh_source(source);
+  });
+  policy_observer.observe(element,options);
+}
+export function observe_media_container(element){
+  if(element instanceof HTMLPictureElement||element instanceof HTMLMediaElement)observe_policy(element,{childList:true});
 }
 
 function source_pending(element) {
@@ -106,15 +132,16 @@ export function rewrite_media(element,initial_sources) {
   const states = new Map();
   const session={authored,states,active:true,crossOrigin:cross_origin(element)},aliases=new Map();sessions.set(element,session);
   if(element instanceof HTMLImageElement){
-    policy_observer??=new MutationObserver(records=>{for(const element of new Set(records.map(record=>record.target)))refresh_image_policy(element);});
-    policy_observer.observe(element,{attributes:true,attributeFilter:['crossorigin']});
+    observe_policy(element,{attributes:true,attributeFilter:['crossorigin']});
   }
+  observe_media_container(element);
+  if(element instanceof HTMLSourceElement)observe_media_container(element.parentElement);
   // Clear every source before starting asynchronous work, including picture sources.
   for (const key of properties) remove(key);
   const base = () => owner.call(element)===document?ctx.document.baseURI:native_base.call(element);
 
   for (const key of properties) {
-    const state = {generation: 0, urls: [], controller: null};
+    const state = {generation: 0, urls: [], controller: null,waiting:false,requestElement:null};
     states.set(key, state);
     const release = urls => {
       for (const url of urls) { URL.revokeObjectURL(url); delete network.known_urls[url]; }
@@ -135,7 +162,13 @@ export function rewrite_media(element,initial_sources) {
       const urls = [];
       const resources = new Map();
       let request_options;
-      const done = key === "src" ? source_pending(element) : () => {};
+      const done=key==='src'?source_pending(element):()=>{};
+      const source=element instanceof HTMLSourceElement;
+      state.requestElement=request_element(element,key);
+      state.waiting=active&&source&&!state.requestElement;
+      // A source has no independent loader. Keep its authored URL virtual until
+      // a picture image or media parent can supply the actual request context.
+      if(state.waiting)return;
       const resource = async source => {
         if (!source) return source;
         const url = new URL(source, request_base);
@@ -164,10 +197,12 @@ export function rewrite_media(element,initial_sources) {
           // This includes CORS/referrer attributes assigned immediately after src.
           await Promise.resolve();
           controller.signal.throwIfAborted();
+          state.requestElement=request_element(element,key);
+          if(source&&!state.requestElement){state.waiting=true;return;}
           const crossOrigin=cross_origin(element);
           session.crossOrigin=crossOrigin;
           request_options={signal:controller.signal,credentials:crossOrigin==='anonymous'?'same-origin':'include',
-            mode:crossOrigin===null?'no-cors':'cors',referrerPolicy:request_element(element).referrerPolicy};
+            mode:crossOrigin===null?'no-cors':'cors',referrerPolicy:state.requestElement.referrerPolicy};
           const rewritten = key === "srcset" ? await rewrite_srcset(value, async source => {
             try { return await resource(source); }
             catch (error) { if (controller.signal.aborted) throw error; return "data:application/octet-stream,"; }

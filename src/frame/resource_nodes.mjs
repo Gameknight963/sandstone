@@ -1,5 +1,5 @@
 import * as rewrite from './rewrite/index.mjs';
-import {clone_media,set_media_active,capture_media} from './rewrite/media.mjs';
+import {clone_media,set_media_active,capture_media,observe_media_container} from './rewrite/media.mjs';
 import {clone_svg_resource,is_svg_resource,rewrite_svg_resource,set_svg_active,capture_svg_resource} from './svg_resources.mjs';
 import {rewrite_event_attributes} from './event_attributes.mjs';
 import {shadow_root,clonable_shadow} from './shadow_roots.mjs';
@@ -31,6 +31,7 @@ export function prepare_resources(node){
   walk_resources(node,element=>{
     if(!(element instanceof Element))return;
     rewrite_event_attributes(element);
+    observe_media_container(element);
     set_media_active(element,true);set_svg_active(element,true);
     if(Element.prototype.matches.call(element,'img, source, video, audio, input, track'))rewrite.media(element);
     if(is_svg_resource(element))rewrite_svg_resource(element);

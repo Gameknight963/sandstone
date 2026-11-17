@@ -5,11 +5,13 @@ import { ctx, get_dom_property } from "../context.mjs";
 import {rewrite_event_attributes} from '../event_attributes.mjs';
 import {is_style_link} from './stylesheet.mjs';
 import {is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
+import {observe_media_container} from './media.mjs';
 
 const rewritten_elements = new WeakSet();
 
 //non-recursive element rewrite
 function rewrite_element_single(element) {
+  observe_media_container(element);
   const tag = get_dom_property(element, "tagName");
   //handlers for specific tags
   let promise;
