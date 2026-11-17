@@ -4,6 +4,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import { runInThisContext } from "node:vm";
 import assert from "node:assert/strict";
 import {createHmac} from 'node:crypto';
+import {verifyHTMLInputStream} from './html-input-native.mjs';
 
 const testSource = await readFile(new URL("browser.playwright.js", import.meta.url), "utf8");
 const dexieSource = await readFile(new URL("../node_modules/dexie/dist/dexie.js", import.meta.url), "utf8");
@@ -220,6 +221,7 @@ try {
     result.passed.push(...await timed(verifyParsedDocuments(page), 'Parsed document fixture'));
     result.passed.push(...await timed(verifyLiveClone(page), 'Live clone fixture'));
     result.passed.push(...await timed(verifyServerShadow(page), 'Server shadow fixture'));
+    result.passed.push(...await timed(verifyHTMLInputStream(page), 'HTML input stream fixture'));
     result.passed.push(...await timed(verifyShadowNavigation(page), 'Shadow navigation fixture'));
     result.passed.push(...await timed(verifyRangeFragments(page), 'Range fragment fixture'));
     result.passed.push(...await timed(verifyDocumentTransfer(page), 'Document transfer fixture'));
