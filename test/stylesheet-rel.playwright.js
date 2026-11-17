@@ -53,6 +53,26 @@ async page=>{
       await until(proxy,'getComputedStyle(document.getElementById("probe")).paddingLeft==="17px"');
       values.push(await read(proxy,'({rel:document.querySelector("link").rel,padding:getComputedStyle(document.getElementById("probe")).paddingLeft})'));
     }
+    for(const mode of ['property','attribute','tokens','as','href','attributes']){
+      const initialRel=mode==='as'?'preload':mode==='attribute'?'prefetch':'';
+      const result=JSON.parse(await evaluate(proxy,`new Promise((resolve,reject)=>{
+        document.querySelector('link')?.remove();const link=document.createElement('link');link.rel=${JSON.stringify(initialRel)};
+        link.href=${JSON.stringify(origin+'/stylesheet-rel/one.css')};
+        const timer=setTimeout(()=>reject(new Error('Late stylesheet relation did not load: '+${JSON.stringify(mode)})),5000);
+        let before,changes;
+        link.onerror=()=>{clearTimeout(timer);reject(new Error('Late stylesheet relation failed'));};
+        link.onload=()=>{
+          if(link.rel==='preload'){link.rel='stylesheet';return;}
+          clearTimeout(timer);link.onload=null;resolve(JSON.stringify({before,changes,rel:link.rel,href:link.href,padding:getComputedStyle(document.getElementById('probe')).paddingLeft}));
+        };
+        document.head.append(link);
+        ${mode==='href'?"link.href='./two.css';":''}
+        ${mode==='attributes'?`link.removeAttribute('HREF');changes={missing:{href:link.href,raw:link.getAttribute('href'),has:link.hasAttribute('href')},names:0,values:0};link.setAttribute({toString(){changes.names++;return 'HREF';}},{toString(){changes.values++;return './two.css';}});`:''}
+        before={rel:link.rel,tokens:link.relList.value,href:link.href,raw:link.getAttribute('href'),has:link.hasAttribute('href'),padding:getComputedStyle(document.getElementById('probe')).paddingLeft};
+        ${mode==='property'?"link.rel='stylesheet'":mode==='attribute'?"link.setAttribute('REL','StyleSheet')":mode==='as'?"link.as='style'":"link.relList.add('stylesheet')"};
+      })`));
+      values.push(result);
+    }
     return values;
   };
   try{
@@ -70,6 +90,6 @@ async page=>{
     });
     const actual=await run(true);
     if(JSON.stringify(actual)!==JSON.stringify(expected))throw new Error('Stylesheet relation parity: '+JSON.stringify({expected,actual}));
-    return ['Stylesheet rel tokens support combined relations, ASCII case and whitespace', 'Dynamic combined-relation stylesheets and href updates stay behind the relay', 'Style preloads promote through inline load handlers, rel properties, attributes and relList'];
+    return ['Stylesheet rel tokens support combined relations, ASCII case and whitespace', 'Dynamic combined-relation stylesheets and href updates stay behind the relay', 'Style preloads promote through inline load handlers, rel properties, attributes and relList', 'Links assigned rel/as after insertion upgrade without direct HTTP requests'];
   }finally{await nativeContext.close();}
 }

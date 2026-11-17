@@ -3,6 +3,7 @@ import * as rewrite from "./index.mjs";
 import { parse_css } from "./css.mjs";
 import { ctx, get_dom_property } from "../context.mjs";
 import {rewrite_event_attributes} from '../event_attributes.mjs';
+import {is_style_link} from './stylesheet.mjs';
 
 const rewritten_elements = new WeakSet();
 
@@ -18,7 +19,7 @@ function rewrite_element_single(element) {
   else if (element instanceof HTMLLinkElement)
     // A style preload must receive rewritten CSS before its load handler can
     // promote it to a stylesheet, including through relList or setAttribute.
-    promise = Element.prototype.matches.call(element,'[rel~="stylesheet" i], [rel~="preload" i][as="style" i]') ? rewrite.stylesheet(element) : rewrite.link(element);
+    promise = is_style_link(element) ? rewrite.stylesheet(element) : rewrite.link(element);
   else if (element instanceof HTMLMetaElement)
     promise = rewrite.meta(element);
   else if (element instanceof HTMLStyleElement)
