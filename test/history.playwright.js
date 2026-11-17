@@ -18,6 +18,7 @@ async page => {
       const nested = new URL(url).pathname === '/history/child' ? '<iframe src="https://fixture.test/history/grandchild"></iframe>' : '';
       return new Response(`<!doctype html><body style="height:4000px">${nested}
         <a id="jump" href="#section">Jump</a><div id="section" style="margin-top:1500px">Section</div>
+        <a id="inline-cancel" href="/history/unwanted" onclick="window.inlineClick={type:event.type,id:this.id}; return false;">Cancel inline</a>
         <script>
           window.instance = Math.random(); window.events = [];
           addEventListener('popstate', event => events.push({type:'popstate',state:event.state}));
@@ -26,6 +27,14 @@ async page => {
     };
     await main_frame.navigate_to('https://fixture.test/history/start');
   });
+  const inlineHandler=await read(`(()=>{
+    const inline=document.getElementById('inline-cancel');inline.click();
+    const original=inlineClick;
+    inline.onclick=function(event){window.inlineReplacement=this===inline&&event.type==='click';return false;};
+    inline.click();
+    return {inline:inlineClick,replaced:inlineReplacement&&inlineClick===original,path:location.pathname};
+  })()`);
+  equal(inlineHandler,{inline:{type:'click',id:'inline-cancel'},replaced:true,path:'/history/start'});
   const initial = await read('({length:history.length,instance})');
   const mutated = await read(`(() => {
     const state={page:1,bytes:new Uint8Array([3,4])};

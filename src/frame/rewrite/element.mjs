@@ -33,13 +33,17 @@ function rewrite_element_single(element) {
     let attribute = item.name;
     if (!attribute.startsWith("on")) continue;
     let handler_script = Element.prototype.getAttribute.call(element, attribute);
-    let event_name = attribute.substring(2);
 
     Element.prototype.setAttribute.call(element, "__" + attribute, handler_script);
     Element.prototype.removeAttribute.call(element, attribute);
-    EventTarget.prototype.addEventListener.call(element, event_name, () => {
-      run_script(handler_script, element);
-    });
+    // Event attributes are function bodies with an event argument and a native
+    // element receiver. Installing a property handler also preserves return
+    // false cancellation, replacement through .onclick, and handler identity.
+    let handler;
+    element[attribute] = function(event) {
+      handler ||= run_script('(function(event){\n'+handler_script+'\n})');
+      return handler.call(this,event);
+    };
   }
 
   //rewrite inline styles
