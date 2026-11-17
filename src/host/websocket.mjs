@@ -1,4 +1,5 @@
 import {same_site} from './request.mjs';
+import {cookie_header} from './cookie_policy.mjs';
 
 // libcurl.js 0.7 only cleans up sockets after they become connected. Its base
 // session close also needs the polling loop stopped before freeing the session.
@@ -47,7 +48,7 @@ export function websocket_options(store, input, {url, top_url = url, userAgent})
   const source = new URL(url), top = new URL(top_url);
   const sameSiteContext = same_site(top, source) && same_site(top, target) ? 'strict' : 'none';
   const headers = {Origin: source.origin, 'User-Agent': userAgent};
-  const cookie = store.cookies.getCookieStringSync(target.href, {sameSiteContext});
+  const cookie = cookie_header(store.cookies,target.href,{sameSiteContext});
   if (cookie) headers.Cookie = cookie;
   return {
     headers,

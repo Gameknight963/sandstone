@@ -1,5 +1,6 @@
 import { getPublicSuffix } from "tough-cookie";
 import {parse_referrer_policy, request_referrer, request_origin} from '../referrer.mjs';
+import {cookie_header} from './cookie_policy.mjs';
 
 export function same_site(a, b) {
   const domain = hostname => getPublicSuffix(hostname, {ignoreError: true}) || hostname;
@@ -39,7 +40,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
     referrer = request_referrer(referrer,url.href,policy);
     if (referrer) headers.set('referer',referrer);
     if (allowed) {
-      const cookies = data.cookies.getCookieStringSync(url.href, {sameSiteContext});
+      const cookies = cookie_header(data.cookies,url.href,{sameSiteContext,allowUnsafe:context.navigation&&!context.nested&&!safe_method});
       if (cookies) headers.set("cookie", cookies);
     }
     const response = await transport(url.href, {...options, headers: Object.fromEntries(headers), redirect: "manual"});

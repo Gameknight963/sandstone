@@ -50,7 +50,7 @@ const server=create_relay_server((request,response)=>{
     return;
   }
   if(url.pathname==='/request-context/source'){
-    response.writeHead(200,{'Content-Type':'text/html','Set-Cookie':'ctx_session=secret; HttpOnly; SameSite=Strict; Path=/',...(url.searchParams.has('policy')?{'Referrer-Policy':url.searchParams.get('policy')}:{})});
+    response.writeHead(200,{'Content-Type':'text/html','Set-Cookie':['ctx_session=secret; HttpOnly; SameSite=Strict; Path=/','ctx_default=default; Path=/','ctx_invalid=invalid; SameSite=unknown; Path=/'],...(url.searchParams.has('policy')?{'Referrer-Policy':url.searchParams.get('policy')}:{})});
     const meta=url.searchParams.has('meta')?'<meta name="referrer" content='+JSON.stringify(url.searchParams.get('meta'))+'>':'';
     const script=url.searchParams.has('script')?'<script src="/request-context/script?client='+encodeURIComponent(url.searchParams.get('script'))+'&label=declared-meta"></script>':'';
     response.end('<!doctype html><title>Request context fixture</title>'+meta+script+'<body>Request context fixture</body>');return;
@@ -368,6 +368,7 @@ try{
     await waitCSS(client);nativeCSS.set(policy,cssValues(client));
   }
   await nativeContext.addCookies([{url:origin.replace('127.0.0.1','localhost'),name:'ctx_target_strict',value:'s',sameSite:'Strict'},{url:origin.replace('127.0.0.1','localhost'),name:'ctx_target_lax',value:'l',sameSite:'Lax'}]);
+  await nativePage.goto(origin.replace('127.0.0.1','localhost')+'/request-context/source');
   for(const [label,method,cross,policy] of formCases){
     await nativePage.goto(origin+'/request-context/source?policy='+policy);
     await nativePage.evaluate(source=>eval(source),submitFormScript('forms-native',label,method,cross?origin.replace('127.0.0.1','localhost'):origin));
@@ -535,6 +536,7 @@ try{
     for(const cookie of ['ctx_target_strict=s; SameSite=Strict; Path=/','ctx_target_lax=l; SameSite=Lax; Path=/'])sandstone.controller.site_data.setCookie(origin.replace('127.0.0.1','localhost')+'/',cookie);
   },origin);
   const formClient='forms-'+storageDenied;
+  await page.evaluate(url=>main_frame.navigate_to(url),origin.replace('127.0.0.1','localhost')+'/request-context/source');
   for(const [label,method,cross,policy] of formCases){
     await page.evaluate(url=>main_frame.navigate_to(url),origin+'/request-context/source?policy='+policy);
     await page.evaluate(source=>main_frame.eval_js(source),submitFormScript(formClient,label,method,cross?origin.replace('127.0.0.1','localhost'):origin));

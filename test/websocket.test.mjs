@@ -105,7 +105,7 @@ test('WebSocket cookies use HTTP schemes, path, Secure, SameSite and HttpOnly ru
   assert.deepEqual(new Set(own.headers.Cookie.split('; ')), new Set(['strict=s', 'lax=l', 'none=n', 'session=secret']));
   assert.equal(own.headers.Origin, 'https://chat.example.test');
   assert.equal(own.headers['User-Agent'], 'test browser');
-  assert.equal(options('wss://chat.example.test/socket/live', 'https://different.test/').headers.Cookie, 'session=secret; none=n');
+  assert.equal(options('wss://chat.example.test/socket/live', 'https://different.test/').headers.Cookie, 'none=n');
   assert.equal(options('wss://chat.example.test/', 'https://chat.example.test/', 'https://different.test/').headers.Cookie, 'none=n');
   assert.equal(options('ws://chat.example.test/', 'http://chat.example.test/').headers.Cookie, 'strict=s; lax=l');
   assert.equal(options('wss://unrelated.test/').headers.Cookie, undefined);
