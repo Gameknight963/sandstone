@@ -27,16 +27,18 @@ export function rewrite_script(element) {
   const enabled = loader.site_settings.allow_js && !element.__sandstone_inert__ && (is_module || !element.noModule);
   element.__sandstone_module__ = is_module;
   let script_url = element.getAttribute("src");
+  let authored_src=script_url;
   const num = script_num++;
   let text = element.textContent;
-  let ready = !script_url;
+  let ready = script_url===null;
   let executed = false;
+  let started = false;
   let prepared;
   element.type = "application/x-sandstone-script";
   element.removeAttribute("src");
 
   element.__sandstone_execute__ = () => {
-    if (!enabled || executed || !element.isConnected || (!script_url && !element.textContent.trim())) return;
+    if (!enabled || executed || !element.isConnected || (script_url===null && !element.textContent.trim())) return;
     if (is_module) {
       executed = true;
       prepared ||= prepare_module();
@@ -47,6 +49,7 @@ export function rewrite_script(element) {
       }).catch(report_error);
     }
     if (!ready) return;
+    started = true;
     executed = true;
     loader.eval_script(element, script_url ? text : element.textContent);
   };
@@ -61,8 +64,11 @@ export function rewrite_script(element) {
 
   async function prepare_module() {
     if (!enabled) return null;
+    if(script_url===null&&!element.textContent.trim())return null;
+    started=true;
     const credentials = element.crossOrigin === "use-credentials" ? "include" : "same-origin";
     try {
+      if(script_url==='')throw new TypeError('Script source is empty');
       return await (script_url ? modules.prepare_url(convert_url(script_url, ctx.document.baseURI), ctx.document.baseURI, {credentials}) :
         modules.prepare_inline(element.textContent, ctx.document.baseURI, credentials));
     } catch(error) {
@@ -72,9 +78,11 @@ export function rewrite_script(element) {
   }
 
   async function download() {
-    if (!enabled || !script_url) return;
+    if (!enabled || script_url===null || started) return;
+    started=true;
     ready = false;
     try {
+      if(script_url==='')throw new TypeError('Script source is empty');
       const response = await network.fetch(convert_url(script_url, ctx.document.baseURI), {
         mode:element.crossOrigin === null ? 'no-cors' : 'cors',
         credentials:element.crossOrigin === 'anonymous' ? 'same-origin' : 'include',
@@ -92,12 +100,16 @@ export function rewrite_script(element) {
 
   intercept_property(element, "src", {
     get: () => {
-      if(!script_url)return '';
-      try{return convert_url(script_url,ctx.document.baseURI);}
-      catch{return script_url;}
+      if(authored_src===null)return '';
+      try{return convert_url(authored_src,ctx.document.baseURI);}
+      catch{return authored_src;}
     },
     set: value => {
-      script_url = String(value);
+      authored_src = `${value}`;
+      // Native scripts keep the request and execution chosen at preparation,
+      // while subsequent src writes still update their reflected attributes.
+      if(started)return;
+      script_url=authored_src;
       if (is_module) {
         prepared = prepare_module();
         prepared.catch(report_error);
@@ -105,14 +117,25 @@ export function rewrite_script(element) {
       } else download();
     }
   });
-  proxy_function(element, "setAttribute", (target, this_arg, args) => {
-    if (String(args[0]).toLowerCase() === "src") { element.src = args[1]; return; }
-    return Reflect.apply(target, this_arg, args);
-  });
+  for(const name of ['getAttribute','hasAttribute','setAttribute','removeAttribute']){
+    proxy_function(element,name,(target,receiver,args)=>{
+      const required=name==='setAttribute'?2:1;
+      if(receiver!==element||args.length<required)return Reflect.apply(target,receiver,args);
+      const attribute=`${args[0]}`;
+      if(attribute.toLowerCase()==='src'){
+        if(name==='getAttribute')return authored_src;
+        if(name==='hasAttribute')return authored_src!==null;
+        if(name==='setAttribute'){element.src=args[1];return;}
+        authored_src=null;
+        if(!started){script_url=null;ready=true;}
+      }
+      return Reflect.apply(target,receiver,[attribute,...args.slice(1)]);
+    });
+  }
   if (!loader.is_loaded) pending_scripts.push([num, element]);
   if (is_module) {
     prepared = prepare_module();
     return prepared.catch(report_error);
   }
-  return script_url ? download() : undefined;
+  return script_url!==null ? download() : undefined;
 }

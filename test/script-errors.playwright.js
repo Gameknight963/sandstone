@@ -1,9 +1,9 @@
 async (page,allowDiagnostics)=>{
   const base='https://fixture.test/script-errors/';
-  const kinds=['classic','module','dependency','invalid-classic','invalid-module'];
+  const kinds=['classic','module','dependency','invalid-classic','invalid-module','empty-classic','empty-module'];
   const pages={},sources={};
   for(const kind of kinds){
-    const src=kind.startsWith('invalid-')?'http://[':base+(kind==='dependency'?'entry.mjs':'missing-'+kind+'.js');
+    const src=kind.startsWith('empty-')?'':kind.startsWith('invalid-')?'http://[':base+(kind==='dependency'?'entry.mjs':'missing-'+kind+'.js');
     const type=kind.endsWith('classic')?'':'module';
     pages[base+'page-'+kind]='<!doctype html><head><script>'+`
       window.scriptErrors=[];window.fallbackLoads=0;window.setterReturned=false;
@@ -60,8 +60,10 @@ async (page,allowDiagnostics)=>{
       `Script failed: ${base}missing-classic.js: Script request failed: 404`,
       `Script failed: ${base}missing-dynamic-classic.js: Script request failed: 404`,
       `Script failed: ${base}missing-dynamic-invalid-classic.js: Script request failed: 404`,
+      `Script failed: ${base}missing-dynamic-empty-classic.js: Script request failed: 404`,
+      ...['classic','module'].map(kind=>`Script failed: ${base}page-empty-${kind}: Script source is empty`),
       `Script failed: http://[: ${invalidMessage}`,
-      ...['module','dynamic-module','dynamic-dependency','dynamic-invalid-module'].map(kind=>`Script failed: ${base}missing-${kind}.js: Module request failed (404): ${base}missing-${kind}.js`),
+      ...['module','dynamic-module','dynamic-dependency','dynamic-invalid-module','dynamic-empty-module'].map(kind=>`Script failed: ${base}missing-${kind}.js: Module request failed (404): ${base}missing-${kind}.js`),
       `Script failed: ${base}entry.mjs: Module request failed (404): ${base}missing-dependency.mjs`
     ]);
     const actual=await run(true);

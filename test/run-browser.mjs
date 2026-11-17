@@ -59,6 +59,8 @@ const stylesheetErrorsTest=await readFile(new URL('stylesheet-errors.playwright.
 const verifyStylesheetErrors=runInThisContext(`(${stylesheetErrorsTest})`);
 const scriptErrorsTest=await readFile(new URL('script-errors.playwright.js',import.meta.url),'utf8');
 const verifyScriptErrors=runInThisContext(`(${scriptErrorsTest})`);
+const scriptAttributesTest=await readFile(new URL('script-attributes.playwright.js',import.meta.url),'utf8');
+const verifyScriptAttributes=runInThisContext(`(${scriptAttributesTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 async function timed(operation, label) {
@@ -111,6 +113,7 @@ try {
     result.passed.push(...await timed(verifyStylesheetAttributes(page), 'Stylesheet attribute fixture'));
     try{result.passed.push(...await timed(verifyStylesheetErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Stylesheet failure fixture'));}
     finally{expectedDiagnostics.clear();}
+    result.passed.push(...await timed(verifyScriptAttributes(page), 'Script attribute fixture'));
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
