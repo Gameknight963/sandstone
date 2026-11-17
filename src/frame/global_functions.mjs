@@ -24,13 +24,14 @@ export function bind_global_function(target, method, virtual_target) {
   });
 }
 
-export function create_obj_proxy(obj, ctx_vars, target) {
+export function create_obj_proxy(obj, ctx_vars, target, map_value) {
   const methods = new WeakMap();
   const proxy = new Proxy(target, {
     get: (_, key) => {
       const replacement = obj[key];
       if (replacement !== undefined) return replacement;
-      const value = target[key];
+      const native_value = target[key];
+      const value = map_value ? map_value(native_value,key) : native_value;
       if (typeof value === 'function' && !value.prototype) {
         // Sites patch globals after first use. Cache by function identity so a
         // replacement takes effect, and restoring a method restores its wrapper.

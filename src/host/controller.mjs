@@ -282,6 +282,14 @@ rpc.rpc_handlers["cookie_set"] = async (frame_id, value) => {
   if (frame) site_data.setCookie(frame.url.href, value, false,{crossSite:frame_cross_site(frame,iframes)});
 };
 
+rpc.rpc_handlers.window_name=(id,token,value)=>{
+  const frame=iframes[id],context=network.beacons.contexts.get(token);
+  if(!frame?.parent_id||context?.frame!==id||context.retired||typeof value!=='string')return;
+  frame.window_name=value;
+  const root=iframes[frame.root_id],port=frame.parent_id===frame.root_id?root?.rpc_target.target:root?.rpc_target.extra_frame_targets.get(frame.parent_id);
+  if(port)rpc.notify(port,'child_window_name',[id,value]);
+};
+
 rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) => {
   const parent = iframes[parent_id];
   if (!parent || iframes[child_id]) throw new TypeError("Invalid child frame");
@@ -292,6 +300,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   const opaque_broadcast='opaque:'+child_id;
   const child = {
     id: child_id, parent_id, root_id: root.id, url: new URL(url),
+    window_name:saved?.window_name??options.window_name??'',
     origin: options.worker ? new URL(url).protocol === "data:" ? "null" : parent.origin || parent.url.origin : new URL(url).origin,
     broadcast_origin:options.worker ? new URL(url).protocol==='data:'?opaque_broadcast:parent_broadcast : options.opaque||parent_broadcast.startsWith('opaque:')?opaque_broadcast:new URL(url).origin,
     session_storage: parent.session_storage,
@@ -312,6 +321,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   iframes[child_id] = child;
   child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push"});
   return {
+    window_name:child.window_name,
     beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin}),
     cookie_cross_site:frame_cross_site(child,iframes),
     message_origin:child.broadcast_origin.startsWith('opaque:')?'null':undefined,
@@ -326,7 +336,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
 rpc.rpc_handlers["frame_unregister"] = (child_id, options = {}) => {
   const child = iframes[child_id];
   if (!child?.parent_id) return;
-  if (options.keep_history) saved_child_histories.set(child_id, {root_id: child.root_id, history: child.history, navigation: child.pending_navigation});
+  if (options.keep_history) saved_child_histories.set(child_id, {root_id: child.root_id, history: child.history, navigation: child.pending_navigation,window_name:child.window_name});
   else saved_child_histories.delete(child_id);
   for (const frame of Object.values(iframes)) {
     if (frame.parent_id === child_id) rpc.rpc_handlers["frame_unregister"](frame.id);

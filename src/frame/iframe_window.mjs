@@ -5,6 +5,36 @@ import {register_message_peer,window_post_message} from './window_messages.mjs';
 const frames=new WeakMap();
 const windows=new WeakMap();
 const descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentWindow');
+function window_index(key){
+  const index=Number(key);
+  return Number.isInteger(index)&&index>=0&&index<2**32-1&&String(index)===key;
+}
+export function virtual_frame_window(value,key){
+  if(!descriptor)return value;
+  const named=typeof key==='string'&&!window_index(key)&&!Object.hasOwn(globalThis,key)&&(value===undefined||value&&typeof value==='object');
+  if(named){
+    const elements=[...document.querySelectorAll('iframe')];
+    // Native indexed order can differ from DOM order after insertion. Apply
+    // virtual origin admission in that order, including duplicate frame names.
+    for(let index=0;index<globalThis.length;index++){
+      const target=globalThis[index],element=elements.find(element=>descriptor.get.call(element)===target),state=element&&frames.get(element);
+      if(state?.name()!==key)continue;
+      const same=!state.opaque()&&(!state.url()||new URL(state.url()).origin===ctx.location.origin);
+      if(same||element.name===key)return element.contentWindow;
+    }
+    if(elements.some(element=>frames.has(element)&&descriptor.get.call(element)===value))return undefined;
+  }
+  const known=windows.get(value);
+  if(known)return known;
+  if(!value||typeof value!=='object')return value;
+  // A newly inserted frame can be addressed by index or name before anyone has
+  // read contentWindow. Let the browser select the named/indexed value, then
+  // resolve its existing element adapter without reimplementing name lookup.
+  for(const element of document.querySelectorAll('iframe')){
+    if(descriptor.get.call(element)===value)return element.contentWindow;
+  }
+  return value;
+}
 if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',{
   ...descriptor,
   get(){
@@ -74,6 +104,6 @@ if(source)Object.defineProperty(MessageEvent.prototype,'source',{
   ...source,get(){const target=source.get.call(this);return windows.get(target)||target;}
 });
 
-export function intercept_iframe_window(element,url,navigate,token){
-  frames.set(element,{url,navigate,token,opaque:()=>element.hasAttribute('sandbox')&&!element.sandbox.contains('allow-same-origin')});
+export function intercept_iframe_window(element,url,navigate,token,{name=()=>'',opaque=()=>false}={}){
+  frames.set(element,{url,navigate,token,name,opaque:()=>opaque()||element.hasAttribute('sandbox')&&!element.sandbox.contains('allow-same-origin')});
 }

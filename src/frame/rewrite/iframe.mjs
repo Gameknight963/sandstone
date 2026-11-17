@@ -18,6 +18,8 @@ export function rewrite_iframe(iframe_element) {
   let registered = false;
   let iframe_src = iframe_element.src;
   let authored_src = iframe_element.getAttribute('src');
+  const initial_name=iframe_element.name;
+  let window_name=initial_name,opaque_origin=false;
   let iframe_url = "";
   let generation=0,active_request,commit=Promise.resolve();
   const retire=()=>{
@@ -25,6 +27,7 @@ export function rewrite_iframe(iframe_element) {
     const release=commit.then(async()=>{
       if(registered){await unregister(frame_id);registered=false;}
       loader.child_navigators.delete(frame_id);
+      loader.child_names.delete(frame_id);
     });
     commit=release.catch(console.error);
   };
@@ -112,8 +115,10 @@ export function rewrite_iframe(iframe_element) {
 
       iframe_url=final_url;
       const opaque=iframe_element.hasAttribute('sandbox')&&!iframe_element.sandbox.contains('allow-same-origin');
-      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque});
+      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,window_name:initial_name});
       registered = true;
+      window_name=state.window_name;opaque_origin=state.message_origin==='null';
+      loader.child_names.set(frame_id,value=>{window_name=value;});
       if(!current())return;
       loader.child_navigators.set(frame_id, fetch_src);
       try {
@@ -175,7 +180,7 @@ export function rewrite_iframe(iframe_element) {
   });
   intercept_iframe_window(iframe_element,()=>iframe_url,(url,history_mode)=>{
     fetch_src(url,null,{history_mode}).catch(console.error);
-  },message_token);
+  },message_token,{name:()=>window_name,opaque:()=>opaque_origin});
   proxy_function(iframe_element, "setAttribute", (target, this_arg, args) => {
     if(this_arg!==iframe_element||args.length<2)return Reflect.apply(target,this_arg,args);
     const name=`${args[0]}`;

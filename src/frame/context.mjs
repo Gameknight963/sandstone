@@ -7,6 +7,8 @@ import { modules } from "./polyfill/module.mjs";
 import { create_obj_proxy, global_method_names } from "./global_functions.mjs";
 import {parent_message_window,top_message_window,self_post_message} from './window_messages.mjs';
 import {create_document_storage} from './storage_sync.mjs';
+import {virtual_frame_window} from './iframe_window.mjs';
+import * as rpc from '../rpc.mjs';
 const parse_json = JSON.parse;
 
 export const is_worker = typeof importScripts === "function";
@@ -39,7 +41,7 @@ export function get_handler_keys(obj) {
 export class CustomCTX {
   constructor() {
     ctx_vars.push(...new Set([...get_handler_keys(this),...global_method_names(globalThis)]));
-    this.__proxy__ = create_obj_proxy(this, ctx_vars, globalThis);
+    this.__proxy__ = create_obj_proxy(this, ctx_vars, globalThis, virtual_frame_window);
   }
 
   set location(value) {internal.location.assign(value)}
@@ -52,6 +54,11 @@ export class CustomCTX {
 
   get window() {return is_worker ? undefined : this.__proxy__}
   get frames() {return is_worker ? undefined : this.__proxy__}
+  get name() {return globalThis.name}
+  set name(value) {
+    globalThis.name=value;
+    if(!is_worker&&loader.is_iframe)rpc.call_procedure(rpc.host,'window_name',[loader.frame_id,loader.beacon_context,globalThis.name]).catch(console.error);
+  }
   get origin() {return this.location.origin}
   get document() {return is_worker ? undefined : intercept.document.__proxy__}
   get parent() {

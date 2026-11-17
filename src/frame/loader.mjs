@@ -42,7 +42,9 @@ export let cookie_cross_site = false;
 export let site_settings = {};
 export let default_settings = {};
 export const child_navigators = new Map();
+export const child_names = new Map();
 rpc.rpc_handlers["child_navigate"] = (id, url, form_data, navigation) => child_navigators.get(id)?.(url, form_data, navigation);
+rpc.rpc_handlers.child_window_name=(id,value)=>child_names.get(id)?.(value);
 
 export function eval_script(script_element, script_text) {
   ctx.document.currentScript = script_element;
@@ -132,6 +134,7 @@ async function load_html(options) {
   set_url(options.url);
   base_url = options.url;
   set_frame_id(options.frame_id);
+  if(options.window_name!==undefined)globalThis.name=options.window_name;
   get_frame_html();
   await update_ctx(options);
   configure_window_messages(options);
