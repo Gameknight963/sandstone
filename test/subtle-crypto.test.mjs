@@ -14,7 +14,7 @@ function fixture(){
 }
 
 test('Relayed Web Crypto hashes and authenticates with native key permissions',async()=>{
-  const {subtle,client}=fixture();
+  const {subtle,client,service}=fixture();
   assert.equal(hex(await subtle.digest('SHA-256',bytes('abc'))),'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
   const key=await subtle.importKey('raw',bytes('secret'),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']);
   assert.ok(key instanceof client.CryptoKey);assert.equal(key.type,'secret');assert.equal(key.extractable,false);
@@ -22,7 +22,11 @@ test('Relayed Web Crypto hashes and authenticates with native key permissions',a
   const signature=await subtle.sign('HMAC',key,bytes('message'));
   assert.equal(await subtle.verify('HMAC',key,signature,bytes('message')),true);
   assert.equal(await subtle.verify('HMAC',key,signature,bytes('changed')),false);
-  await assert.rejects(subtle.exportKey('raw',key),{name:'InvalidAccessException'});
+  // Node versions differ in the name used for exporting a nonextractable key.
+  // The relay must preserve the host's actual error, including its message.
+  let nativeFailure;
+  await assert.rejects(webcrypto.subtle.exportKey('raw',service.decode(client.encode(key))),error=>{nativeFailure=error;return true;});
+  await assert.rejects(subtle.exportKey('raw',key),{name:nativeFailure.name,message:nativeFailure.message});
   await assert.rejects(subtle.digest('not-an-algorithm',bytes('abc')),{name:'NotSupportedError'});
   await assert.rejects(subtle.digest.call({},'SHA-256',bytes('abc')),TypeError);
 });
