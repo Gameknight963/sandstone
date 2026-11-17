@@ -53,6 +53,8 @@ const rootInitializationTest=await readFile(new URL('root-initialization.playwri
 const verifyRootInitialization=runInThisContext(`(${rootInitializationTest})`);
 const stylesheetRelTest=await readFile(new URL('stylesheet-rel.playwright.js',import.meta.url),'utf8');
 const verifyStylesheetRel=runInThisContext(`(${stylesheetRelTest})`);
+const stylesheetErrorsTest=await readFile(new URL('stylesheet-errors.playwright.js',import.meta.url),'utf8');
+const verifyStylesheetErrors=runInThisContext(`(${stylesheetErrorsTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 async function timed(operation, label) {
@@ -71,10 +73,10 @@ try {
     });
     const page = await context.newPage();
     const browserErrors = [];
-    const expectedBaseWarnings=new Set();
+    const expectedDiagnostics=new Set();
     page.on("pageerror", error => { browserErrors.push(error.message); console.error("Browser error:", error.message); });
     page.on("console", message => {
-      if(expectedBaseWarnings.has(message.text()))return;
+      if(expectedDiagnostics.has(message.text()))return;
       if (message.type() === "error") { browserErrors.push(message.text()); console.error("Browser console:",message.text()); }
     });
     const requests = [];
@@ -102,6 +104,8 @@ try {
     result.passed.push(...moduleResults);
     result.passed.push(...await timed(verifyResources(page), "Resource fixture"));
     result.passed.push(...await timed(verifyStylesheetRel(page), 'Stylesheet relation fixture'));
+    try{result.passed.push(...await timed(verifyStylesheetErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Stylesheet failure fixture'));}
+    finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
     result.passed.push(...await timed(verifyWorkerBundles(page), 'Worker bundle fixture'));
     result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));
@@ -182,8 +186,8 @@ try {
     assert.deepEqual(cryptoReload,storageDenied?{existed:false,typed:false,extractable:null,signature:null}:{existed:true,typed:true,extractable:false,signature:createHmac('sha256','secret').update('message').digest('hex')},'Cryptographic key persistence did not match the storage capability');
     // Chrome can replay invalid-base diagnostics when another frame is loaded.
     // Exercise those native diagnostics last, with no subsequent navigation.
-    try{result.passed.push(...await timed(verifyBase(page,warnings=>warnings.forEach(message=>expectedBaseWarnings.add(message))), 'Document base fixture'));}
-    finally{expectedBaseWarnings.clear();}
+    try{result.passed.push(...await timed(verifyBase(page,warnings=>warnings.forEach(message=>expectedDiagnostics.add(message))), 'Document base fixture'));}
+    finally{expectedDiagnostics.clear();}
     if (target.startsWith("file:")) assert.deepEqual(requests.filter(url => /^https?:/.test(url)), [], "The standalone fixture made a direct HTTP request");
     assert.deepEqual(browserErrors, [], "The browser reported an unexpected runtime error");
     console.log(JSON.stringify({storageDenied, survivedReload, ...result}));
