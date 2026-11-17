@@ -5,6 +5,7 @@ import * as loader from "../loader.mjs";
 import { rewrite_media } from "../rewrite/media.mjs";
 import {parse_referrer_policy} from '../../referrer.mjs';
 import {configure_document_base,document_base_url} from '../document_base.mjs';
+import {is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
 
 configure_document_base(()=>ctx.location?.href||loader.url,()=>loader.is_loaded?undefined:loader.base_url);
 
@@ -17,8 +18,22 @@ if(globalThis.document){
 }
 
 function prepare_media(element) {
-  if (element.matches("img, source, video, audio, input, track")) rewrite_media(element);
+  if (Element.prototype.matches.call(element,"img, source, video, audio, input, track")) rewrite_media(element);
+  if(is_svg_resource(element))rewrite_svg_resource(element);
   return element;
+}
+
+if(globalThis.document){
+  const view=Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get;
+  for(const key of ['createElement','createElementNS']){
+    const original=Document.prototype[key];
+    Document.prototype[key]=new Proxy(original,{apply(target,receiver,args){
+      const element=Reflect.apply(target,receiver,args);
+      // Frameworks also create nodes through an element's native ownerDocument.
+      // Inert parser/mirror documents must retain their inactive behavior.
+      return view.call(receiver)?prepare_media(element):element;
+    }});
+  }
 }
 
 let active_referrer_policy, seen_referrer_meta = new WeakMap();

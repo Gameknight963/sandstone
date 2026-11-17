@@ -4,6 +4,7 @@ import { parse_css } from "./css.mjs";
 import { ctx, get_dom_property } from "../context.mjs";
 import {rewrite_event_attributes} from '../event_attributes.mjs';
 import {is_style_link} from './stylesheet.mjs';
+import {is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
 
 const rewritten_elements = new WeakSet();
 
@@ -16,13 +17,14 @@ function rewrite_element_single(element) {
     promise = rewrite.noscript(element);
   else if (Element.prototype.matches.call(element, "img, source, video, audio, input[type='image'], track"))
     promise = rewrite.media(element);
+  else if(is_svg_resource(element))promise=rewrite_svg_resource(element);
   else if (element instanceof HTMLLinkElement)
     // A style preload must receive rewritten CSS before its load handler can
     // promote it to a stylesheet, including through relList or setAttribute.
     promise = is_style_link(element) ? rewrite.stylesheet(element) : rewrite.link(element);
   else if (element instanceof HTMLMetaElement)
     promise = rewrite.meta(element);
-  else if (element instanceof HTMLStyleElement)
+  else if (element instanceof HTMLStyleElement || globalThis.SVGStyleElement && element instanceof SVGStyleElement)
     promise = rewrite.style(element);
   else if (element instanceof HTMLScriptElement)
     promise = rewrite.script(element);

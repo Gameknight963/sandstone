@@ -7,6 +7,7 @@ import {reconcile_iframes} from '../iframe_lifecycle.mjs';
 import {html_fragment,range_fragment} from '../html_fragments.mjs';
 import {rewrite_event_attributes} from '../event_attributes.mjs';
 import {clone_media} from '../rewrite/media.mjs';
+import {clone_svg_resource,is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
 const mutate_styles=(nodes,operation)=>mutate_document_base(()=>mutate_style_sources(nodes,operation));
 
 function prepare(node) {
@@ -41,7 +42,7 @@ if (globalThis.Node) {
   const next=Object.getOwnPropertyDescriptor(Node.prototype,'nextSibling').get;
   const kind=Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get;
   function restore_media(source,copy){
-    if(clone_media(source,copy))rewrite_event_attributes(copy);
+    if(clone_media(source,copy)||clone_svg_resource(source,copy))rewrite_event_attributes(copy);
     let original=first.call(source),child=first.call(copy);
     while(original&&child){restore_media(original,child);original=next.call(original);child=next.call(child);}
     if(source instanceof HTMLTemplateElement&&copy instanceof HTMLTemplateElement)restore_media(source.content,copy.content);
@@ -141,6 +142,7 @@ if (globalThis.Node) {
       for(const element of content.querySelectorAll('*')){
         rewrite_event_attributes(element);
         if(Element.prototype.matches.call(element,"img, source, video, audio, input[type='image'], track"))rewrite.media(element)?.catch(console.error);
+        if(is_svg_resource(element))rewrite_svg_resource(element)?.catch(console.error);
       }
       adopt.call(source,content);
       if(upgrade&&source===document)upgrade.call(registry,content);
