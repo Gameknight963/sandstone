@@ -5,6 +5,7 @@ import {download} from '../downloads.mjs';
 import {install_link_events} from '../link_events.mjs';
 import {install_hyperlinks} from '../hyperlinks.mjs';
 import {navigate_target,navigation_target} from '../navigation_targets.mjs';
+import {submit} from '../rewrite/form.mjs';
 
 function activate(element) {
   if(!element.hasAttribute('href'))return;
@@ -22,5 +23,5 @@ function activate(element) {
 
 if(globalThis.document){
   install_hyperlinks(()=>ctx.document.baseURI);
-  install_link_events({enabled:()=>loader.is_loaded,activate});
+  install_link_events({enabled:()=>loader.is_loaded,activate,submit});
 }

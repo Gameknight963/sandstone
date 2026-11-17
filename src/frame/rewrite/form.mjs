@@ -6,19 +6,37 @@ const form_prototype = globalThis.HTMLFormElement?.prototype;
 const method_descriptor = form_prototype && Object.getOwnPropertyDescriptor(form_prototype, "method");
 const enctype_descriptor = form_prototype && Object.getOwnPropertyDescriptor(form_prototype, "enctype");
 const attribute = (element, name) => element ? Element.prototype.getAttribute.call(element, name) : null;
+const constructing=new WeakSet();
+const connected=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'isConnected').get;
+const owner=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get;
+const button_form=globalThis.HTMLButtonElement&&Object.getOwnPropertyDescriptor(HTMLButtonElement.prototype,'form').get;
+const input_form=globalThis.HTMLInputElement&&Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'form').get;
+const button_value=globalThis.HTMLButtonElement&&Object.getOwnPropertyDescriptor(HTMLButtonElement.prototype,'value').get;
+const input_value=globalThis.HTMLInputElement&&Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').get;
+const close_dialog=globalThis.HTMLDialogElement?.prototype.close;
 
 function method_for(form, submitter) {
   return attribute(submitter, "formmethod") !== null ? submitter.formMethod || "get" : method_descriptor.get.call(form);
 }
 
-async function submit(form, submitter) {
+export async function submit(form, submitter) {
+  if(!connected.call(form)||owner.call(form)!==document||constructing.has(form))return;
   const action = attribute(submitter, "formaction") ?? attribute(form, "action") ?? ctx.location.href;
   const method = method_for(form, submitter);
   const target=navigation_target(form,attribute(submitter,'formtarget'));
   const navigation = /(?:^|\s)noreferrer(?:\s|$)/i.test(attribute(form,'rel') || '') ? {referrerPolicy:'no-referrer'} : {};
-  if (method === "dialog") return;
+  if (method === "dialog") {
+    const dialog=Element.prototype.closest.call(form,'dialog');
+    if(dialog){
+      close_dialog.call(dialog,submitter?(submitter instanceof HTMLButtonElement?button_value:input_value).call(submitter):'');
+    }
+    return;
+  }
   const url = new URL(convert_url(action || ctx.location.href, ctx.document.baseURI));
-  const data = submitter ? new FormData(form, submitter) : new FormData(form);
+  const associated=submitter&&(submitter instanceof HTMLButtonElement?button_form:input_form).call(submitter)===form;
+  let data;constructing.add(form);
+  try{data=associated?new FormData(form,submitter):new FormData(form);}finally{constructing.delete(form);}
+  if(!connected.call(form)||owner.call(form)!==document)return;
   const params = new URLSearchParams();
   for (const [key, value] of data) params.append(key, typeof value === "string" ? value : value.name);
   if (method === "get") {
@@ -48,11 +66,3 @@ if (form_prototype) {
     submit(this).catch(console.error);
   };
 }
-
-// Run after form-level handlers so frameworks can cancel their own submissions.
-if (typeof window !== "undefined") window.addEventListener("submit", event => {
-  if (event.defaultPrevented || !(event.target instanceof HTMLFormElement)) return;
-  if (method_for(event.target, event.submitter) === "dialog") return;
-  event.preventDefault();
-  submit(event.target, event.submitter).catch(console.error);
-});

@@ -1,4 +1,5 @@
 import {run_script} from './context.mjs';
+import {finish_event_listener} from './link_events.mjs';
 
 const states=new WeakMap(),supported=new Set(),nativeHandlers=new WeakMap();
 let assigning=0;
@@ -17,11 +18,12 @@ export function rewrite_event_attributes(element){
     const handler=function(...args){
       const parameters=name==='onerror'&&(element instanceof HTMLBodyElement||element instanceof HTMLFrameSetElement)?'event,source,lineno,colno,error':'event';
       compiled ||= run_script('(function('+parameters+'){\n'+source+'\n})');
-      const result=compiled.apply(this,args);
-      // Link activation masks its own physical cancellation. Report an inline
-      // onclick's return-false through the same tracked cancellation method.
-      if(name==='onclick'&&result===false)args[0]?.preventDefault();
-      return result;
+      try{
+        const result=compiled.apply(this,args);
+        // Virtual default actions mask their own physical cancellation.
+        if((name==='onclick'||name==='onsubmit')&&result===false)args[0]?.preventDefault();
+        return result;
+      }finally{finish_event_listener(args[0]);}
     };
     assigning++;
     try{
