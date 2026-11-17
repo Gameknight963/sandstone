@@ -17,7 +17,7 @@ const native_set_html=globalThis.Element?.prototype.setHTMLUnsafe;
 const create=globalThis.Document?.prototype.createElementNS,replace=globalThis.DocumentFragment?.prototype.replaceChildren;
 const owner=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get;
 const mode=globalThis.ShadowRoot&&Object.getOwnPropertyDescriptor(ShadowRoot.prototype,'mode').get;
-const internals=new WeakMap(),internals_get=globalThis.ElementInternals&&Object.getOwnPropertyDescriptor(ElementInternals.prototype,'shadowRoot')?.get;
+const internals=new WeakMap(),internal_hosts=new WeakMap(),internals_get=globalThis.ElementInternals&&Object.getOwnPropertyDescriptor(ElementInternals.prototype,'shadowRoot')?.get;
 export function shadow_root(element){
   let root=roots.get(element)||get.call(element);
   const attached=internals.get(element);if(!root&&attached&&internals_get)root=internals_get.call(attached);
@@ -85,6 +85,12 @@ if(getRoot&&host){
   on_dom_construction(element=>track_shadow_root(getRoot.call(element)));
   const property=globalThis.ElementInternals&&Object.getOwnPropertyDescriptor(ElementInternals.prototype,'shadowRoot');
   const attachInternals=globalThis.HTMLElement?.prototype.attachInternals;
-  if(attachInternals)HTMLElement.prototype.attachInternals=new Proxy(attachInternals,{apply(target,receiver,args){const result=Reflect.apply(target,receiver,args);internals.set(receiver,result);return result;}});
-  if(property?.get)Object.defineProperty(ElementInternals.prototype,'shadowRoot',{...property,get:new Proxy(property.get,{apply(target,receiver,args){const root=Reflect.apply(target,receiver,args);track_shadow_root(root);return root;}})});
+  if(attachInternals)HTMLElement.prototype.attachInternals=new Proxy(attachInternals,{apply(target,receiver,args){const result=Reflect.apply(target,receiver,args);internals.set(receiver,result);internal_hosts.set(result,receiver);return result;}});
+  if(property?.get)Object.defineProperty(ElementInternals.prototype,'shadowRoot',{...property,get:new Proxy(property.get,{apply(target,receiver,args){
+    const native=Reflect.apply(target,receiver,args),attached=roots.get(internal_hosts.get(receiver));
+    // Streaming declarations attach to a host that may already be observable.
+    // Their internals visibility follows declarations without replacing the host.
+    const root=native||attached&&declarative.has(attached)&&attached||null;
+    track_shadow_root(root);return root;
+  }})});
 }

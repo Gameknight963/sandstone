@@ -1,20 +1,14 @@
 import * as rpc from "../rpc.mjs";
-import * as rewrite from "./rewrite/index.mjs";
 import * as network from "./network.mjs";
 import * as parser from "./parser.mjs";
 
 import { update_ctx, run_script, ctx } from "./context.mjs";
-import { pending_scripts } from "./rewrite/script.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
-import {resolve_base_href} from '../base_url.mjs';
-import { flush_import_map } from "./polyfill/module.mjs";
 import {configure_crypto} from './polyfill/crypto.mjs';
 import {default_referrer_policy} from '../referrer.mjs';
 import {document_referrer_policy,reset_document_referrer_policy} from './intercept/document.mjs';
 import {configure_window_messages} from './window_messages.mjs';
-import {scripting_html} from './scripting_html.mjs';
-import {defer_declarative_roots} from './declarative_html.mjs';
-import {run_initial_script,run_late_script,run_document_script,input_ready_state} from './document_input.mjs';
+import {load_document_html,run_document_script} from './document_input.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -39,13 +33,12 @@ export let frame_html; //the html for the frame runtime
 export let version; //the sandstone version
 export let is_loaded = false;
 export let ready_state = "loading";
+export function set_ready_state(value){ready_state=value;}
 export let base_url;
 export let is_iframe = false;
 export let cookie_cross_site = false;
 export let site_settings = {};
 export let default_settings = {};
-const named_elements=new Map();
-export function clear_named_elements(){for(const [name,node] of named_elements)if(ctx[name]===node)delete ctx[name];named_elements.clear();}
 export const child_navigators = new Map();
 export const child_names = new Map();
 rpc.rpc_handlers["child_navigate"] = (id, url, form_data, navigation) => child_navigators.get(id)?.(url, form_data, navigation);
@@ -70,30 +63,6 @@ export function eval_script(script_element, script_text,{run=callback=>run_docum
   script.remove();
   ctx.document.currentScript = previous_script;
   script_element.dispatchEvent(new Event("load"));
-}
-
-async function evaluate_scripts(order) {
-  let deferred = [];
-  const initial = pending_scripts.splice(0).sort((a, b) => (order.get(a[1])??Infinity)-(order.get(b[1])??Infinity)||a[0]-b[0]);
-  for (let [num, script_element] of initial) {
-    if(input_ready_state())return;
-    // Scripts parsed in template contents carry a native force-async flag.
-    // Initial shadow declarations instead follow normal parser script rules.
-    const asynchronous=order.has(script_element)?script_element.hasAttribute('async'):script_element.async;
-    if (script_element.__sandstone_module__ || script_element.hasAttribute('src')&&(script_element.defer || asynchronous)) {
-      deferred.push(()=>run_late_script(()=>script_element.__sandstone_execute__()));
-    }
-    else {
-      const written=await run_initial_script(script_element,()=>script_element.__sandstone_execute__());
-      if(written?.written)deferred.push(...written.written);
-    }
-  }
-  pending_scripts.length = 0;
-  if(input_ready_state())return;
-  ready_state = "interactive";
-  ctx.document.dispatchEvent(new Event("readystatechange"));
-
-  for(const execute of deferred){if(input_ready_state())return;await execute();}
 }
 
 export function set_frame_id(id) {
@@ -157,56 +126,8 @@ async function load_html(options) {
     return;
   }
 
-  let parser = new DOMParser();
-  const declarations=defer_declarative_roots(null,options.html,true,site_settings.allow_js);
-  const source=site_settings.allow_js?scripting_html(null,declarations.value,true):{value:declarations.value,restore(){}};
-  let html = parser.parseFromString(source.value, "text/html");
-  source.restore(html);
-  // Hydrating declarations moves scripts out of their original tree position.
-  // Retain parser order before closed roots and ordinary templates are restored.
-  const script_order=new WeakMap(),nodes=[html];let script_index=0;
-  while(nodes.length){
-    const node=nodes.pop();if(node instanceof HTMLScriptElement)script_order.set(node,script_index++);
-    const children=node instanceof HTMLTemplateElement?node.content.childNodes:node.childNodes;
-    for(let index=children.length-1;index>=0;index--)nodes.push(children[index]);
-  }
-  declarations.restore(html);
-  document_referrer_policy(html);
-  const base_href = [...html.querySelectorAll('base[href]')].find(node=>node instanceof HTMLBaseElement)?.getAttribute('href');
-  base_url=resolve_base_href(base_href,options.url);
-  
-  //rewrite all html elements
-  await rewrite.element(html.documentElement);
-
-  //parse elements with ids and add them to the scope
-  let id_elements = html.querySelectorAll("*[id]");
-  let ctx_proto = Object.getPrototypeOf(ctx);
-  for (let i = 0; i < id_elements.length; i++) {
-    let element = id_elements[i];
-    if (ctx_proto.hasOwnProperty(element.id)) continue;
-    ctx[element.id] = element;
-    named_elements.set(element.id,element);
-  }
-
-  //apply the rewritten html
-  console.log("done downloading page");
-  document.documentElement.replaceWith(html.documentElement);
-  flush_import_map();
   is_loaded = true;
-  if (site_settings.allow_js) {
-    await evaluate_scripts(script_order);
-  }
-  if(input_ready_state()){ctx.history._restored(options.history);return;}
-
-  //trigger load events
-  is_loaded = true;
-  ctx.document.dispatchEvent(new Event("DOMContentLoaded", {bubbles: true}));
-  await Promise.resolve();
-  ready_state = "complete";
-  ctx.document.dispatchEvent(new Event("readystatechange"));
-  ctx.document.dispatchEvent(new Event("load"));
-  ctx.window.dispatchEvent(new Event("load"));
-  ctx.window.dispatchEvent(new PageTransitionEvent("pageshow", {persisted: false}));
+  await load_document_html(options.html,{scriptingEnabled:site_settings.allow_js});
   ctx.history._restored(options.history);
 }
 

@@ -11,8 +11,7 @@ import * as loader from './loader.mjs';
 import {pending_media_attribute} from './media_attributes.mjs';
 import {pending_style_request} from './style_requests.mjs';
 
-let session,writer,writerOwner,initial,ignoreWrites=0,validation;
-const initial_inputs=new Set();
+let session,writer,writerOwner,ignoreWrites=0,validation;
 const type=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'contentType').get;
 const state=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'readyState').get;
 const link_href=globalThis.HTMLLinkElement&&Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype,'href').get;
@@ -58,7 +57,7 @@ function images(current){
 }
 
 function prepare_script(current,node,input){
-  if(current.controller.signal.aborted)return;
+  if(current.controller.signal.aborted||!loader.site_settings.allow_js)return;
   const sourceElement=node,svg=globalThis.SVGScriptElement&&node instanceof SVGScriptElement;
   if(svg){
     const type=(node.getAttribute('type')||'').trim().toLowerCase();
@@ -85,38 +84,23 @@ function prepare_script(current,node,input){
   const blocking=node.__sandstone_execute__?styles(current):[];
   return pending||blocking.length?Promise.all([pending,...blocking]).then(execute):execute();
 }
-export function run_initial_script(element,execute){
-  const previous=initial,current={element};initial=current;let result;
-  try{result=execute();}finally{initial=previous;}
-  if(!current.state)return result;
-  const input=current.state;
-  return Promise.resolve(result).then(()=>input.stream.finish()).then(()=>{
-    const pending=[...input.deferred,...input.async.map(task=>()=>task)];let remaining=pending.length;
-    if(!remaining)initial_inputs.delete(input);
-    return {written:pending.map(execute=>async()=>{try{return await execute();}finally{if(!--remaining)initial_inputs.delete(input);}})};
-  }).catch(error=>{initial_inputs.delete(input);if(input.controller.signal.aborted)return;throw error;});
-}
 export function run_late_script(execute){
   ignoreWrites++;let result;try{result=execute();}catch(error){ignoreWrites--;throw error;}
   if(result&&typeof result.then==='function')return Promise.resolve(result).finally(()=>ignoreWrites--);
   ignoreWrites--;return result;
 }
-export function run_document_script(element,execute){return element.hasAttribute('src')&&!writer&&!initial?ignored(execute):execute();}
-function insertion(){
-  if(initial.state)return initial.state;
-  const element=initial.element,parent=element.parentNode;
-  const current={controller:new AbortController(),fragment:true,async:[],deferred:[]};initial.state=current;initial_inputs.add(current);
-  current.stream=new HTMLDOMStream(parent,{before:element.nextSibling,signal:current.controller.signal,onScript:(node,input)=>prepare_script(current,node,input)});
-  return current;
+export function run_document_script(element,execute){return element.hasAttribute('src')&&!writer?ignored(execute):execute();}
+export async function load_document_html(source,{scriptingEnabled=true}={}){
+  const current=begin({source:true,scriptingEnabled});
+  current.stream.write(source);close(current);await current.finished;
 }
-function begin(){
+function begin({source=false,scriptingEnabled=loader.site_settings.allow_js!==false}={}){
   const previous=session,targets=nodes(),saved=snapshot_runtime_events(targets);
   dom.open.call(document);restore_runtime_events(saved);forget_document_listeners(targets);
-  for(const input of initial_inputs)input.controller.abort(new DOMException('The document was replaced','AbortError'));initial_inputs.clear();
   previous?.controller.abort(new DOMException('The document was replaced','AbortError'));
-  loader.clear_named_elements();
-  const current={controller:new AbortController(),phase:'loading',async:[],deferred:[],finished:null};session=current;
-  current.stream=new HTMLDOMStream(document,{signal:current.controller.signal,onMode:mode=>{
+  const current={controller:new AbortController(),source,phase:'loading',async:[],deferred:[],finished:null};session=current;
+  loader.set_ready_state('loading');
+  current.stream=new HTMLDOMStream(document,{scriptingEnabled,signal:current.controller.signal,onMode:mode=>{
     // Let the native parser set the document's real layout mode. Its empty
     // shell is replaced by intercepted nodes before authored code can run.
     while(document.firstChild)dom.remove.call(document,document.firstChild);
@@ -130,16 +114,16 @@ function close(current){
   if(current.closing)return;current.closing=true;
   const parsed=current.stream.finish();
   const live=()=>session===current&&!current.controller.signal.aborted;
-  const interactive=()=>{if(live()&&current.phase==='loading'){current.phase='interactive';emit(document,'readystatechange');}};
+  const interactive=()=>{if(live()&&current.phase==='loading'){current.phase='interactive';loader.set_ready_state('interactive');emit(document,'readystatechange');}};
   const complete=()=>{
-    if(!live())return;dom.close.call(document);current.phase='complete';emit(document,'readystatechange');
+    if(!live())return;dom.close.call(document);current.phase='complete';loader.set_ready_state('complete');emit(document,'readystatechange');
     if(!live())return;
     const loaded=new Event('load');Object.defineProperty(loaded,'target',{value:wrap_document(document)});globalThis.dispatchEvent(loaded);
     if(live())globalThis.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:false}));
   };
   if(current.stream.closed)interactive();
   if(!live()){current.finished=Promise.resolve();return;}
-  const imageLoads=images(current);
+  const imageLoads=current.stream.closed?images(current):[];
   if(live()&&current.stream.closed&&!current.stream.pendingResources&&!current.deferred.length&&!current.async.length&&!imageLoads.length){
     emit(document,'DOMContentLoaded');complete();current.finished=Promise.resolve();return;
   }
@@ -148,7 +132,7 @@ function close(current){
     if(!live())return;
     for(const execute of current.deferred){await execute();if(!live())return;}
     emit(document,'DOMContentLoaded');
-    await Promise.allSettled([...current.async,current.stream.settled(),...imageLoads]);if(!live())return;complete();
+    await Promise.allSettled([...current.async,current.stream.settled(),...styles(current),...imageLoads,...images(current)]);if(!live())return;complete();
   }).catch(error=>{if(!current.controller.signal.aborted)console.error(error);});
 }
 
@@ -164,13 +148,12 @@ if(globalThis.document){
       if(receiver!==document||type.call(receiver)!=='text/html'||method==='open'&&args.length>=3)return Reflect.apply(target,receiver,args);
       if(method==='open'){
         validation??=document.implementation.createHTMLDocument('');Reflect.apply(dom.open,validation,args);
-        if(!writer&&!initial)begin();return wrap_document(document);
+        if(!writer)begin();return wrap_document(document);
       }
-      if(method==='close'){if(initial||writerOwner?.fragment)return;if(session)close(session);else Reflect.apply(target,receiver,args);return;}
+      if(method==='close'){if(writerOwner?.source)return;if(session)close(session);else Reflect.apply(target,receiver,args);return;}
       const text=strings(args)+(method==='writeln'?'\n':'');
       if(writer){writer.write(text);return;}
       if(ignoreWrites)return;
-      if(initial){insertion().stream.write(text);return;}
       if(!session||session.stream.closed)begin();
       session.stream.write(text);
     }});

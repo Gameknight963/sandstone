@@ -40,6 +40,8 @@ const htmlDOMStreamTest=await readFile(new URL('html-dom-stream.playwright.js',i
 const verifyHTMLDOMStream=runInThisContext(`(${htmlDOMStreamTest})`);
 const documentInputTest=await readFile(new URL('document-input.playwright.js',import.meta.url),'utf8');
 const verifyDocumentInput=runInThisContext(`(${documentInputTest})`);
+const initialInputTest=await readFile(new URL('initial-input.playwright.js',import.meta.url),'utf8');
+const verifyInitialInput=runInThisContext(`(${initialInputTest})`);
 const rangeFragmentTest=await readFile(new URL('range-fragments.playwright.js',import.meta.url),'utf8');
 const verifyRangeFragments=runInThisContext(`(${rangeFragmentTest})`);
 const documentTransferTest=await readFile(new URL('document-transfer.playwright.js',import.meta.url),'utf8');
@@ -228,6 +230,7 @@ try {
     result.passed.push(...await timed(verifyHTMLInputStream(page), 'HTML input stream fixture'));
     result.passed.push(...await timed(verifyHTMLDOMStream(page), 'HTML DOM stream fixture'));
     result.passed.push(...await timed(verifyDocumentInput(page), 'Document input fixture'));
+    result.passed.push(...await timed(verifyInitialInput(page), 'Initial document input fixture'));
     result.passed.push(...await timed(verifyShadowNavigation(page), 'Shadow navigation fixture'));
     result.passed.push(...await timed(verifyRangeFragments(page), 'Range fragment fixture'));
     result.passed.push(...await timed(verifyDocumentTransfer(page), 'Document transfer fixture'));

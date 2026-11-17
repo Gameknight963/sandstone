@@ -64,7 +64,12 @@ export class HTMLInputStream {
         // A completed script end tag ends at '>'. Smaller boundaries inside
         // attributes, comments or raw text are harmless tokenizer hibernations.
         const delimiter=text.indexOf('>',offset),end=delimiter<0?text.length:delimiter+1;
+        const previousToken=this.#parser.currentToken;
         this.#parser.tokenizer.write(text.slice(offset,end),false);offset=end;
+        // Install completed tags in source order. In particular a base/meta
+        // must take effect before preparing the next resource element. Raw
+        // text containing '>' does not introduce another parser token.
+        if(this.#parser.currentToken!==previousToken)this.#update?.(this.document);
         if(this.#pending){
           const script=this.#pending;this.#pending=undefined;
           // The end-tag handler has now popped the script element. Resume with
