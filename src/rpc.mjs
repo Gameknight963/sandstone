@@ -174,23 +174,27 @@ export function set_host(frame, msg_port) {
   msg_target.postMessage(msg, {targetOrigin: "*", transfer: [msg_port]})
 }
 
-export async function wait_on_frame(frame) {
-  let resolved = false;
-
-  globalThis.addEventListener("message", (event) => {
-    let msg = event.data;
-    if (msg.type === "pong") 
-      resolved = true;
-  });
-  
-  while (!resolved) {
-    let msg = {
-      type: "ping",
-      id: Math.random() + ""
+export function wait_on_frame(frame,{signal}={}) {
+  const id=Math.random()+':'+Math.random(),url=frame.src;
+  return new Promise((resolve,reject)=>{
+    let timer,finished=false;
+    const cleanup=()=>{finished=true;clearTimeout(timer);globalThis.removeEventListener('message',receive);signal?.removeEventListener('abort',abort);};
+    const abort=()=>{cleanup();reject(signal.reason||new DOMException('The operation was aborted','AbortError'));};
+    const receive=event=>{
+      const message=event.data;
+      if(message?.type!=='pong'||message.id!==id||message.url!==url||unwrap_global_target(event.source)!==unwrap_global_target(frame.contentWindow))return;
+      cleanup();resolve();
     };
-    unwrap_global_target(frame.contentWindow).postMessage(msg, "*");
-    await new Promise(r => setTimeout(r, 50));
-  }
+    const ping=()=>{
+      try{unwrap_global_target(frame.contentWindow)?.postMessage({type:'ping',id,url},'*');}
+      catch(error){cleanup();reject(error);return;}
+      if(!finished)timer=setTimeout(ping,50);
+    };
+    if(signal?.aborted){abort();return;}
+    globalThis.addEventListener('message',receive);
+    signal?.addEventListener('abort',abort,{once:true});
+    ping();
+  });
 }
 
 //handle the initial set_host message from the host
@@ -199,10 +203,11 @@ function host_set_handler(event) {
   if (!msg || typeof msg !== "object") return;
   let msg_port = event.ports[0];
 
-  if (msg.type === "ping" && event.source) {
+  if (msg.type === "ping" && event.source && msg.url===globalThis.location.href) {
     let msg = {
       type: "pong",
-      id: Math.random() + ""
+      id: event.data.id,
+      url:globalThis.location.href
     };
     unwrap_global_target(event.source).postMessage(msg, "*");
     return;

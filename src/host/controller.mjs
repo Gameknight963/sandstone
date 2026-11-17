@@ -18,7 +18,7 @@ import { libcurl } from "libcurl.js/bundled";
 //frame_js is a string, which is imported using webpack
 import frame_js from "../../dist/sandstone_frame.js";
 
-let frame_url = null;
+let frame_blob = null;
 let frame_html = `
   <!DOCTYPE html>
   <head>
@@ -61,11 +61,8 @@ export let local_storage = {};
 local_storage = site_data.local;
 
 function get_frame_bundle() {
-  if (!frame_url) {
-    let frame_blob = new Blob([frame_html], {type: "text/html"});
-    frame_url = URL.createObjectURL(frame_blob);
-  }
-  return frame_url;
+  frame_blob ||= new Blob([frame_html], {type: "text/html"});
+  return URL.createObjectURL(frame_blob);
 }
 
 export class ProxyFrame {
@@ -109,6 +106,8 @@ export class ProxyFrame {
   async navigate_to(url, form_data=null, navigation = {}) {
     if (!util.is_valid_url(url)) throw TypeError("Invalid URL");
     const navigation_id = ++this.navigation_id;
+    this.runtime_wait?.abort();
+    const runtime_wait=this.runtime_wait=new AbortController();
     this.is_navigating = true;
     await this.wait_for_libcurl();
     if (navigation_id !== this.navigation_id) return;
@@ -161,7 +160,12 @@ export class ProxyFrame {
     this.iframe.style.backgroundColor = "#222222";
     this.history.save_scroll(navigation.scroll);
     this.on_navigate();
-    this.iframe.src = get_frame_bundle();
+    // A fresh URL identifies the intended document and forces a real load;
+    // changing only a fragment would keep the old runtime alive.
+    const previous_runtime=this.runtime_url;
+    this.runtime_url=get_frame_bundle();
+    this.iframe.src = this.runtime_url;
+    if(previous_runtime)URL.revokeObjectURL(previous_runtime);
     indexed_db.disconnect(this.id);
     network.clean_ws_connections(this.id);
     for (const [id, frame] of Object.entries(iframes)) {
@@ -184,7 +188,8 @@ export class ProxyFrame {
     settings = {...this.default_settings, ...settings};
     console.log("site settings:", settings);
 
-    await rpc.wait_on_frame(this.iframe);
+    try{await rpc.wait_on_frame(this.iframe,{signal:runtime_wait.signal});}
+    catch(error){if(navigation_id!==this.navigation_id)return;throw error;}
     if (navigation_id !== this.navigation_id) return;
     let msg_channel = new MessageChannel();
     this.rpc_target.set_target(msg_channel.port1);

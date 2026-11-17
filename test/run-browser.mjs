@@ -47,6 +47,8 @@ const scriptLabelsTest=await readFile(new URL('script-labels.playwright.js',impo
 const verifyScriptLabels=runInThisContext(`(${scriptLabelsTest})`);
 const workerBundlesTest=await readFile(new URL('worker-bundles.playwright.js',import.meta.url),'utf8');
 const verifyWorkerBundles=runInThisContext(`(${workerBundlesTest})`);
+const frameReadinessTest=await readFile(new URL('frame-readiness.playwright.js',import.meta.url),'utf8');
+const verifyFrameReadiness=runInThisContext(`(${frameReadinessTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 async function timed(operation, label) {
@@ -99,6 +101,7 @@ try {
     result.passed.push(...await timed(verifyWorkerBundles(page), 'Worker bundle fixture'));
     result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
+    result.passed.push(...await timed(verifyFrameReadiness(page), 'Frame readiness fixture'));
     result.passed.push(...await timed(verifyIframeWindow(page), 'Frame window fixture'));
     result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
     result.passed.push(...await timed(verifyIframeRaces(page), 'Iframe race fixture'));
