@@ -356,13 +356,20 @@ try{
   await nativeContext.addCookies([{url:origin.replace('127.0.0.1','localhost')+'/fonts/',name:'font_session',value:'cross',sameSite:'Lax'}]);
   await nativePage.goto(origin+'/fonts/page?client=font-native');
   const nativeFonts=JSON.parse(await nativePage.evaluate(source=>eval(source),font_script('font-native')));
-  assert.deepEqual(nativeFonts.map(value=>[value.count,value.status,value.width]),Array.from({length:6},()=>[1,'loaded',60]));
+  // Chromium's full-browser and shell renderers can differ by subpixel rounding.
+  // Keep the native/proxy comparison exact below; only the fixture's nominal
+  // 60px sanity check needs a tolerance (well below a visible layout change).
+  const assertFontWidth=width=>assert.ok(Math.abs(width-60)<0.001,'Fixture font width differs from 60px: '+width);
+  assert.deepEqual(nativeFonts.map(value=>[value.count,value.status]),Array.from({length:6},()=>[1,'loaded']));
+  for(const value of nativeFonts)assertFontWidth(value.width);
   const nativeFontRequests=fonts.values('font-native');
   assert.equal(nativeFontRequests.length,6);
   await nativePage.goto(origin+'/fonts/page?client=constructor-native');
   const nativeConstructorFonts=JSON.parse(await nativePage.evaluate(source=>eval(source),constructor_font_script('constructor-native')));
-  assert.equal(nativeConstructorFonts.lazy,'unloaded');assert.equal(nativeConstructorFonts.width,60);assert.equal(nativeConstructorFonts.automatic.width,60);
-  assert.deepEqual(nativeConstructorFonts.worker,{status:'loaded',has:true,identity:true,width:60});
+  assert.equal(nativeConstructorFonts.lazy,'unloaded');assertFontWidth(nativeConstructorFonts.width);assertFontWidth(nativeConstructorFonts.automatic.width);
+  const {width:workerFontWidth,...workerFontState}=nativeConstructorFonts.worker;
+  assertFontWidth(workerFontWidth);
+  assert.deepEqual(workerFontState,{status:'loaded',has:true,identity:true});
   const nativeConstructorRequests=fonts.values('constructor-native').filter(value=>value.path.includes('/ctor-'));
   const nativeCSS=new Map();
   for(const policy of ['', 'unsafe-url', 'no-referrer', 'link-no-referrer']){
