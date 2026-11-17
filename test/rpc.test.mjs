@@ -6,6 +6,29 @@ globalThis.parent=globalThis;
 const rpc=await import('../src/rpc.mjs');
 delete globalThis.self;delete globalThis.parent;
 
+test('Retired frame ports drain only allowed unload calls and expire independently of replacements',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  class Port extends EventTarget{
+    closed=false;
+    close(){this.closed=true;}
+    emit(data){this.dispatchEvent(new MessageEvent('message',{data}));}
+  }
+  const target=new rpc.RPCTarget(),old=new Port(),replacement=new Port(),messages=[],outgoing=[],controller=new AbortController();
+  target.onmessage=event=>messages.push(event.data);
+  target.add_extra_target(old,'frame');target.retire_extra_target('frame',{procedures:['beacon'],timeout:100});
+  assert.equal(target.extra_frame_targets.size,0);assert.equal(target.extra_targets.length,0);
+  assert.equal(target.retired_targets.size,1);
+  target.add_extra_target(replacement,'frame');
+  const pending=['beacon','fetch'].map(procedure=>rpc.call_procedure({postMessage(message){outgoing.push(message);old.emit(message);}},procedure,[],{signal:controller.signal}).catch(error=>error));
+  old.emit({type:'notification',procedure:'beacon'});old.emit(null);old.emit({type:'reply',id:'pending'});
+  assert.deepEqual(messages,[outgoing[0],{type:'reply',id:'pending'}]);
+  controller.abort();await Promise.all(pending);
+  t.mock.timers.tick(100);
+  assert.equal(old.closed,true);assert.equal(target.retired_targets.size,0);assert.equal(replacement.closed,false);
+  old.emit(outgoing[0]);replacement.emit(outgoing[1]);
+  assert.equal(messages.length,3);assert.equal(messages[2].procedure,'fetch');
+});
+
 test('RPC notifications deliver updates without allocating requests or sending replies',async()=>{
   const values=[],messages=[];
   rpc.rpc_handlers.test_notification=value=>values.push(value);

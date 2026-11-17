@@ -5,6 +5,7 @@ import {register_message_peer,window_post_message} from './window_messages.mjs';
 const frames=new WeakMap();
 const windows=new WeakMap();
 const descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentWindow');
+export function native_frame_window(element){return descriptor?.get.call(element);}
 function window_index(key){
   const index=Number(key);
   return Number.isInteger(index)&&index>=0&&index<2**32-1&&String(index)===key;

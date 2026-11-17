@@ -12,6 +12,7 @@ export class RPCTarget {
     this.target = null;
     this.extra_targets = [];
     this.extra_frame_targets = new Map();
+    this.retired_targets = new Map();
     this.msg_callback = this.handle_msg.bind(this);
     this.onmessage = () => {};
     if (target)
@@ -40,13 +41,34 @@ export class RPCTarget {
     if (frame_id) this.extra_frame_targets.set(frame_id, target);
   }
 
-  remove_extra_target(frame_id) {
+  detach_extra_target(frame_id) {
     const target = this.extra_frame_targets.get(frame_id);
     if (!target) return;
     target.removeEventListener("message", this.msg_callback);
-    target.close?.();
     this.extra_targets = this.extra_targets.filter(item => item !== target);
     this.extra_frame_targets.delete(frame_id);
+    return target;
+  }
+
+  remove_extra_target(frame_id) {
+    this.detach_extra_target(frame_id)?.close?.();
+  }
+
+  retire_extra_target(frame_id,{procedures,timeout=10000}) {
+    const target=this.detach_extra_target(frame_id);
+    if(!target)return;
+    const allowed=new Set(procedures);
+    const receive=event=>{
+      const message=event.data;
+      if(message?.type==='reply'||message?.type==='procedure'&&allowed.has(message.procedure))this.msg_callback(event);
+    };
+    const close=()=>{
+      clearTimeout(timer);target.removeEventListener('message',receive);target.close?.();this.retired_targets.delete(target);
+    };
+    // Unload tasks from another frame can arrive after its parent's teardown
+    // message. Only context-bound operations retain this short delivery window.
+    const timer=setTimeout(close,timeout);timer.unref?.();
+    this.retired_targets.set(target,close);target.addEventListener('message',receive);
   }
 
   handle_msg(event) {

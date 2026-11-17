@@ -9,6 +9,7 @@ import {is_download} from '../../download.mjs';
 import {save_response} from '../downloads.mjs';
 import {intercept_iframe_window} from '../iframe_window.mjs';
 import {child_message_parent} from '../window_messages.mjs';
+import {track_iframe} from '../iframe_lifecycle.mjs';
 
 export function rewrite_iframe(iframe_element) {
   const frame_id = Math.random() + "";
@@ -18,7 +19,7 @@ export function rewrite_iframe(iframe_element) {
   let registered = false;
   let iframe_src = iframe_element.src;
   let authored_src = iframe_element.getAttribute('src');
-  const initial_name=iframe_element.name;
+  let initial_name=iframe_element.name;
   let window_name=initial_name,opaque_origin=false;
   let iframe_url = "";
   let generation=0,active_request,commit=Promise.resolve();
@@ -33,11 +34,12 @@ export function rewrite_iframe(iframe_element) {
   };
 
   let fetch_src = async (value, form_data = null, navigation = {}) => {
+    if(!iframe_element.isConnected||iframe_element.ownerDocument!==document)return;
     const target_url=convert_url(value,ctx.document.baseURI);
     const revision=++generation;
     active_request?.abort();
     const controller=active_request=new AbortController();
-    const current=()=>revision===generation;
+    const current=()=>revision===generation&&iframe_element.isConnected&&iframe_element.ownerDocument===document;
     const previous_url=iframe_url;
     //download the proxied html
     iframe_element.setAttribute("__src", value);
@@ -203,6 +205,24 @@ export function rewrite_iframe(iframe_element) {
     return Reflect.apply(target,receiver,[name,...args.slice(1)]);
   });
 
+  let lifecycle_ready=false;
+  track_iframe(iframe_element,{
+    disconnect(){
+      retire();
+      // A reinserted element must not auto-load its old physical runtime before
+      // the authored URL is relayed again. Keep native data/blob sources intact.
+      let remote=false;
+      try{remote=!authored_src||util.url_is_http(authored_src);}catch{}
+      if(remote)src_descriptor.set.call(iframe_element,'');
+    },
+    connect(){
+      initial_name=window_name=iframe_element.name;opaque_origin=false;
+      if(!lifecycle_ready||!authored_src)return;
+      let remote=false;try{remote=util.url_is_http(authored_src);}catch{}
+      if(remote)fetch_src(authored_src).catch(console.error);
+    }
+  });
+  lifecycle_ready=true;
   if (!iframe_src || iframe_src.startsWith("data:") || iframe_src.startsWith("blob:")) {
     return;
   }

@@ -343,7 +343,10 @@ rpc.rpc_handlers["frame_unregister"] = (child_id, options = {}) => {
   }
   indexed_db.disconnect(child_id);
   network.clean_ws_connections(child_id);
-  iframes[child.root_id]?.rpc_target.remove_extra_target(child_id);
+  iframes[child.root_id]?.rpc_target.retire_extra_target(child_id,{
+    timeout:network.beacons.grace,
+    procedures:['beacon','fetch_keepalive','fetch_keepalive_read','fetch_keepalive_abort','fetch_keepalive_done','local_storage','session_storage','storage_disconnect']
+  });
   delete iframes[child_id];
 };
 

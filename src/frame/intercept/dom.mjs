@@ -3,6 +3,7 @@ import { proxy_function, get_dom_property } from "../context.mjs";
 import * as loader from "../loader.mjs";
 import {mutate_styles as mutate_style_sources} from '../rewrite/style.mjs';
 import {mutate_document_base} from '../document_base.mjs';
+import {reconcile_iframes} from '../iframe_lifecycle.mjs';
 const mutate_styles=(nodes,operation)=>mutate_document_base(()=>mutate_style_sources(nodes,operation));
 
 function prepare(node) {
@@ -26,7 +27,7 @@ function intercept(target, key, first_only = false) {
       for (const node of nodes) prepare(node);
       return Reflect.apply(original, receiver, args);
     });
-    for (const node of inserted) execute(node);
+    for (const node of inserted) {reconcile_iframes(node);execute(node);}
     return result;
   });
 }
