@@ -174,8 +174,8 @@ export function set_host(frame, msg_port) {
   msg_target.postMessage(msg, {targetOrigin: "*", transfer: [msg_port]})
 }
 
-export function wait_on_frame(frame,{signal}={}) {
-  const id=Math.random()+':'+Math.random(),url=frame.src;
+export function wait_on_frame(frame,{signal,url=frame.src}={}) {
+  const id=Math.random()+':'+Math.random();
   return new Promise((resolve,reject)=>{
     let timer,finished=false;
     const cleanup=()=>{finished=true;clearTimeout(timer);globalThis.removeEventListener('message',receive);signal?.removeEventListener('abort',abort);};

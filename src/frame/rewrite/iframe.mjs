@@ -77,6 +77,7 @@ export function rewrite_iframe(iframe_element) {
 
       //load the frame runtime
       let loader_blob = new Blob([loader.frame_html], {type: "text/html"});
+      const runtime_url=network.create_blob_url(loader_blob);
       await new Promise((resolve) => {
         const cleanup=()=>{iframe_element.removeEventListener('load',loaded);controller.signal.removeEventListener('abort',aborted);};
         const aborted=()=>{cleanup();resolve();};
@@ -86,8 +87,13 @@ export function rewrite_iframe(iframe_element) {
         };
         iframe_element.addEventListener('load',loaded);
         controller.signal.addEventListener('abort',aborted,{once:true});
-        src_descriptor.set.call(iframe_element, network.create_blob_url(loader_blob));
+        src_descriptor.set.call(iframe_element, runtime_url);
       });
+      if(!current())return;
+      // A load event may belong to the previous document or the blank reset.
+      // The reflected src is virtual, so identify the physical runtime explicitly.
+      try{await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:runtime_url});}
+      catch(error){if(!current())return;throw error;}
       if(!current())return;
 
       //create the rpc message channel

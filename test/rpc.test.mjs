@@ -64,3 +64,16 @@ test('Superseded frame readiness waits remove listeners and stop polling',async 
   assert.equal(events.listeners(),0);
   await new Promise(resolve=>setTimeout(resolve,65));assert.equal(sent,1);
 });
+
+test('Child readiness uses the physical runtime URL instead of a reflected virtual src',async t=>{
+  const events=window_events(t),messages=[],target={postMessage:message=>messages.push(message)};
+  const frame={src:'https://fixture.test/authored-child',contentWindow:target};
+  let resolved=false;
+  const waiting=rpc.wait_on_frame(frame,{url:'blob:child-runtime'}).then(()=>{resolved=true;});
+  const ping=messages[0];
+  assert.equal(ping.url,'blob:child-runtime');
+  events.emit({type:'pong',id:ping.id,url:frame.src},target);
+  await Promise.resolve();assert.equal(resolved,false);
+  events.emit({type:'pong',id:ping.id,url:ping.url},target);
+  await waiting;assert.equal(events.listeners(),0);
+});

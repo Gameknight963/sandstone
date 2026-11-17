@@ -15,7 +15,11 @@ async page=>{
       }catch{}
       await new Promise(resolve=>setTimeout(resolve,20));
     }
-    throw new Error('Frame window navigation timed out: '+url);
+    const frames=await Promise.all((proxy?page:native).frames().map(async frame=>{
+      try{return await frame.evaluate(()=>({physical:location.href,virtual:globalThis.sandstone_frame?.loader.url,ready:globalThis.sandstone_frame?.context.run_script('window.childReady===true')}));}
+      catch(error){return {physical:frame.url(),error:error.message};}
+    }));
+    throw new Error('Frame window navigation timed out: '+JSON.stringify({proxy,url,frames,requests:proxy?await page.evaluate(()=>frameWindowRequests):undefined}));
   };
   const run=async proxy=>{
     await evaluate(proxy,"globalThis.frameMessages=[];addEventListener('message',event=>{if(event.data==='frame-window-ready')frameMessages.push(event.source===child.contentWindow);});globalThis.child=document.createElement('iframe'); document.body.append(child); globalThis.savedWindow=child.contentWindow; true");

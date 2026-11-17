@@ -49,6 +49,8 @@ const workerBundlesTest=await readFile(new URL('worker-bundles.playwright.js',im
 const verifyWorkerBundles=runInThisContext(`(${workerBundlesTest})`);
 const frameReadinessTest=await readFile(new URL('frame-readiness.playwright.js',import.meta.url),'utf8');
 const verifyFrameReadiness=runInThisContext(`(${frameReadinessTest})`);
+const childReadinessTest=await readFile(new URL('child-readiness.playwright.js',import.meta.url),'utf8');
+const verifyChildReadiness=runInThisContext(`(${childReadinessTest})`);
 const rootInitializationTest=await readFile(new URL('root-initialization.playwright.js',import.meta.url),'utf8');
 const verifyRootInitialization=runInThisContext(`(${rootInitializationTest})`);
 const stylesheetRelTest=await readFile(new URL('stylesheet-rel.playwright.js',import.meta.url),'utf8');
@@ -121,6 +123,7 @@ try {
     result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
     result.passed.push(...await timed(verifyFrameReadiness(page), 'Frame readiness fixture'));
+    result.passed.push(...await timed(verifyChildReadiness(page), 'Child readiness fixture'));
     result.passed.push(...await timed(verifyRootInitialization(page), 'Root initialization fixture'));
     result.passed.push(...await timed(verifyIframeWindow(page), 'Frame window fixture'));
     result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
