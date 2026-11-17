@@ -1,6 +1,6 @@
 // Native HTML constructors return the element before custom-element fields or
 // constructor bodies run. Keep that boundary available to DOM copy operations.
-const hooks=[],constructors=new WeakMap(),parents=new Map();
+const hooks=[],construction_hooks=[],constructors=new WeakMap(),parents=new Map();
 export const html_constructor_names=[];
 const base=globalThis.HTMLElement?.prototype,isPrototypeOf=Object.prototype.isPrototypeOf;
 if(base)for(const [name,property] of Object.entries(Object.getOwnPropertyDescriptors(globalThis))){
@@ -10,7 +10,7 @@ if(base)for(const [name,property] of Object.entries(Object.getOwnPropertyDescrip
   let wrapper=constructors.get(value);
   if(!wrapper){
     parents.set(value,Object.getPrototypeOf(value));
-    wrapper=new Proxy(value,{construct(target,args,newTarget){const element=Reflect.construct(target,args,newTarget);notify_dom_access(element);return element;}});
+    wrapper=new Proxy(value,{construct(target,args,newTarget){const element=Reflect.construct(target,args,newTarget);notify_dom_access(element);for(const hook of construction_hooks)hook(element);return element;}});
     constructors.set(value,wrapper);
     const constructor=Object.getOwnPropertyDescriptor(prototype,'constructor');
     if(constructor?.value===value&&constructor.configurable)Object.defineProperty(prototype,'constructor',{...constructor,value:wrapper});
@@ -20,5 +20,6 @@ if(base)for(const [name,property] of Object.entries(Object.getOwnPropertyDescrip
 // Keep interface inheritance consistent with the public constructor objects.
 for(const [value,parent] of parents){const replacement=constructors.get(parent);if(replacement)Object.setPrototypeOf(value,replacement);}
 export const virtual_html_constructor=value=>constructors.get(value)||value;
+export function on_dom_construction(hook){construction_hooks.push(hook);}
 export function notify_dom_access(value){if(hooks.length)for(const hook of [...hooks])hook(value);}
 export function with_dom_access(hook,operation){hooks.push(hook);try{return operation();}finally{hooks.pop();}}

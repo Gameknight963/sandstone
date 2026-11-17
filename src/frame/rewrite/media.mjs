@@ -1,6 +1,8 @@
-import { ctx, intercept_property, proxy_function } from "../context.mjs";
+import { ctx, intercept_property } from "../context.mjs";
 import * as network from "../network.mjs";
 import { rewrite_srcset } from "../srcset.mjs";
+import {register_media_attributes,render_media_attribute,detach_media_attribute_node,media_placeholder,pending_media_attribute,raw_media_attribute} from '../media_attributes.mjs';
+import {on_dom_construction} from '../dom_operations.mjs';
 
 const prepared = new WeakMap();
 const sessions = new WeakMap();
@@ -17,6 +19,18 @@ let policy_observer;
 const image_prototype=globalThis.HTMLImageElement?.prototype;
 const image_properties=image_prototype&&Object.fromEntries(['src','srcset','currentSrc'].map(key=>[key,Object.getOwnPropertyDescriptor(image_prototype,key)]));
 const well_formed=String.prototype.toWellFormed;
+const native_media=[['HTMLImageElement',['src','srcset']],['HTMLVideoElement',['src','poster']],['HTMLAudioElement',['src']],['HTMLSourceElement',['src','srcset']],['HTMLInputElement',['src']],['HTMLTrackElement',['src']]].map(([name,keys])=>({prototype:globalThis[name]?.prototype,keys}));
+const is_prototype=Object.prototype.isPrototypeOf;
+on_dom_construction(element=>{
+  if(prepared.has(element))return;
+  const type=native_media.find(({prototype})=>prototype&&is_prototype.call(prototype,element));
+  // Existing attributes on native copies are restored by the copying operation.
+  // Fresh custom elements need their internal listeners before authored fields.
+  if(!type||type.keys.some(key=>raw_media_attribute(element,key)!==null))return;
+  const original=Object.getPrototypeOf(element);
+  if(original!==type.prototype)Object.setPrototypeOf(element,type.prototype);
+  try{rewrite_media(element);}finally{if(original!==type.prototype)Object.setPrototypeOf(element,original);}
+});
 
 function reflected_source(element,key,native){
   const session=sessions.get(element),value=session?.authored.get(key);
@@ -24,10 +38,14 @@ function reflected_source(element,key,native){
   if(key==='srcset')return value;
   try{return new URL(value,session.base()).href;}catch{return value;}
 }
+function reflected_current(element,native){
+  const session=sessions.get(element);
+  return native===media_placeholder?session?.previousCurrentSrc||'':network.known_urls[native]||session?.aliases.get(native)||native;
+}
 if(image_properties)for(const [key,property] of Object.entries(image_properties)){
   const descriptor={...property,get:new Proxy(property.get,{apply(target,receiver,args){
     const native=Reflect.apply(target,receiver,args);
-    if(key==='currentSrc')return network.known_urls[native]||sessions.get(receiver)?.aliases.get(native)||native;
+    if(key==='currentSrc')return reflected_current(receiver,native);
     return reflected_source(receiver,key,native);
   }})};
   if(property.set)descriptor.set=new Proxy(property.set,{apply(target,receiver,args){
@@ -140,11 +158,7 @@ export function capture_media(source){
 }
 
 export function detach_media_attribute(node){
-  const element=attr_owner.call(node),session=sessions.get(element),key=node.localName;
-  if(node.namespaceURI!==null||!session?.authored.has(key))return false;
-  const value=session.authored.get(key),state=session.states.get(key);
-  session.authored.set(key,null);state.generation++;state.controller?.abort();state.release(state.urls);state.urls=[];
-  remove_attribute.call(element,key);attr_value.set.call(node,value);return true;
+  return detach_media_attribute_node(node);
 }
 
 export function set_media_active(element,active){
@@ -158,20 +172,29 @@ export function rewrite_media(element,initial_sources) {
   if (prepared.has(element)) return;
   prepared.set(element,null);
   const get = element.getAttribute.bind(element);
-  const remove = element.removeAttribute.bind(element);
   const properties = element instanceof HTMLImageElement?['src','srcset']:["src", "srcset", "poster"].filter(key => key in element);
   const authored = new Map(initial_sources||properties.map(key => [key, get(key)]));
   prepared.set(element,authored);
   const states = new Map();
   const base = () => owner.call(element)===document?ctx.document.baseURI:native_base.call(element);
   const aliases=new Map(),session={authored,states,active:true,crossOrigin:cross_origin(element),aliases,base};sessions.set(element,session);
+  if(element instanceof HTMLImageElement)session.readCurrent=()=>image_properties.currentSrc.get.call(element);
+  if(session.readCurrent)session.previousCurrentSrc=reflected_current(element,session.readCurrent());
+  register_media_attributes(element,authored,(key,value)=>{
+    const state=states.get(key);if(state)state.update(value);else authored.set(key,value);
+  },key=>{
+    authored.set(key,null);
+    const state=states.get(key);
+    if(state){state.generation++;state.controller?.abort();state.release(state.urls);state.urls=[];}
+    render_media_attribute(element,key,null);
+  });
   if(element instanceof HTMLImageElement){
     observe_policy(element,{attributes:true,attributeFilter:['crossorigin']});
   }
   observe_media_container(element);
   if(element instanceof HTMLSourceElement)observe_media_container(element.parentElement);
-  // Clear every source before starting asynchronous work, including picture sources.
-  for (const key of properties) remove(key);
+  // Retain native Attr identity while keeping remote URLs out of the renderer.
+  for (const key of properties)render_media_attribute(element,key,key==='srcset'?'':media_placeholder);
 
   for (const key of properties) {
     const state = {generation: 0, urls: [], controller: null,waiting:false,requestElement:null};
@@ -189,7 +212,8 @@ export function rewrite_media(element,initial_sources) {
       const generation = ++state.generation;
       state.controller?.abort();
       const controller = state.controller = new AbortController();
-      remove(key);
+      if(session.readCurrent)session.previousCurrentSrc=reflected_current(element,session.readCurrent());
+      render_media_attribute(element,key,key==='srcset'?'':media_placeholder);
       release(state.urls);
       state.urls = [];
       const urls = [];
@@ -266,56 +290,16 @@ export function rewrite_media(element,initial_sources) {
     let current = intercept_property(element, "currentSrc", {
       get() {
         const value = current.get.call(element);
-        return network.known_urls[value] || aliases.get(value) || value;
+        return reflected_current(element,value);
       }
     });
-  }
-  proxy_function(element, "getAttribute", (target, receiver, args) => {
-    const key = String(args[0]).toLowerCase();
-    return authored.has(key) ? authored.get(key) : Reflect.apply(target, receiver, args);
-  });
-  proxy_function(element, "hasAttribute", (target, receiver, args) => {
-    const key = String(args[0]).toLowerCase();
-    return authored.has(key) ? authored.get(key) !== null : Reflect.apply(target, receiver, args);
-  });
-  proxy_function(element, "setAttribute", (target, receiver, args) => {
-    const state = states.get(String(args[0]).toLowerCase());
-    if (state) { state.update(args[1]); return; }
-    return Reflect.apply(target, receiver, args);
-  });
-  proxy_function(element, "removeAttribute", (target, receiver, args) => {
-    const key = String(args[0]).toLowerCase();
-    const state = states.get(key);
-    if (state) {
-      authored.set(key, null);
-      state.generation++;
-      state.controller?.abort();
-      state.release(state.urls);
-      state.urls = [];
-    }
-    return Reflect.apply(target, receiver, args);
-  });
-  proxy_function(element, "toggleAttribute", (target, receiver, args) => {
-    const key = String(args[0]).toLowerCase();
-    if (!states.has(key)) return Reflect.apply(target, receiver, args);
-    const exists = element.hasAttribute(key);
-    const wanted = args.length > 1 ? Boolean(args[1]) : !exists;
-    if (wanted && !exists) element.setAttribute(key, "");
-    if (!wanted && exists) element.removeAttribute(key);
-    return wanted;
-  });
-  for (const method of ["setAttributeNS", "getAttributeNS", "hasAttributeNS", "removeAttributeNS"]) {
-    proxy_function(element, method, (target, receiver, args) => {
-      if (args[0] === null || args[0] === "") {
-        return element[method.replace("NS", "")](...args.slice(1));
-      }
-      return Reflect.apply(target, receiver, args);
-    });
+    session.readCurrent=()=>current.get.call(element);
+    session.previousCurrentSrc=reflected_current(element,session.readCurrent());
   }
   // Removing a temporary source can produce a native empty-source error.
   element.addEventListener("error", event => {
     if (!event.isTrusted) return;
-    if (properties.every(key => !get(key))) event.stopImmediatePropagation();
+    if (properties.every(key => authored.get(key)===null||pending_media_attribute(element,key))) event.stopImmediatePropagation();
   }, true);
   for (const [key, value] of authored) if (value !== null) states.get(key).update(value,true);
 }
