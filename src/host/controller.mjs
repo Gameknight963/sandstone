@@ -9,6 +9,8 @@ import {parse_referrer_policy,default_referrer_policy} from '../referrer.mjs';
 import {is_download} from '../download.mjs';
 import {frame_cross_site} from './frame_context.mjs';
 import './storage.mjs';
+import './navigation_targets.mjs';
+import {navigation_sandbox} from '../navigation_policy.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 
@@ -118,7 +120,7 @@ export class ProxyFrame {
 
     console.log("navigating to", url);
     if (navigation_id !== this.navigation_id) return;
-    const source_url = navigation.initiated ? this.url?.href : undefined;
+    const source_url = navigation.source_context?.url||(navigation.initiated ? this.url?.href : undefined);
     const source_policy = navigation.referrerPolicy || this.referrer_policy || default_referrer_policy;
     let html = null;
     let download_response;
@@ -140,7 +142,7 @@ export class ProxyFrame {
           }
         }
         if (navigation.history_mode === 'reload') options.cache = 'no-cache';
-        let response = await network.fetch(url, options, {url:source_url,top_url:source_url,referrerPolicy:source_policy,navigation:true});
+        let response = await network.fetch(url, options, {url:source_url,top_url:navigation.source_context?.top_url||source_url,cross_site:navigation.source_context?.cross_site,broadcast_origin:navigation.source_context?.broadcast_origin,referrerPolicy:source_policy,navigation:true});
         if(navigation_id!==this.navigation_id){await response.body?.cancel();return;}
         if(is_download(response.headers))download_response=response;
         else html = await response.text();
@@ -297,9 +299,10 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   const saved = saved_child_histories.get(child_id);
   saved_child_histories.delete(child_id);
   const parent_broadcast=parent.broadcast_origin||parent.origin||parent.url.origin;
-  const opaque_broadcast='opaque:'+child_id;
+  const opaque_broadcast='opaque:'+child_id+':'+Math.random();
   const child = {
-    id: child_id, parent_id, root_id: root.id, url: new URL(url),
+    id: child_id, parent_id, root_id: root.id, url: new URL(url),worker:!!options.worker,
+    navigation_sandbox:navigation_sandbox(parent.navigation_sandbox,options.sandbox??null),
     window_name:saved?.window_name??options.window_name??'',
     origin: options.worker ? new URL(url).protocol === "data:" ? "null" : parent.origin || parent.url.origin : new URL(url).origin,
     broadcast_origin:options.worker ? new URL(url).protocol==='data:'?opaque_broadcast:parent_broadcast : options.opaque||parent_broadcast.startsWith('opaque:')?opaque_broadcast:new URL(url).origin,
@@ -307,7 +310,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
     history: saved?.history || new NavigationHistory(),
     async navigate_to(url, form_data, navigation = {}) {
       const previous_url=child.url;
-      navigation = {...navigation,source_url:child.url.href};
+      navigation = {...navigation,source_url:navigation.source_context?.url||child.url.href};
       child.url = new URL(url, child.url);
       child.history.save_scroll(navigation.scroll);
       child.pending_navigation = navigation;

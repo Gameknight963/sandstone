@@ -10,6 +10,7 @@ import {save_response} from '../downloads.mjs';
 import {intercept_iframe_window} from '../iframe_window.mjs';
 import {child_message_parent} from '../window_messages.mjs';
 import {track_iframe} from '../iframe_lifecycle.mjs';
+import {sandbox_tokens} from '../../navigation_policy.mjs';
 
 export function rewrite_iframe(iframe_element) {
   const frame_id = Math.random() + "";
@@ -51,7 +52,7 @@ export function rewrite_iframe(iframe_element) {
     try {
       let response = await network.fetch(target_url, {
         signal:controller.signal,
-        mode:'navigate',sandstone_frame_id:navigation.from_child ? frame_id : loader.frame_id,
+        mode:'navigate',sandstone_frame_id:navigation.source_frame_id||(navigation.from_child ? frame_id : loader.frame_id),
         cache:navigation.history_mode === 'reload' ? 'no-cache' : 'default',
         referrerPolicy:navigation.referrerPolicy || iframe_element.referrerPolicy || document_referrer_policy(),
         ...(form_data ? {
@@ -116,8 +117,8 @@ export function rewrite_iframe(iframe_element) {
       const send_page=options=>rpc.call_procedure(rpc_target,'html',[options],{signal:controller.signal});
 
       iframe_url=final_url;
-      const opaque=iframe_element.hasAttribute('sandbox')&&!iframe_element.sandbox.contains('allow-same-origin');
-      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,window_name:initial_name});
+      const sandbox=iframe_element.getAttribute('sandbox'),opaque=sandbox!==null&&!sandbox_tokens(sandbox).has('allow-same-origin');
+      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,sandbox,window_name:initial_name});
       registered = true;
       window_name=state.window_name;opaque_origin=state.message_origin==='null';
       loader.child_names.set(frame_id,value=>{window_name=value;});
@@ -180,9 +181,9 @@ export function rewrite_iframe(iframe_element) {
       }
     }
   });
-  intercept_iframe_window(iframe_element,()=>iframe_url,(url,history_mode)=>{
-    fetch_src(url,null,{history_mode}).catch(console.error);
-  },message_token,{name:()=>window_name,opaque:()=>opaque_origin});
+  intercept_iframe_window(iframe_element,()=>iframe_url,(url,history_mode,form_data,navigation)=>{
+    return fetch_src(url,form_data,{...navigation,history_mode});
+  },message_token,{id:frame_id,name:()=>window_name,opaque:()=>opaque_origin});
   proxy_function(iframe_element, "setAttribute", (target, this_arg, args) => {
     if(this_arg!==iframe_element||args.length<2)return Reflect.apply(target,this_arg,args);
     const name=`${args[0]}`;

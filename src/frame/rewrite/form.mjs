@@ -1,6 +1,6 @@
 import { ctx, convert_url } from "../context.mjs";
-import * as loader from "../loader.mjs";
 import { serialize_request } from "../polyfill/request.mjs";
+import {navigate_target,navigation_target} from '../navigation_targets.mjs';
 
 const form_prototype = globalThis.HTMLFormElement?.prototype;
 const method_descriptor = form_prototype && Object.getOwnPropertyDescriptor(form_prototype, "method");
@@ -14,6 +14,7 @@ function method_for(form, submitter) {
 async function submit(form, submitter) {
   const action = attribute(submitter, "formaction") ?? attribute(form, "action") ?? ctx.location.href;
   const method = method_for(form, submitter);
+  const target=navigation_target(form,attribute(submitter,'formtarget'));
   const navigation = /(?:^|\s)noreferrer(?:\s|$)/i.test(attribute(form,'rel') || '') ? {referrerPolicy:'no-referrer'} : {};
   if (method === "dialog") return;
   const url = new URL(convert_url(action || ctx.location.href, ctx.document.baseURI));
@@ -22,7 +23,7 @@ async function submit(form, submitter) {
   for (const [key, value] of data) params.append(key, typeof value === "string" ? value : value.name);
   if (method === "get") {
     url.search = params.toString();
-    return loader.navigate(loader.frame_id, url.href,true,null,navigation);
+    return navigate_target(url.href,target,null,navigation);
   }
   const enctype = attribute(submitter, "formenctype") !== null ? submitter.formEnctype || "application/x-www-form-urlencoded" : enctype_descriptor.get.call(form);
   let body = data;
@@ -33,7 +34,7 @@ async function submit(form, submitter) {
     headers = {"Content-Type": "text/plain"};
   }
   const request = await serialize_request(url.href, {method: "POST", body, headers}, ctx.location.href);
-  return loader.navigate(loader.frame_id, url.href, true, {
+  return navigate_target(url.href,target, {
     method: "POST", headers: request.options.headers, body: request.options.body
   },navigation);
 }

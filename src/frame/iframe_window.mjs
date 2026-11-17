@@ -1,11 +1,26 @@
 import {ctx} from './context.mjs';
 import {create_obj_proxy} from './global_functions.mjs';
 import {register_message_peer,window_post_message} from './window_messages.mjs';
+import {sandbox_tokens} from '../navigation_policy.mjs';
 
 const frames=new WeakMap();
 const windows=new WeakMap();
 const descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentWindow');
 export function native_frame_window(element){return descriptor?.get.call(element);}
+export function find_frame_target(name,parent){
+  const elements=[...document.querySelectorAll('iframe')];
+  for(let index=0;index<globalThis.length;index++){
+    const target=globalThis[index],element=elements.find(element=>descriptor.get.call(element)===target),state=element&&frames.get(element);
+    if(state?.name()===name)return {id:state.id,parent};
+  }
+  return null;
+}
+export function navigate_frame_target(id,url,form_data,navigation){
+  for(const element of document.querySelectorAll('iframe')){
+    const state=frames.get(element);
+    if(state?.id===id)return state.navigate(url,'push',form_data,navigation);
+  }
+}
 function window_index(key){
   const index=Number(key);
   return Number.isInteger(index)&&index>=0&&index<2**32-1&&String(index)===key;
@@ -55,7 +70,7 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
     };
     const navigate=(value,mode)=>{
       const url=new URL(`${value}`,ctx.document.baseURI);
-      if(url.protocol==='http:'||url.protocol==='https:')state.navigate(url.href,mode);
+      if(url.protocol==='http:'||url.protocol==='https:')state.navigate(url.href,mode)?.catch(console.error);
       else if(mode==='replace')nativeLocation().replace(url.href);
       else nativeLocation().href=url.href;
     };
@@ -105,6 +120,6 @@ if(source)Object.defineProperty(MessageEvent.prototype,'source',{
   ...source,get(){const target=source.get.call(this);return windows.get(target)||target;}
 });
 
-export function intercept_iframe_window(element,url,navigate,token,{name=()=>'',opaque=()=>false}={}){
-  frames.set(element,{url,navigate,token,name,opaque:()=>opaque()||element.hasAttribute('sandbox')&&!element.sandbox.contains('allow-same-origin')});
+export function intercept_iframe_window(element,url,navigate,token,{id,name=()=>'',opaque=()=>false}={}){
+  frames.set(element,{id,url,navigate,token,name,opaque:()=>opaque()||element.hasAttribute('sandbox')&&!sandbox_tokens(element.getAttribute('sandbox')).has('allow-same-origin')});
 }

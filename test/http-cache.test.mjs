@@ -4,6 +4,14 @@ import {HTTPCache,http_cache} from '../src/host/http_cache.mjs';
 import {SiteDataStore} from '../src/host/site_data.mjs';
 
 const context={url:'https://site.test/page',top_url:'https://site.test/'};
+test('Opaque document cache partitions retain unique origin identities and clear with their source site',async()=>{
+  const cache=new HTTPCache();let calls=0;
+  const transport=async()=>new Response(String(++calls),{headers:{'Cache-Control':'max-age=60'}});
+  const get=origin=>cache.fetch(transport,'https://cdn.test/asset',{}, {...context,broadcast_origin:origin}).then(response=>response.text());
+  assert.equal(await get('opaque:first'),'1');assert.equal(await get('opaque:first'),'1');
+  assert.equal(await get('opaque:second'),'2');assert.equal(await get('https://site.test'),'3');
+  cache.clear('site.test');assert.equal(cache.entries.size,0);
+});
 function fixture(options={}){
   let time=Date.UTC(2026,0,1),calls=[];
   const cache=new HTTPCache({...options,now:()=>time});

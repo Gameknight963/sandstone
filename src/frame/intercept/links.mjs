@@ -4,6 +4,7 @@ import {document_referrer_policy} from './document.mjs';
 import {download} from '../downloads.mjs';
 import {install_link_events} from '../link_events.mjs';
 import {install_hyperlinks} from '../hyperlinks.mjs';
+import {navigate_target,navigation_target} from '../navigation_targets.mjs';
 
 function activate(element) {
   if(!element.hasAttribute('href'))return;
@@ -16,8 +17,7 @@ function activate(element) {
     // Native download-attribute requests use referrerPolicy; rel=noreferrer
     // applies to following hyperlinks through the normal navigation path.
     download(href,element.getAttribute('download'),{referrerPolicy:element.referrerPolicy||document_referrer_policy(),referrer:ctx.location.href}).catch(console.error);
-  }else if(target.origin===current.origin&&target.pathname===current.pathname&&target.search===current.search&&(target.hash!==current.hash||target.hash))ctx.location.assign(href);
-  else loader.navigate(loader.frame_id,href,true,null,{referrerPolicy:policy}).catch(console.error);
+  }else navigate_target(href,navigation_target(element),null,{referrerPolicy:policy}).catch(console.error);
 }
 
 if(globalThis.document){

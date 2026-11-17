@@ -42,6 +42,20 @@ test('Relayed API requests use the virtual page and discard supplied Origin/Refe
   assert.equal(response.request_referrer,'https://site.test/settings?tab=1');
 });
 
+test('Opaque documents suppress referrers, send null CORS origins and cannot use URL-based same-origin credentials',async()=>{
+  const seen=[],store=new SiteDataStore(),context={url:'https://site.test/private',top_url:'https://site.test/',broadcast_origin:'opaque:document'};
+  store.setCookie('https://site.test/','strict=s; SameSite=Strict; Secure; Path=/');
+  store.setCookie('https://site.test/','none=n; SameSite=None; Secure; Path=/');
+  const transport=async(url,options)=>{seen.push(options);return new Response('ok');};
+  const response=await fetch_with_cookies(transport,store,'https://site.test/api',{mode:'cors',credentials:'same-origin',referrer:'https://site.test/explicit',referrerPolicy:'unsafe-url'},context);
+  assert.equal(response.request_referrer,'');assert.equal(seen[0].headers.origin,'null');
+  assert.equal(seen[0].headers.referer,undefined);assert.equal(seen[0].headers.cookie,undefined);
+  await fetch_with_cookies(transport,store,'https://site.test/api',{mode:'cors',credentials:'include'},context);
+  assert.equal(seen[1].headers.cookie,'none=n');
+  await assert.rejects(fetch_with_cookies(transport,store,'https://site.test/api',{mode:'same-origin'},context),TypeError);
+  assert.equal(seen.length,2);
+});
+
 test('Redirects taint Origin, reduce referrers and honor response referrer policy changes',async()=>{
   const seen=[],store=new SiteDataStore();
   await fetch_with_cookies(async(url,options)=>{

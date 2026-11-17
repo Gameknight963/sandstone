@@ -56,6 +56,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options) {
     response = await fetch(url, {...options, signal: request.controller.signal}, {
       url: options?.mode === 'navigate' && frame.pending_navigation?.source_url || (frame.url.origin === "null" && frame.origin && frame.origin !== "null" ? frame.origin + "/" : frame.url.href),
       top_url: iframes[frame.root_id]?.url?.href || frame.url.href,
+      broadcast_origin:frame.broadcast_origin,
       navigation: options?.mode === 'navigate', nested: true,cross_site:frame_cross_site(frame,iframes)
     });
     request.reader = response.body?.getReader();

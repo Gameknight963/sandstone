@@ -53,6 +53,8 @@ const iframeRacesTest=await readFile(new URL('iframe-races.playwright.js',import
 const verifyIframeRaces=runInThisContext(`(${iframeRacesTest})`);
 const iframeLifecycleTest=await readFile(new URL('iframe-lifecycle.playwright.js',import.meta.url),'utf8');
 const verifyIframeLifecycle=runInThisContext(`(${iframeLifecycleTest})`);
+const navigationTargetsTest=await readFile(new URL('navigation-targets.playwright.js',import.meta.url),'utf8');
+const verifyNavigationTargets=runInThisContext(`(${navigationTargetsTest})`);
 const scriptLabelsTest=await readFile(new URL('script-labels.playwright.js',import.meta.url),'utf8');
 const verifyScriptLabels=runInThisContext(`(${scriptLabelsTest})`);
 const workerBundlesTest=await readFile(new URL('worker-bundles.playwright.js',import.meta.url),'utf8');
@@ -160,6 +162,7 @@ try {
     result.passed.push(...await timed(verifyBroadcast(page), 'Broadcast channel fixture'));
     result.passed.push(...await timed(verifyIframeRaces(page), 'Iframe race fixture'));
     result.passed.push(...await timed(verifyIframeLifecycle(page), 'Iframe lifecycle fixture'));
+    result.passed.push(...await timed(verifyNavigationTargets(page), 'Navigation targets fixture'));
     result.passed.push(...await timed(verifyScriptLabels(page), 'Script filename fixture'));
     result.passed.push(...await timed(verifyLinks(page), 'Link event fixture'));
     result.passed.push(...await timed(verifyAttributes(page), 'Event attribute fixture'));

@@ -74,6 +74,7 @@ export class HTTPCache {
       if(!headers.has('cache-control'))headers.set('cache-control','no-cache');
     }
     const partition=[origin(context.top_url||context.url||url),origin(context.url||url)];
+    if(context.broadcast_origin?.startsWith('opaque:'))partition.push(context.broadcast_origin);
     const base=JSON.stringify([url,method,...partition,init.credentials||'include',headers.get('cookie'),headers.get('authorization'),headers.get('origin')]);
     const eligible=['GET','HEAD'].includes(method)&&!conditional&&!headers.has('range')&&!request_control.has('no-store')&&mode!=='no-store';
     let stored;
