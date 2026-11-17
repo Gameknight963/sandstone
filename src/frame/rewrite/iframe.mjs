@@ -11,6 +11,7 @@ import {intercept_iframe_window} from '../iframe_window.mjs';
 import {child_message_parent} from '../window_messages.mjs';
 import {track_iframe} from '../iframe_lifecycle.mjs';
 import {sandbox_tokens} from '../../navigation_policy.mjs';
+import {resource_attribute} from '../resource_attributes.mjs';
 
 export function rewrite_iframe(iframe_element) {
   const frame_id = Math.random() + "";
@@ -20,6 +21,7 @@ export function rewrite_iframe(iframe_element) {
   let registered = false;
   let iframe_src = iframe_element.src;
   let authored_src = iframe_element.getAttribute('src');
+  resource_attribute(iframe_element,'src',()=>authored_src);
   let initial_name=iframe_element.name;
   let window_name=initial_name,opaque_origin=false;
   let iframe_url = "";

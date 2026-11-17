@@ -7,14 +7,56 @@ import {schedule_resource_event} from '../resource_events.mjs';
 export const pending_scripts = [];
 let script_num = 0;
 const classic_types = new Set(["", "application/javascript", "text/javascript", "application/ecmascript", "text/ecmascript"]);
+const records=new WeakMap();
+const get=globalThis.Element?.prototype.getAttribute,set=globalThis.Element?.prototype.setAttribute,remove=globalThis.Element?.prototype.removeAttribute;
+const N=globalThis.Node?.prototype,append=N?.appendChild,remove_child=N?.removeChild,insert=N?.insertBefore;
+const owner=N&&Object.getOwnPropertyDescriptor(N,'ownerDocument').get,connected=N&&Object.getOwnPropertyDescriptor(N,'isConnected').get;
+const data=N&&Object.getOwnPropertyDescriptor(N,'textContent');
+const view=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get;
+const adopt=globalThis.Document?.prototype.adoptNode;
+let inert;
+function eligible(element,record){
+  const type=((record?record.type():get.call(element,'type'))||'').trim();
+  return (classic_types.has(type.toLowerCase())||type==='module'||type==='importmap')&&
+    ((record?record.src():get.call(element,'src'))!==null||data.get.call(element).length>0);
+}
+export function mark_script_connected(element){
+  if(!globalThis.HTMLScriptElement||!(element instanceof HTMLScriptElement)||!connected.call(element))return;
+  const record=records.get(element);if(!eligible(element,record))return;
+  if(record)record.started=true;
+  else if(!view.call(owner.call(element))||element.__rewritten__===true)element.__sandstone_inert__=true;
+}
+function prime_inert_script(element){
+  // Native preparation in a document with scripting disabled sets the real
+  // already-started flag. A private document avoids executing authored code.
+  inert??=document.implementation.createHTMLDocument('');
+  const original=owner.call(element),parent=element.parentNode,next=element.nextSibling,children=[...element.childNodes];
+  for(const child of children)remove_child.call(element,child);
+  remove.call(element,'src');set.call(element,'type','text/javascript');data.set.call(element,' ');
+  adopt.call(inert,element);append.call(inert.body,element);remove_child.call(inert.body,element);
+  data.set.call(element,'');for(const child of children)append.call(element,child);
+  adopt.call(original,element);if(parent)insert.call(parent,element,next);
+}
+export function clone_script(source,copy,prime=false){
+  if(!globalThis.HTMLScriptElement||!(source instanceof HTMLScriptElement))return;
+  const record=records.get(source),started=source.__sandstone_inert__||record&&(record.started||connected.call(source)&&eligible(source,record));
+  if(started)copy.__sandstone_inert__=true;
+  if(!record)return;
+  if(started&&prime)prime_inert_script(copy);
+  const type=started&&!prime?'application/x-sandstone-script':record.type(),src=record.src();
+  if(type===null)remove.call(copy,'type');else set.call(copy,'type',type);
+  if(src===null)remove.call(copy,'src');else set.call(copy,'src',src);
+}
 
 export function should_load(element) {
   return loader.site_settings.allow_js && (classic_types.has(element.type.trim().toLowerCase()) || element.type === "module");
 }
 
 export function rewrite_script(element) {
+  const original_type=get.call(element,'type');
   const type = element.type.trim().toLowerCase();
   if (type === "importmap") {
+    records.set(element,{started:false,type:()=>get.call(element,'type')==='application/x-sandstone-importmap'?original_type:get.call(element,'type'),src:()=>get.call(element,'src')});
     element.type = "application/x-sandstone-importmap";
     if (loader.site_settings.allow_js && !element.__sandstone_inert__) {
       try { modules.map.add(element.textContent, ctx.document.baseURI); }
@@ -28,6 +70,7 @@ export function rewrite_script(element) {
   element.__sandstone_module__ = is_module;
   let script_url = element.getAttribute("src");
   let authored_src=script_url;
+  records.set(element,{started:false,type:()=>get.call(element,'type')==='application/x-sandstone-script'?original_type:get.call(element,'type'),src:()=>authored_src});
   const num = script_num++;
   let text = element.textContent;
   let ready = script_url===null;

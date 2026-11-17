@@ -1,6 +1,7 @@
 import {ctx} from './context.mjs';
 import * as network from './network.mjs';
 import {schedule_resource_event} from './resource_events.mjs';
+import * as loader from './loader.mjs';
 
 const svg='http://www.w3.org/2000/svg',xlink='http://www.w3.org/1999/xlink';
 const states=new WeakMap(),strings=new WeakMap(),maps=new WeakMap();
@@ -9,6 +10,7 @@ function descriptor(prototype,key){while(prototype){const value=Object.getOwnPro
 const fields=Object.fromEntries(['name','namespaceURI','localName','ownerElement','value'].map(key=>[key,A&&descriptor(A,key)]));
 const attributes=E&&descriptor(E,'attributes').get,clone=N?.cloneNode;
 const node_type=N&&descriptor(N,'nodeType').get;
+const owner_document=N&&descriptor(N,'ownerDocument').get,document_view=globalThis.Document&&descriptor(Document.prototype,'defaultView').get;
 const methods=Object.fromEntries(['getAttribute','getAttributeNS','getAttributeNode','getAttributeNodeNS','hasAttribute','hasAttributeNS','setAttribute','setAttributeNS','removeAttribute','removeAttributeNS','toggleAttribute','setAttributeNode','setAttributeNodeNS','removeAttributeNode'].map(key=>[key,E?.[key]]));
 const base=globalThis.SVGAnimatedString&&descriptor(SVGAnimatedString.prototype,'baseVal');
 const stringify=String;
@@ -32,14 +34,14 @@ export function is_svg_resource(element){
   return !!(globalThis.SVGImageElement&&element instanceof SVGImageElement||globalThis.SVGFEImageElement&&element instanceof SVGFEImageElement);
 }
 
-function render(state,url){
-  state.local=url;
+function render(state,url,authored_values=false){
+  state.local=authored_values?'':url;
   for(const slot of slots){
     const authored=attr(state.mirror,slot.ns,slot.name),current=attr(state.element,slot.ns,slot.name);
     if(!authored){
       if(current){methods.removeAttributeNS.call(state.element,slot.ns,slot.name);detached(state,current);}
     }else{
-      methods.setAttributeNS.call(state.element,slot.ns,qualified(authored),url);
+      methods.setAttributeNS.call(state.element,slot.ns,qualified(authored),authored_values?value(authored):url);
       state.values.set(attr(state.element,slot.ns,slot.name),value(authored));
     }
   }
@@ -48,7 +50,13 @@ function release(state){
   if(!state.blob)return;
   URL.revokeObjectURL(state.blob);delete network.known_urls[state.blob];delete network.known_urls[state.local];state.blob=null;
 }
-function refresh(state){
+function refresh(state,intended_active){
+  const active=intended_active??(!loader.is_loaded||!!document_view.call(owner_document.call(state.element)));
+  if(!active){
+    state.active=false;state.cancelError?.();state.controller?.abort();release(state);state.generation++;state.key=null;state.pending=null;
+    render(state,'',true);return;
+  }
+  state.active=true;
   const source=base.get.call(animated(state.mirror)),cors=state.cors?methods.getAttribute.call(state.element,'crossorigin'):null;
   const mode=cors===null?'no-cors':'cors',credentials=cors===null||cors.toLowerCase()==='use-credentials'?'include':'same-origin';
   let url;
@@ -91,17 +99,23 @@ export function rewrite_svg_resource(element,source){
   }
   states.set(element,state);strings.set(animated(element),state);maps.set(attributes.call(element),state);
   element.addEventListener('error',event=>{if(event.isTrusted&&(!state.local||state.pending))event.stopImmediatePropagation();},true);
-  return refresh(state);
+  return refresh(state,true);
 }
-export function clone_svg_resource(source,copy){
+export function clone_svg_resource(source,copy,inactive=false){
   const state=states.get(source);
-  if(state){rewrite_svg_resource(copy,state);return true;}
+  if(state){
+    if(inactive){for(const slot of slots){const original=attr(state.mirror,slot.ns,slot.name);if(original)methods.setAttributeNS.call(copy,slot.ns,qualified(original),value(original));else methods.removeAttributeNS.call(copy,slot.ns,slot.name);}}
+    else rewrite_svg_resource(copy,state);
+    return true;
+  }
   if(A&&source instanceof Attr){
     const state=states.get(owner(source));
     if(state&&resource_attr(source)){fields.value.set.call(copy,canonical(state,source));return true;}
   }
   return false;
 }
+export function set_svg_active(element,active){const state=states.get(element);if(!state||state.active===active)return false;refresh(state,active);return true;}
+export function detach_svg_attribute(node){const element=owner(node),state=states.get(element);if(!state||!resource_attr(node))return false;remove_node(state,node,()=>methods.removeAttributeNode.call(element,node));return true;}
 
 function attach(state,node,namespaced,operation){
   const parent=owner(node);

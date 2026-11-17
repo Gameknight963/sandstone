@@ -1,4 +1,5 @@
 import {native_frame_window} from './iframe_window.mjs';
+import {shadow_root} from './shadow_roots.mjs';
 
 const states=new WeakMap(),shadowRoots=new WeakMap(),observed=new WeakSet();
 const node=globalThis.Node&&Node.prototype;
@@ -6,7 +7,6 @@ const children=node&&Object.getOwnPropertyDescriptor(node,'childNodes').get;
 const connected=node&&Object.getOwnPropertyDescriptor(node,'isConnected').get;
 const owner=node&&Object.getOwnPropertyDescriptor(node,'ownerDocument').get;
 const getRoot=node?.getRootNode;
-const getShadow=globalThis.Element&&Object.getOwnPropertyDescriptor(Element.prototype,'shadowRoot').get;
 let observer;
 function observe(root){
   if(observed.has(root))return;
@@ -34,7 +34,7 @@ export function reconcile_iframes(node,seen=new WeakSet()){
   seen.add(node);
   const state=states.get(node);
   if(state)reconcile(node,state);
-  const shadow=shadowRoots.get(node)||(node instanceof Element?getShadow.call(node):null);
+  const shadow=shadowRoots.get(node)||(node instanceof Element?shadow_root(node):null);
   if(shadow)reconcile_iframes(shadow,seen);
   for(const child of children.call(node))reconcile_iframes(child,seen);
 }

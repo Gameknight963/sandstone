@@ -3,7 +3,14 @@ import * as network from "../network.mjs";
 import { rewrite_srcset } from "../srcset.mjs";
 
 const prepared = new WeakMap();
+const sessions = new WeakMap();
 const source_loads = new WeakMap();
+const owner=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get;
+const native_base=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'baseURI').get;
+const view=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get;
+const set=globalThis.Element?.prototype.setAttribute,remove_attribute=globalThis.Element?.prototype.removeAttribute;
+const attr_owner=globalThis.Attr&&Object.getOwnPropertyDescriptor(Attr.prototype,'ownerElement').get;
+const attr_value=globalThis.Attr&&Object.getOwnPropertyDescriptor(Attr.prototype,'value');
 
 function source_pending(element) {
   const parent = element.parentElement;
@@ -21,10 +28,30 @@ function source_pending(element) {
   };
 }
 
-export function clone_media(source,copy){
+export function clone_media(source,copy,inactive=false){
+  if(globalThis.Attr&&source instanceof Attr){
+    const authored=prepared.get(attr_owner.call(source));
+    if(source.namespaceURI===null&&authored?.has(source.localName)){attr_value.set.call(copy,authored.get(source.localName));return true;}
+  }
   const authored=prepared.get(source);
   if(!authored)return false;
-  rewrite_media(copy,authored);
+  if(inactive){for(const [key,value] of authored)if(value===null)remove_attribute.call(copy,key);else set.call(copy,key,value);}
+  else rewrite_media(copy,authored);
+  return true;
+}
+
+export function detach_media_attribute(node){
+  const element=attr_owner.call(node),session=sessions.get(element),key=node.localName;
+  if(node.namespaceURI!==null||!session?.authored.has(key))return false;
+  const value=session.authored.get(key),state=session.states.get(key);
+  session.authored.set(key,null);state.generation++;state.controller?.abort();state.release(state.urls);state.urls=[];
+  remove_attribute.call(element,key);attr_value.set.call(node,value);return true;
+}
+
+export function set_media_active(element,active){
+  const session=sessions.get(element);if(!session||session.active===active)return false;
+  session.active=active;
+  for(const [key,value] of session.authored)if(value!==null)session.states.get(key).update(value,active);
   return true;
 }
 
@@ -37,9 +64,10 @@ export function rewrite_media(element,initial_sources) {
   const authored = new Map(initial_sources||properties.map(key => [key, get(key)]));
   prepared.set(element,authored);
   const states = new Map();
+  const session={authored,states,active:true},aliases=new Map();sessions.set(element,session);
   // Clear every source before starting asynchronous work, including picture sources.
   for (const key of properties) remove(key);
-  const base = () => ctx.document.baseURI;
+  const base = () => owner.call(element)===document?ctx.document.baseURI:native_base.call(element);
 
   for (const key of properties) {
     const state = {generation: 0, urls: [], controller: null};
@@ -48,9 +76,12 @@ export function rewrite_media(element,initial_sources) {
       for (const url of urls) { URL.revokeObjectURL(url); delete network.known_urls[url]; }
     };
     let descriptor;
-    function update(value) {
+    function update(value,intended_active) {
       value = String(value);
       authored.set(key, value);
+      const document=owner.call(element),active=intended_active??!!view.call(document);
+      const request_base=active?ctx.document.baseURI:base();
+      session.active=active;
       const generation = ++state.generation;
       state.controller?.abort();
       const controller = state.controller = new AbortController();
@@ -62,7 +93,7 @@ export function rewrite_media(element,initial_sources) {
       const done = key === "src" ? source_pending(element) : () => {};
       const resource = async source => {
         if (!source) return source;
-        const url = new URL(source, base());
+        const url = new URL(source, request_base);
         if (["data:", "blob:"].includes(url.protocol)) return url.href;
         if (!resources.has(url.href)) resources.set(url.href, (async () => {
           const crossOrigin = element.crossOrigin ?? (element instanceof HTMLSourceElement ? element.parentElement?.crossOrigin : null);
@@ -74,13 +105,14 @@ export function rewrite_media(element,initial_sources) {
           const blob = await response.blob();
           controller.signal.throwIfAborted();
           const local = network.create_blob_url(blob, url.href);
+          aliases.set(local,url.href);
           urls.push(local);
           return local;
         })());
         return resources.get(url.href);
       };
       // Local sources retain their synchronous property behavior.
-      if (key !== "srcset" && (!value || /^(data|blob):/i.test(value))) {
+      if (!active || key !== "srcset" && (!value || /^(data|blob):/i.test(value))) {
         descriptor.set.call(element, value);
         done();
         return;
@@ -107,7 +139,7 @@ export function rewrite_media(element,initial_sources) {
         if (key === "srcset") return value;
         try { return new URL(value, base()).href; } catch { return value; }
       },
-      set: update
+      set: value=>update(value)
     });
     state.update = update;
     state.release = release;
@@ -117,7 +149,7 @@ export function rewrite_media(element,initial_sources) {
     let current = intercept_property(element, "currentSrc", {
       get() {
         const value = current.get.call(element);
-        return network.known_urls[value] || value;
+        return network.known_urls[value] || aliases.get(value) || value;
       }
     });
   }
@@ -168,5 +200,5 @@ export function rewrite_media(element,initial_sources) {
     if (!event.isTrusted) return;
     if (properties.every(key => !get(key))) event.stopImmediatePropagation();
   }, true);
-  for (const [key, value] of authored) if (value !== null) states.get(key).update(value);
+  for (const [key, value] of authored) if (value !== null) states.get(key).update(value,true);
 }

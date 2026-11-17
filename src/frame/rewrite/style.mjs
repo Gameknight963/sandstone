@@ -121,3 +121,10 @@ export function rewrite_style(element) {
   mutate_styles([element], () => {});
   return states.get(element)?.pending;
 }
+export function clone_style(source,copy){
+  const state=states.get(source);if(!state)return;
+  const nodes=text_nodes(source),targets=text_nodes(copy),parts=nodes.map(node=>data.get.call(node)),markers=new Map(state.markers);
+  for(const node of nodes)for(const entry of node_markers.get(node)||[])markers.set(...entry);
+  const restored=restore_css(parts.join(''),markers,edits=>edit_css_parts(parts,edits),true);
+  if(targets.length===restored.length)write(targets,restored);
+}

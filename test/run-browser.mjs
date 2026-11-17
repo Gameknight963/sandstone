@@ -25,6 +25,8 @@ const htmlInsertionTest=await readFile(new URL('html-insertion.playwright.js',im
 const verifyHTMLInsertion=runInThisContext(`(${htmlInsertionTest})`);
 const rangeFragmentTest=await readFile(new URL('range-fragments.playwright.js',import.meta.url),'utf8');
 const verifyRangeFragments=runInThisContext(`(${rangeFragmentTest})`);
+const documentTransferTest=await readFile(new URL('document-transfer.playwright.js',import.meta.url),'utf8');
+const verifyDocumentTransfer=runInThisContext(`(${documentTransferTest})`);
 const baseTest=await readFile(new URL('base.playwright.js',import.meta.url),'utf8');
 const verifyBase=runInThisContext(`(${baseTest})`);
 const attributeTest=await readFile(new URL('event-attributes.playwright.js',import.meta.url),'utf8');
@@ -180,6 +182,7 @@ try {
     result.passed.push(...await timed(verifyHyperlinks(page), 'Hyperlink URL fixture'));
     result.passed.push(...await timed(verifyHTMLInsertion(page), 'HTML insertion fixture'));
     result.passed.push(...await timed(verifyRangeFragments(page), 'Range fragment fixture'));
+    result.passed.push(...await timed(verifyDocumentTransfer(page), 'Document transfer fixture'));
     result.passed.push(...await timed(verifyCSS(page), "CSS fixture"));
     result.passed.push(...await timed(verifyMedia(page), "Media fixture"));
     result.passed.push(...await timed(verifySVGResources(page), 'SVG resource fixture'));

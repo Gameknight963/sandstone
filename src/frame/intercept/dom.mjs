@@ -5,20 +5,26 @@ import {mutate_styles as mutate_style_sources} from '../rewrite/style.mjs';
 import {mutate_document_base} from '../document_base.mjs';
 import {reconcile_iframes} from '../iframe_lifecycle.mjs';
 import {html_fragment,range_fragment} from '../html_fragments.mjs';
-import {rewrite_event_attributes} from '../event_attributes.mjs';
-import {clone_media} from '../rewrite/media.mjs';
-import {clone_svg_resource,is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
-const mutate_styles=(nodes,operation)=>mutate_document_base(()=>mutate_style_sources(nodes,operation));
+import {copy_resources,prepare_resources,pause_resources,mark_connected_scripts,mark_fragment_scripts,node_document,active_document,connected_node,walk_resources} from '../resource_nodes.mjs';
+import {detach_media_attribute} from '../rewrite/media.mjs';
+import {detach_svg_attribute} from '../svg_resources.mjs';
+import {shadow_root} from '../shadow_roots.mjs';
+const mutate_styles=(nodes,operation)=>mutate_document_base(()=>active_document(node_document(nodes[0]))?mutate_style_sources(nodes,operation):operation());
 
-function prepare(node) {
+function prepare(node,full=true) {
+  prepare_resources(node);
+  if(!full)return;
   const pending = rewrite.element(node);
   pending?.catch(console.error);
+  walk_resources(node,element=>{if(element instanceof Element){const root=shadow_root(element);if(root)rewrite.element(root)?.catch(console.error);}});
 }
 
 function execute(node) {
+  if(!(node instanceof Node)||!connected_node(node)||node_document(node)!==document)return;
   if (!loader.is_loaded) return;
   if (typeof node?.__sandstone_execute__ === "function") node.__sandstone_execute__();
   for (const child of get_dom_property(node, "children") || []) execute(child);
+  if(node instanceof Element){const root=shadow_root(node);if(root)execute(root);}
 }
 
 function intercept(target, key, first_only = false) {
@@ -27,33 +33,61 @@ function intercept(target, key, first_only = false) {
     const nodes = first_only ? args.slice(0, 1) : args;
     // A fragment is empty after insertion; retain its children for execution.
     const inserted = nodes.flatMap(node => node?.nodeType === 11 ? [...node.childNodes] : [node]);
+    const active=active_document(node_document(receiver)),full=active&&connected_node(receiver);
     const result = mutate_styles([receiver, ...nodes], () => {
-      for (const node of nodes) prepare(node);
+      if(active)for (const node of nodes) prepare(node,full);
       return Reflect.apply(original, receiver, args);
     });
-    for (const node of inserted) {reconcile_iframes(node);execute(node);}
+    for (const node of inserted)if(node instanceof Node){
+      if(active_document(node_document(node))){mark_connected_scripts(node);reconcile_iframes(node);execute(node);}
+      else{pause_resources(node);mark_connected_scripts(node);}
+    }
     return result;
   });
 }
 
 if (globalThis.Node) {
   const clone=Node.prototype.cloneNode;
-  const first=Object.getOwnPropertyDescriptor(Node.prototype,'firstChild').get;
-  const next=Object.getOwnPropertyDescriptor(Node.prototype,'nextSibling').get;
   const kind=Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get;
-  function restore_media(source,copy){
-    if(clone_media(source,copy)||clone_svg_resource(source,copy))rewrite_event_attributes(copy);
-    let original=first.call(source),child=first.call(copy);
-    while(original&&child){restore_media(original,child);original=next.call(original);child=next.call(child);}
-    if(source instanceof HTMLTemplateElement&&copy instanceof HTMLTemplateElement)restore_media(source.content,copy.content);
-  }
   Node.prototype.cloneNode=new Proxy(clone,{apply(target,receiver,args){
     const copy=Reflect.apply(target,receiver,args);
     // Source attributes may temporarily be absent or contain local blobs.
     // Restore their virtual values without ever assigning remote native URLs.
-    if(kind.call(copy)!==9)restore_media(receiver,copy);
+    copy_resources(receiver,copy,!active_document(node_document(copy)));
     return copy;
   }});
+  const import_node=Document.prototype.importNode,adopt_node=Document.prototype.adoptNode;
+  const document_view=Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get;
+  const registry=globalThis.customElements,upgrade=registry?.upgrade;
+  Document.prototype.importNode=new Proxy(import_node,{apply(target,receiver,args){
+    const active=!!document_view.call(receiver);
+    if(!args.length)return Reflect.apply(target,receiver,args);
+    if(!active){const copy=Reflect.apply(target,receiver,args);copy_resources(args[0],copy,true,true);return copy;}
+    const inert=receiver.implementation.createHTMLDocument('');
+    const copy=Reflect.apply(target,inert,args);
+    copy_resources(args[0],copy,true,true);prepare_resources(copy);
+    adopt_node.call(receiver,copy);
+    if(upgrade&&receiver===document)upgrade.call(registry,copy);
+    return copy;
+  }});
+  Document.prototype.adoptNode=new Proxy(adopt_node,{apply(target,receiver,args){
+    const active=!!document_view.call(receiver);
+    if(!args.length)return Reflect.apply(target,receiver,args);
+    const node=args[0],type=kind.call(node);
+    if(type===9||globalThis.ShadowRoot&&node instanceof ShadowRoot)return Reflect.apply(target,receiver,args);
+    if(type===2){if(!detach_media_attribute(node))detach_svg_attribute(node);}
+    if(active)prepare_resources(node);
+    const result=Reflect.apply(target,receiver,args);
+    if(!active)pause_resources(node);
+    return result;
+  }});
+  if(globalThis.DOMParser){
+    const parse=DOMParser.prototype.parseFromString;
+    DOMParser.prototype.parseFromString=new Proxy(parse,{apply(target,receiver,args){const result=Reflect.apply(target,receiver,args);if(loader.is_loaded)mark_connected_scripts(result);return result;}});
+  }
+  for(const key of ['parseHTML','parseHTMLUnsafe'])if(typeof Document[key]==='function'){
+    const parse=Document[key];Document[key]=new Proxy(parse,{apply(target,receiver,args){const result=Reflect.apply(target,receiver,args);if(loader.is_loaded)mark_connected_scripts(result);return result;}});
+  }
   for (const key of ["appendChild", "insertBefore", "replaceChild"]) intercept(Node.prototype, key, true);
   for (const target of [globalThis.Element?.prototype, globalThis.Document?.prototype, globalThis.DocumentFragment?.prototype]) {
     for (const key of ["append", "prepend", "replaceChildren"]) intercept(target, key);
@@ -75,7 +109,9 @@ if (globalThis.Node) {
     for (const key of keys) {
       const property = Object.getOwnPropertyDescriptor(prototype, key);
       Object.defineProperty(prototype, key, {...property, set(value) {
-        return mutate_styles([this], () => property.set.call(this, value));
+        const result=mutate_styles([this], () => property.set.call(this, value));
+        mark_connected_scripts(this);if(this.parentNode)mark_connected_scripts(this.parentNode);
+        return result;
       }});
     }
   }
@@ -84,13 +120,17 @@ if (globalThis.Node) {
       const original = Range.prototype[key];
       Range.prototype[key] = function(...args) {
         const ancestor=this.commonAncestorContainer;
+        const active=active_document(node_document(ancestor)),full=active&&connected_node(ancestor);
         const inserting=key==='insertNode'||key==='surroundContents',node=args[0];
         const inserted=inserting?(node?.nodeType===11?[...node.childNodes]:[node]):[];
         const result=mutate_styles([ancestor,...args],()=>{
-          if(inserting)prepare(node);
+          if(inserting&&active)prepare(node,full);
           return Reflect.apply(original,this,args);
         });
-        for(const node of inserted){reconcile_iframes(node);execute(node);}
+        for(const node of inserted)if(node instanceof Node){
+          if(active_document(node_document(node))){mark_connected_scripts(node);reconcile_iframes(node);execute(node);}
+          else{pause_resources(node);mark_connected_scripts(node);}
+        }
         return result;
       };
     }
@@ -118,7 +158,7 @@ if (globalThis.Node) {
   const before=Element.prototype.before,after=Element.prototype.after,prepend=Element.prototype.prepend,append=Element.prototype.append;
   function fragment(context,value,operation,position) {
     const content=html_fragment(context,value,operation,position);
-    prepare(content);
+    if(active_document(node_document(context)))prepare(content,connected_node(context));
     return content;
   }
   if(globalThis.Range){
@@ -139,11 +179,7 @@ if (globalThis.Node) {
       // Images/media can start loading as soon as their owner document is
       // active, even while detached. Other resources and executable scripts
       // retain their original markup until insertion prepares them.
-      for(const element of content.querySelectorAll('*')){
-        rewrite_event_attributes(element);
-        if(Element.prototype.matches.call(element,"img, source, video, audio, input[type='image'], track"))rewrite.media(element)?.catch(console.error);
-        if(is_svg_resource(element))rewrite_svg_resource(element)?.catch(console.error);
-      }
+      prepare_resources(content);
       adopt.call(source,content);
       if(upgrade&&source===document)upgrade.call(registry,content);
       return content;
@@ -157,6 +193,8 @@ if (globalThis.Node) {
       value=value===null?'':markup_string(value);
       if (["SCRIPT", "STYLE", "TEXTAREA", "TEMPLATE"].includes(this.tagName)) {
         mutate_styles([this], () => descriptor.set.call(this, value));
+        if(this instanceof HTMLTemplateElement)mark_fragment_scripts(this.content);
+        else mark_connected_scripts(this);
         return;
       }
       const content = fragment(this,value);

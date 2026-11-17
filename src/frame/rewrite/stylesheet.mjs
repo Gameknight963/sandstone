@@ -4,6 +4,7 @@ import { parse_css } from "./css.mjs";
 import {parse_referrer_policy} from '../../referrer.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {schedule_resource_event} from '../resource_events.mjs';
+import {resource_attribute} from '../resource_attributes.mjs';
 
 export function is_style_link(element){
   return Element.prototype.matches.call(element,'[rel~="stylesheet" i], [rel~="preload" i][as="style" i]');
@@ -14,6 +15,7 @@ export function rewrite_stylesheet(element,initialHref) {
   const initial = typeof initialHref==='function' ? initialHref() : initialHref===undefined ? element.getAttribute("href") ?? element.getAttribute("data-href") : initialHref;
   const remove=element.removeAttribute;
   let authored=initial??null;
+  resource_attribute(element,'href',()=>authored);
   let remote = "";
   let generation = 0;
   let pending;

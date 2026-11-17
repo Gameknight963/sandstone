@@ -1,9 +1,11 @@
 import {ctx,intercept_property,proxy_function} from '../context.mjs';
 import {is_style_link,rewrite_stylesheet} from './stylesheet.mjs';
+import {resource_attribute} from '../resource_attributes.mjs';
 
 export function rewrite_link(element) {
   const get=Element.prototype.getAttribute,remove=Element.prototype.removeAttribute;
   let authored=get.call(element,'href'),active=false,activating=false,observer;
+  resource_attribute(element,'href',()=>authored);
   const methods=new Map();
   function activate(){
     if(active||activating||!is_style_link(element))return;
