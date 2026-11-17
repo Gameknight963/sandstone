@@ -4,7 +4,8 @@ import * as loader from "../loader.mjs";
 import {mutate_styles as mutate_style_sources} from '../rewrite/style.mjs';
 import {mutate_document_base} from '../document_base.mjs';
 import {reconcile_iframes} from '../iframe_lifecycle.mjs';
-import {html_fragment,range_fragment,setter_fragment} from '../html_fragments.mjs';
+import {html_fragment,range_fragment,setter_fragment,setter_input} from '../html_fragments.mjs';
+import {template_host} from '../template_hosts.mjs';
 import {copy_resources,prepare_resources,pause_resources,mark_connected_scripts,mark_fragment_scripts,node_document,active_document,connected_node,walk_resources} from '../resource_nodes.mjs';
 import {detach_media_attribute,observe_media_container} from '../rewrite/media.mjs';
 import {detach_svg_attribute} from '../svg_resources.mjs';
@@ -247,7 +248,18 @@ if (globalThis.Node) {
     }});
   }
   const parse_methods=Object.fromEntries(['setHTML','setHTMLUnsafe'].map(key=>[key,Element.prototype[key]]));
+  const fragment_operations=Object.fromEntries(['replaceChildren','append','prepend'].map(key=>[key,DocumentFragment.prototype[key]]));
   const upgrade_html=globalThis.CustomElementRegistry?.prototype.upgrade;
+  function insert_html(container,result,insert){
+    const content=result.fragment;
+    if(!result.runScripts)mark_fragment_scripts(content);
+    if(active_document(node_document(container))){prepare(content,connected_node(container));Document.prototype.adoptNode.call(node_document(container),content);}
+    const inserted=[...content.childNodes];insert(content);
+    if(active_document(node_document(container))&&upgrade_html){
+      const registry=container.customElementRegistry===undefined?globalThis.customElements:container.customElementRegistry;
+      if(registry)for(const node of inserted)upgrade_html.call(registry,node);
+    }
+  }
   for(const prototype of [Element.prototype,globalThis.ShadowRoot?.prototype])if(prototype)for(const key of ['setHTML','setHTMLUnsafe']){
     const method=prototype[key];if(typeof method!=='function')continue;
     const shadow=prototype===globalThis.ShadowRoot?.prototype;
@@ -255,16 +267,36 @@ if (globalThis.Node) {
     const parse_method=parse_methods[key];
     prototype[key]=new Proxy(method,{apply(target,receiver,args){
       const context=shadow?host.call(receiver):(namespace.call(receiver),receiver);
-      const result=setter_fragment(context,parse_method,args),content=result.fragment;
-      if(!result.runScripts)mark_fragment_scripts(content);
+      const result=setter_fragment(context,parse_method,args);
       const container=!shadow&&receiver instanceof HTMLTemplateElement?receiver.content:receiver;
-      if(active_document(node_document(container))){prepare(content,connected_node(container));Document.prototype.adoptNode.call(node_document(container),content);}
-      const inserted=[...content.childNodes];
-      Reflect.apply(container instanceof DocumentFragment?DocumentFragment.prototype.replaceChildren:replace,container,[content]);
-      if(active_document(node_document(container))&&upgrade_html){
-        const registry=container.customElementRegistry===undefined?globalThis.customElements:container.customElementRegistry;
-        if(registry)for(const node of inserted)upgrade_html.call(registry,node);
-      }
+      insert_html(container,result,content=>Reflect.apply(container instanceof DocumentFragment?fragment_operations.replaceChildren:replace,container,[content]));
+    }});
+  }
+  const shadow_host=globalThis.ShadowRoot&&Object.getOwnPropertyDescriptor(ShadowRoot.prototype,'host').get;
+  const character_data=Object.getOwnPropertyDescriptor(CharacterData.prototype,'data').get;
+  const positions=['append','prepend','before','after','replaceWith'],prototypes=[Element.prototype,CharacterData.prototype,globalThis.ShadowRoot?.prototype].filter(Boolean);
+  const positional_methods=new Map(prototypes.map(prototype=>[prototype,Object.fromEntries(positions.flatMap(position=>['','Unsafe'].map(suffix=>[position+'HTML'+suffix,prototype[position+'HTML'+suffix]])))]));
+  for(const prototype of prototypes)for(const suffix of ['','Unsafe'])for(const position of positions){
+    const key=position+'HTML'+suffix,method=positional_methods.get(prototype)[key];if(typeof method!=='function')continue;
+    const shadow=prototype===globalThis.ShadowRoot?.prototype,character=prototype===CharacterData.prototype;
+    const child=['before','after','replaceWith'].includes(position),validation=child?positional_methods.get(prototype)['beforeHTML'+suffix]:method;
+    const child_operation=prototype[position];
+    prototype[key]=new Proxy(method,{apply(_target,receiver,args){
+      if(shadow)shadow_host.call(receiver);else if(character)character_data.call(receiver);else namespace.call(receiver);
+      const input=setter_input(shadow?positional_methods.get(Element.prototype)[key]:method,args,character);
+      // Empty insertion performs native hierarchy validation without changing
+      // the receiver, including for replacement methods and detached nodes.
+      Reflect.apply(validation,receiver,['',input.options]);
+      const container=child?parent.call(receiver):!shadow&&receiver instanceof HTMLTemplateElement?receiver.content:receiver;
+      if(!container)return;
+      let context=container;
+      if(globalThis.ShadowRoot&&container instanceof ShadowRoot)context=shadow_host.call(container);
+      else if(container instanceof DocumentFragment)context=template_host(container);
+      const result=setter_fragment(context,parse_methods['setHTML'+suffix],[],input);
+      insert_html(container,result,content=>{
+        if(child)Reflect.apply(child_operation,receiver,[content]);
+        else Reflect.apply(container instanceof DocumentFragment?fragment_operations[position]:position==='append'?append:prepend,container,[content]);
+      });
     }});
   }
   Element.prototype.insertAdjacentHTML = function(position, value) {

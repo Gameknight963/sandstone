@@ -1,5 +1,6 @@
 import {scripting_html} from './scripting_html.mjs';
 import {defer_declarative_roots} from './declarative_html.mjs';
+import './template_hosts.mjs';
 
 // Parse with native context rules in a document without a browsing context.
 // Detached elements in the live document can start resource requests before
@@ -17,6 +18,7 @@ const contextual=globalThis.Range?.prototype.createContextualFragment;
 const select=globalThis.Range?.prototype.selectNodeContents;
 const NativeSanitizer=globalThis.Sanitizer,sanitizer_config=NativeSanitizer?.prototype.get;
 const create=globalThis.Document?.prototype.createElement;
+const create_text=globalThis.Document?.prototype.createTextNode;
 let validation_document;
 
 function clone_context(context){
@@ -74,7 +76,7 @@ export function html_fragment(context,value,operation='inner',position){
   return fragment;
 }
 
-export function setter_fragment(context,method,args){
+export function setter_input(method,args,character=false){
   let text,runScripts=false,options=args[1];
   const converted=[...args],captured=Object.create(null);
   if(args.length)converted[0]={toString(){
@@ -97,7 +99,12 @@ export function setter_fragment(context,method,args){
     options=captured;
   }
   validation_document??=document.implementation.createHTMLDocument('');
-  Reflect.apply(method,create.call(validation_document,'div'),converted);
+  Reflect.apply(method,character?create_text.call(validation_document,''):create.call(validation_document,'div'),converted);
+  return {text,options,runScripts};
+}
+
+export function setter_fragment(context,method,args,input=setter_input(method,args)){
+  const {text,options,runScripts}=input;
   // Coercions can move the receiver, change a form ancestor, or mutate a
   // namespace integration point. Capture the native parsing context afterward.
   const {inert,copy}=clone_context(context),protected_roots=defer_declarative_roots(context,text),protected_scripting=scripting_html(context,protected_roots.value);
