@@ -2,12 +2,10 @@ import {ctx,convert_url,run_script_safe} from '../context.mjs';
 import * as loader from '../loader.mjs';
 import {document_referrer_policy} from './document.mjs';
 import {download} from '../downloads.mjs';
+import {install_link_events} from '../link_events.mjs';
 
-function click(event) {
-  if(!loader.is_loaded||event.defaultPrevented)return;
-  const element=event.composedPath().find(node=>node instanceof Element&&Element.prototype.matches.call(node,'a[href], area[href]'));
-  if(!element)return;
-  event.preventDefault();event.stopImmediatePropagation();
+function activate(element) {
+  if(!element.hasAttribute('href'))return;
   let href;
   try{href=convert_url(element.getAttribute('href'),ctx.document.baseURI);}catch{return;}
   const target=new URL(href),current=new URL(ctx.location.href);
@@ -22,13 +20,5 @@ function click(event) {
 }
 
 if(globalThis.document){
-  document.addEventListener('click',click);
-  const original=HTMLElement.prototype.click;
-  HTMLElement.prototype.click=new Proxy(original,{apply(target,receiver,args){
-    // FileSaver-style exports commonly click an anchor without inserting it.
-    // Its native click never bubbles to document, so handle the same event on
-    // the detached anchor after its existing cancellation handlers have run.
-    if((receiver instanceof HTMLAnchorElement||receiver instanceof HTMLAreaElement)&&!receiver.isConnected)receiver.addEventListener('click',click,{once:true});
-    return Reflect.apply(target,receiver,args);
-  }});
+  install_link_events({enabled:()=>loader.is_loaded,activate});
 }

@@ -17,6 +17,8 @@ const workerTest = await readFile(new URL("workers.playwright.js", import.meta.u
 const verifyWorkers = runInThisContext(`(${workerTest})`);
 const historyTest = await readFile(new URL("history.playwright.js", import.meta.url), "utf8");
 const verifyHistory = runInThisContext(`(${historyTest})`);
+const linkTest=await readFile(new URL('links.playwright.js',import.meta.url),'utf8');
+const verifyLinks=runInThisContext(`(${linkTest})`);
 const cssTest = await readFile(new URL("css.playwright.js", import.meta.url), "utf8");
 const verifyCSS = runInThisContext(`(${cssTest})`);
 const mediaTest = await readFile(new URL("media.playwright.js", import.meta.url), "utf8");
@@ -78,6 +80,7 @@ try {
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
     result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
+    result.passed.push(...await timed(verifyLinks(page), 'Link event fixture'));
     result.passed.push(...await timed(verifyCSS(page), "CSS fixture"));
     result.passed.push(...await timed(verifyMedia(page), "Media fixture"));
     result.passed.push(...await timed(verifyForms(page), "Form fixture"));
