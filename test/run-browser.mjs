@@ -65,15 +65,21 @@ const scriptAttributesTest=await readFile(new URL('script-attributes.playwright.
 const verifyScriptAttributes=runInThisContext(`(${scriptAttributesTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
+let activeStorageMode;
 async function timed(operation, label) {
+  console.log(JSON.stringify({storageDenied:activeStorageMode,fixture:label}));
   let timer;
   try { return await Promise.race([operation, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label + " timed out")), 30000); })]); }
   finally { clearTimeout(timer); }
 }
 const browserChannel = process.env.BROWSER_CHANNEL || "chrome";
-const browser = await chromium.launch({channel: browserChannel === "headless" ? undefined : browserChannel, headless: true});
+let browser;
 try {
   for (const storageDenied of [false, true]) {
+    activeStorageMode=storageDenied;
+    // Keep each storage mode in a separate browser process. Closing a context
+    // with many navigated cross-process frames must not affect the next run.
+    browser = await chromium.launch({channel: browserChannel === "headless" ? undefined : browserChannel, headless: true});
     const context = await browser.newContext();
     if (storageDenied) await context.addInitScript(() => {
       Object.defineProperty(window, "localStorage", {get() { throw new DOMException("Storage denied", "SecurityError"); }});
@@ -203,7 +209,9 @@ try {
     finally{expectedDiagnostics.clear();}
     if (target.startsWith("file:")) assert.deepEqual(requests.filter(url => /^https?:/.test(url)), [], "The standalone fixture made a direct HTTP request");
     assert.deepEqual(browserErrors, [], "The browser reported an unexpected runtime error");
+    console.log(JSON.stringify({storageDenied,fixture:'Browser shutdown'}));
+    await browser.close();
+    browser=undefined;
     console.log(JSON.stringify({storageDenied, survivedReload, ...result}));
-    await context.close();
   }
-} finally { await browser.close(); }
+} finally { await browser?.close(); }
