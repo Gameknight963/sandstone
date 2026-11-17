@@ -7,6 +7,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {chromium} from 'playwright-core';
 import {create_relay_server} from '../example/http.mjs';
 import {server as wisp,logging} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
+import {track_client_sockets} from './client-sockets.mjs';
 
 const sites=[
   {id:'hn',url:'https://news.ycombinator.com/'},
@@ -34,6 +35,7 @@ server.listen(0,'127.0.0.1');await once(server,'listening');
 wisp.options.port_whitelist=[80,443];wisp.options.allow_loopback_ips=false;
 logging.set_level(logging.WARN);
 let browser;
+const closeClientSockets=track_client_sockets();
 function deadline(operation,label,ms=25000){
   let timer;
   return Promise.race([operation,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(label+' timed out')),ms);})]).finally(()=>clearTimeout(timer));
@@ -178,6 +180,13 @@ try{
     try{
       await page.goto(artifact);
       await page.waitForFunction(()=>globalThis.main_frame&&sandstone.libcurl.ready&&!main_frame.is_navigating);
+      await page.evaluate(()=>{
+        const session=sandstone.network.session,fetch=session.fetch;globalThis.liveRequestProgress=[];
+        session.fetch=function(url,...args){
+          const record={url:String(url),phase:'waiting for headers'};liveRequestProgress.push(record);
+          return fetch.call(this,url,...args).then(response=>{record.phase='headers received';record.status=response.status;return response;},error=>{record.phase='failed';record.error=String(error);throw error;});
+        };
+      });
       await page.evaluate(port=>sandstone.network.set_websocket('ws://127.0.0.1:'+port+'/'),server.address().port);
       await deadline(page.evaluate(url=>main_frame.navigate_to(url),site.url),'Proxy navigation');
       await page.waitForTimeout(1000);
@@ -188,7 +197,10 @@ try{
       assert.deepEqual(direct,[],'A proxied page attempted direct HTTP');
       assert.deepEqual(errors,[],'A proxied page raised script errors');
       result.status=diagnostics.length?'passed-with-diagnostics':'passed';
-    }catch(error){result.status='failed';result.error=error.message;}
+    }catch(error){
+      result.status='failed';result.error=error.message;
+      try{result.progress=await deadline(page.evaluate(()=>({navigating:main_frame.is_navigating,url:String(main_frame.url),requests:liveRequestProgress.filter(record=>record.phase==='waiting for headers'),recent:liveRequestProgress.slice(-10)})),'Failure diagnostics',2000);}catch{}
+    }
     finally{
       result.scriptErrors=[...new Set(errors)];result.consoleDiagnostics=[...new Set(diagnostics)];result.directHTTP=[...new Set(direct)];
       await proxyContext.close();
@@ -199,6 +211,9 @@ try{
   await writeFile(reportURL,JSON.stringify({checkedAt:new Date().toISOString(),results},null,2)+'\n');
   if(results.some(result=>!result.status.startsWith('passed')))process.exitCode=1;
 }finally{
-  await browser?.close();for(const socket of connections)socket.destroy();
-  await new Promise(resolve=>server.close(resolve));
+  try{await browser?.close();}
+  finally{
+    for(const socket of connections)socket.destroy();closeClientSockets();
+    await new Promise(resolve=>server.close(resolve));
+  }
 }
