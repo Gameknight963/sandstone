@@ -19,7 +19,7 @@ rpc.rpc_handlers.navigate_target=async(id,token,name,url,form_data,navigation={}
   const source=iframes[id],document=beacons.contexts.get(token);
   if(!source||!document||document.frame!==id||document.retired)return;
   const root=iframes[source.root_id];if(!root)return;
-  const context={url:source.url.href,top_url:root.url.href,cross_site:frame_cross_site(source,iframes),broadcast_origin:source.broadcast_origin};
+  const context={url:source.url.href,top_url:root.url.href,cross_site:frame_cross_site(source,iframes),broadcast_origin:source.broadcast_origin,document:token,frame:id};
   navigation={...navigation,initiated:true,source_frame_id:id,source_context:context};
   const keyword=name.toLowerCase();
   let destination;

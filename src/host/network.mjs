@@ -10,7 +10,7 @@ import { BeaconQueue } from './beacon.mjs';
 import {KeepaliveRequests} from './keepalive.mjs';
 import {http_cache} from './http_cache.mjs';
 import {Downloads} from './download.mjs';
-import {frame_cross_site} from './frame_context.mjs';
+import {frame_cross_site,navigation_request_context} from './frame_context.mjs';
 import {broadcast_channels} from './broadcast.mjs';
 import {disconnect_storage} from './storage.mjs';
 export {http_cache} from './http_cache.mjs';
@@ -45,20 +45,22 @@ function get_ws(frame_id, ws_id) {
 }
 
 //handle fetch api requests
-rpc_handlers["fetch"] = async function(frame_id, request_id, url, options) {
+rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navigation_source) {
   const frame = iframes[frame_id];
   if (!frame) throw new TypeError("Unknown frame");
+  if(navigation_source&&options?.mode!=='navigate')throw new TypeError('Navigation source requires navigation mode');
+  const source_context=navigation_source?navigation_request_context(beacons.contexts,navigation_source,frame.root_id):{
+    url: options?.mode === 'navigate' && frame.pending_navigation?.source_url || (frame.url.origin === "null" && frame.origin && frame.origin !== "null" ? frame.origin + "/" : frame.url.href),
+    top_url: iframes[frame.root_id]?.url?.href || frame.url.href,
+    broadcast_origin:frame.broadcast_origin,
+    navigation: options?.mode === 'navigate',nested:true,cross_site:frame_cross_site(frame,iframes)
+  };
   const key = request_key(frame_id, request_id);
   const request = {frame_id, controller: new AbortController(), reader: null};
   requests.set(key, request);
   let response;
   try {
-    response = await fetch(url, {...options, signal: request.controller.signal}, {
-      url: options?.mode === 'navigate' && frame.pending_navigation?.source_url || (frame.url.origin === "null" && frame.origin && frame.origin !== "null" ? frame.origin + "/" : frame.url.href),
-      top_url: iframes[frame.root_id]?.url?.href || frame.url.href,
-      broadcast_origin:frame.broadcast_origin,
-      navigation: options?.mode === 'navigate', nested: true,cross_site:frame_cross_site(frame,iframes)
-    });
+    response = await fetch(url, {...options, signal: request.controller.signal},source_context);
     request.reader = response.body?.getReader();
   } catch (error) {
     requests.delete(key);

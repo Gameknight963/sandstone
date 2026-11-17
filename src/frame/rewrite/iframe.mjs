@@ -52,7 +52,8 @@ export function rewrite_iframe(iframe_element) {
     try {
       let response = await network.fetch(target_url, {
         signal:controller.signal,
-        mode:'navigate',sandstone_frame_id:navigation.source_frame_id||(navigation.from_child ? frame_id : loader.frame_id),
+        mode:'navigate',sandstone_frame_id:navigation.from_child ? frame_id : loader.frame_id,
+        sandstone_navigation_source:navigation.source_context,
         cache:navigation.history_mode === 'reload' ? 'no-cache' : 'default',
         referrerPolicy:navigation.referrerPolicy || iframe_element.referrerPolicy || document_referrer_policy(),
         ...(form_data ? {

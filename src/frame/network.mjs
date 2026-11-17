@@ -50,6 +50,8 @@ export async function fetch(url, options) {
   if (!params.referrerPolicy) params.referrerPolicy = document_referrer_policy();
   const frame_id = params.sandstone_frame_id || loader.frame_id;
   delete params.sandstone_frame_id;
+  const navigation_source=params.sandstone_navigation_source;
+  delete params.sandstone_navigation_source;
   const signal = params.signal;
   delete params.signal;
   signal?.throwIfAborted();
@@ -70,7 +72,7 @@ export async function fetch(url, options) {
   };
   signal?.addEventListener("abort", abort, {once: true});
   try {
-    const pending = open(owner, request_id, url.href, params);
+    const pending = open(owner, request_id, url.href, params,navigation_source);
     if (keepalive) pending.then(()=>rpc_keepalive_done(owner,request_id)).then(release,release);
     const fetch_data = signal ? await new Promise((resolve, reject) => {
       const reject_abort = () => reject(signal.reason);

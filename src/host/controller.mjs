@@ -199,7 +199,7 @@ export class ProxyFrame {
     this.rpc_target.set_target(msg_channel.port1);
     msg_channel.port1.start();
     await rpc.set_host(this.iframe, msg_channel.port2);
-    const beacon_context = network.beacons.register(this.id, {url: this.url.href, top_url: this.url.href,broadcast_origin:this.broadcast_origin});
+    const beacon_context = network.beacons.register(this.id, {url: this.url.href, top_url: this.url.href,broadcast_origin:this.broadcast_origin,root_id:this.id});
 
     try {
       await this.send_page({
@@ -325,7 +325,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push"});
   return {
     window_name:child.window_name,
-    beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin}),
+    beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id}),
     cookie_cross_site:frame_cross_site(child,iframes),
     message_origin:child.broadcast_origin.startsWith('opaque:')?'null':undefined,
     crypto_available: crypto_service.methods,
