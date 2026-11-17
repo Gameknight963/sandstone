@@ -3,7 +3,7 @@ import { ctx, convert_url, intercept_property, proxy_function } from "../context
 import { parse_css } from "./css.mjs";
 import {parse_referrer_policy} from '../../referrer.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
-import * as loader from '../loader.mjs';
+import {schedule_resource_event} from '../resource_events.mjs';
 
 export function is_style_link(element){
   return Element.prototype.matches.call(element,'[rel~="stylesheet" i], [rel~="preload" i][as="style" i]');
@@ -16,24 +16,17 @@ export function rewrite_stylesheet(element,initialHref) {
   let generation = 0;
   let pending;
   let blob_url;
-  let error_timer,error_observer;
-  function clear_error(){clearTimeout(error_timer);error_observer?.disconnect();error_observer=null;}
+  let cancel_error;
+  function clear_error(){cancel_error?.();cancel_error=undefined;}
   function failed(error,current){
     if(current!==generation)return;
     const url=remote;
-    const deliver=()=>{
-      if(current!==generation){clear_error();return;}
-      // Initial links are rewritten in an inert document. Their error handlers
-      // must see the installed page and its preceding classic scripts.
-      if(!loader.is_loaded||!element.isConnected||element.ownerDocument!==document){
-        error_observer??=new MutationObserver(()=>{clear_error();error_timer=setTimeout(deliver,0);});
-        error_observer.observe(document,{childList:true,subtree:true});return;
-      }
+    cancel_error=schedule_resource_event(element,()=>{
+      if(current!==generation)return;
       clear_error();
       console.error(`Stylesheet failed: ${url}: ${error.message}`);
       element.dispatchEvent(new Event('error'));
-    };
-    error_timer=setTimeout(deliver,0);
+    });
   }
   const descriptor = intercept_property(element, "href", {
     get: () => remote || descriptor.get.call(element),

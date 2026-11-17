@@ -2,6 +2,7 @@ import * as network from "../network.mjs";
 import * as loader from "../loader.mjs";
 import { ctx, convert_url, intercept_property, proxy_function } from "../context.mjs";
 import { modules, execute_module } from "../polyfill/module.mjs";
+import {schedule_resource_event} from '../resource_events.mjs';
 
 export const pending_scripts = [];
 let script_num = 0;
@@ -51,18 +52,23 @@ export function rewrite_script(element) {
   };
 
   function report_error(error) {
-    element.dispatchEvent(new Event("error"));
-    console.error(error);
+    const source=script_url||ctx.location.href;
+    schedule_resource_event(element,()=>{
+      console.error(`Script failed: ${source}: ${error.message}`);
+      element.dispatchEvent(new Event("error"));
+    });
   }
 
-  function prepare_module() {
-    if (!enabled) return Promise.resolve(null);
+  async function prepare_module() {
+    if (!enabled) return null;
     const credentials = element.crossOrigin === "use-credentials" ? "include" : "same-origin";
-    return (script_url ? modules.prepare_url(convert_url(script_url, ctx.document.baseURI), ctx.document.baseURI, {credentials}) :
-      modules.prepare_inline(element.textContent, ctx.document.baseURI, credentials)).catch(error => {
-        report_error(error);
-        return null;
-      });
+    try {
+      return await (script_url ? modules.prepare_url(convert_url(script_url, ctx.document.baseURI), ctx.document.baseURI, {credentials}) :
+        modules.prepare_inline(element.textContent, ctx.document.baseURI, credentials));
+    } catch(error) {
+      report_error(error);
+      return null;
+    }
   }
 
   async function download() {
@@ -85,7 +91,11 @@ export function rewrite_script(element) {
   }
 
   intercept_property(element, "src", {
-    get: () => script_url ? convert_url(script_url, ctx.document.baseURI) : "",
+    get: () => {
+      if(!script_url)return '';
+      try{return convert_url(script_url,ctx.document.baseURI);}
+      catch{return script_url;}
+    },
     set: value => {
       script_url = String(value);
       if (is_module) {
