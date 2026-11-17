@@ -83,7 +83,7 @@ export class ProxyFrame {
     iframes[this.id] = this;
     this.rpc_target = new rpc.RPCTarget();
     this.rpc_target.onmessage = rpc.message_listener;
-    this.send_page = rpc.create_rpc_wrapper(this.rpc_target, "html");
+    this.send_page = (options,request={})=>rpc.call_procedure(this.rpc_target,'html',[options],request);
     this.get_favicon = rpc.create_rpc_wrapper(this.rpc_target, "favicon");
     this.eval_js = rpc.create_rpc_wrapper(this.rpc_target, "eval");
 
@@ -213,12 +213,12 @@ export class ProxyFrame {
         cookies: site_data.documentCookies(this.url.href),
         history: {...this.history.snapshot(), traversed: !!navigation.traversed, restored: navigation.history_mode === "reload"},
         version: version
-      });
+      },{signal:runtime_wait.signal});
     }
     catch (e) {
       if (navigation_id !== this.navigation_id) return;
       let error_msg = util.format_error(e);
-      await this.send_page({
+      try{await this.send_page({
         url: this.url.href,
         html: html, 
         frame_id: this.id,
@@ -230,7 +230,8 @@ export class ProxyFrame {
         default_settings: this.default_settings,
         local_storage: undefined,
         version: version
-      });
+      },{signal:runtime_wait.signal});}
+      catch(error){if(navigation_id!==this.navigation_id)return;throw error;}
     }
     if (navigation_id !== this.navigation_id) return;
     this.iframe.style.backgroundColor = "unset";
