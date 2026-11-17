@@ -16,7 +16,9 @@ function rewrite_element_single(element) {
   else if (Element.prototype.matches.call(element, "img, source, video, audio, input[type='image'], track"))
     promise = rewrite.media(element);
   else if (element instanceof HTMLLinkElement)
-    promise = Element.prototype.matches.call(element,'[rel~="stylesheet" i]') ? rewrite.stylesheet(element) : rewrite.link(element);
+    // A style preload must receive rewritten CSS before its load handler can
+    // promote it to a stylesheet, including through relList or setAttribute.
+    promise = Element.prototype.matches.call(element,'[rel~="stylesheet" i], [rel~="preload" i][as="style" i]') ? rewrite.stylesheet(element) : rewrite.link(element);
   else if (element instanceof HTMLMetaElement)
     promise = rewrite.meta(element);
   else if (element instanceof HTMLStyleElement)

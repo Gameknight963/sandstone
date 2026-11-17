@@ -1,6 +1,7 @@
 async page=>{
-  const origin='https://fixture.test',relValues=['stylesheet','preload stylesheet','StyleSheet PRELOAD','\tpreload\nstylesheet\f','stylesheetx'];
-  const html=rel=>'<!doctype html><link rel="'+rel+'" href="'+origin+'/stylesheet-rel/one.css"><body><div id="probe">Stylesheet tokens</div>';
+  const origin='https://fixture.test',relValues=['stylesheet','preload stylesheet','StyleSheet PRELOAD','\tpreload\nstylesheet\f','stylesheetx','preload'];
+  const lazy=`as="style" onload="this.onload=null;this.rel='stylesheet'"`;
+  const html=rel=>'<!doctype html><link rel="'+rel+'" '+(rel==='preload'?lazy:'')+' href="'+origin+'/stylesheet-rel/one.css"><body><div id="probe">Stylesheet tokens</div>';
   const css=path=>'#probe{padding-left:'+(path.endsWith('/two.css')?29:17)+'px}';
   const nativeContext=await page.context().browser().newContext(),native=await nativeContext.newPage();
   await nativeContext.route(origin+'/stylesheet-rel/**',route=>{
@@ -35,6 +36,23 @@ async page=>{
       await until(proxy,'getComputedStyle(document.getElementById("probe")).paddingLeft==="29px"');
       values.push(await read(proxy,'({href:document.querySelector("link").href,padding:getComputedStyle(document.getElementById("probe")).paddingLeft})'));
     }
+    for(const method of ['property','attribute','tokens']){
+      const before=JSON.parse(await evaluate(proxy,`new Promise((resolve,reject)=>{
+        document.querySelector('link')?.remove();const link=document.createElement('link');
+        link.rel='preload';link.as='style';link.href=${JSON.stringify(origin+'/stylesheet-rel/one.css')};
+        const timer=setTimeout(()=>reject(new Error('Stylesheet preload did not complete')),5000);
+        link.onerror=()=>{clearTimeout(timer);reject(new Error('Stylesheet preload failed'));};
+        link.onload=()=>{
+          clearTimeout(timer);const before={padding:getComputedStyle(document.getElementById('probe')).paddingLeft,rel:link.rel,href:link.href};link.onload=null;
+          ${method==='property'?"link.rel='stylesheet'":method==='attribute'?"link.setAttribute('rel','stylesheet')":"link.relList.replace('preload','stylesheet')"};
+          resolve(JSON.stringify(before));
+        };
+        document.head.append(link);
+      })`));
+      values.push(before);
+      await until(proxy,'getComputedStyle(document.getElementById("probe")).paddingLeft==="17px"');
+      values.push(await read(proxy,'({rel:document.querySelector("link").rel,padding:getComputedStyle(document.getElementById("probe")).paddingLeft})'));
+    }
     return values;
   };
   try{
@@ -44,13 +62,14 @@ async page=>{
       sandstone.network.session.fetch=(url,options)=>{
         const target=new URL(url);if(!target.pathname.startsWith('/stylesheet-rel/'))return previous(url,options);
         const rel=target.searchParams.get('rel')||'';
+        const lazy=`as="style" onload="this.onload=null;this.rel='stylesheet'"`;
         return Promise.resolve(new Response(target.pathname.endsWith('.css')?'#probe{padding-left:'+(target.pathname.endsWith('/two.css')?29:17)+'px}':
-          '<!doctype html><link rel="'+rel+'" href="https://fixture.test/stylesheet-rel/one.css"><body><div id="probe">Stylesheet tokens</div>',
+          '<!doctype html><link rel="'+rel+'" '+(rel==='preload'?lazy:'')+' href="https://fixture.test/stylesheet-rel/one.css"><body><div id="probe">Stylesheet tokens</div>',
           {headers:{'Content-Type':target.pathname.endsWith('.css')?'text/css':'text/html'}}));
       };
     });
     const actual=await run(true);
     if(JSON.stringify(actual)!==JSON.stringify(expected))throw new Error('Stylesheet relation parity: '+JSON.stringify({expected,actual}));
-    return ['Stylesheet rel tokens support combined relations, ASCII case and whitespace', 'Dynamic combined-relation stylesheets and href updates stay behind the relay'];
+    return ['Stylesheet rel tokens support combined relations, ASCII case and whitespace', 'Dynamic combined-relation stylesheets and href updates stay behind the relay', 'Style preloads promote through inline load handlers, rel properties, attributes and relList'];
   }finally{await nativeContext.close();}
 }
