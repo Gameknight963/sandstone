@@ -7,21 +7,31 @@ async page=>{
   await native.route('https://other.test/**',route=>route.fulfill({contentType:'text/html',body:child}));
   const evaluate=(proxy,source)=>proxy?page.evaluate(source=>main_frame.eval_js(source),source):native.evaluate(source=>eval(source),source);
   const read=(proxy,source)=>evaluate(proxy,`JSON.stringify(${source})`).then(JSON.parse);
+  const bounded=async(operation,label,ms=1000)=>{
+    let timer;
+    try{return await Promise.race([operation,new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error(label+' did not respond')),ms))]);}
+    finally{clearTimeout(timer);}
+  };
   const findChild=async(proxy,url)=>{
     const deadline=Date.now()+10000;
     while(Date.now()<deadline){
       for(const frame of (proxy?page:native).frames())try{
-        if(proxy?await frame.evaluate(url=>globalThis.sandstone_frame?.loader.url===url&&sandstone_frame.context.run_script('window.childReady===true'),url):frame.url()===url)return frame;
+        if(!proxy&&frame.url()!==url)continue;
+        const ready=await bounded(frame.evaluate(({proxy,url})=>proxy?
+          globalThis.sandstone_frame?.loader.url===url&&sandstone_frame.context.run_script('window.childReady===true'):
+          location.href===url&&globalThis.childReady===true,{proxy,url}),'Frame readiness',250);
+        if(ready)return frame;
       }catch{}
       await new Promise(resolve=>setTimeout(resolve,20));
     }
     const frames=await Promise.all((proxy?page:native).frames().map(async frame=>{
-      try{return await frame.evaluate(()=>({physical:location.href,virtual:globalThis.sandstone_frame?.loader.url,ready:globalThis.sandstone_frame?.context.run_script('window.childReady===true')}));}
+      try{return await bounded(frame.evaluate(()=>({physical:location.href,virtual:globalThis.sandstone_frame?.loader.url,ready:globalThis.sandstone_frame?.context.run_script('window.childReady===true')})),'Frame diagnostics');}
       catch(error){return {physical:frame.url(),error:error.message};}
     }));
     throw new Error('Frame window navigation timed out: '+JSON.stringify({proxy,url,frames,requests:proxy?await page.evaluate(()=>frameWindowRequests):undefined}));
   };
   const run=async proxy=>{
+    console.log(JSON.stringify({fixture:'Frame window',proxy,step:'create child'}));
     await evaluate(proxy,"globalThis.frameMessages=[];addEventListener('message',event=>{if(event.data==='frame-window-ready')frameMessages.push(event.source===child.contentWindow);});globalThis.child=document.createElement('iframe'); document.body.append(child); globalThis.savedWindow=child.contentWindow; true");
     const values=[];
     values.push(await read(proxy,"({detached:document.createElement('iframe').contentWindow,href:savedWindow.location.href,identity:savedWindow===savedWindow.window&&savedWindow===savedWindow.self&&savedWindow===savedWindow.frames,parent:savedWindow.parent===window,top:savedWindow.top===window})"));
@@ -38,9 +48,10 @@ async page=>{
       ["savedWindow.location.replace('last')",origin+'/iframe-window/assets/last']
     ];
     for(const [action,url] of cases){
+      console.log(JSON.stringify({fixture:'Frame window',proxy,step:action}));
       await evaluate(proxy,action+'; true');
       const frame=await findChild(proxy,url);
-      const history=proxy?await frame.evaluate(()=>sandstone_frame.context.run_script('history.length')):await frame.evaluate(()=>history.length);
+      const history=await bounded(proxy?frame.evaluate(()=>sandstone_frame.context.run_script('history.length')):frame.evaluate(()=>history.length),'Child history',5000);
       // Browsers expose joint session history; Sandstone stores child histories
       // separately. Compare the effects of pushes and replacements here.
       initialHistory??=history;
@@ -54,6 +65,7 @@ async page=>{
     while(await evaluate(proxy,'frameMessages.length')<5&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,20));
     values.push(await read(proxy,'frameMessages'));
     for(const action of ["child.src='authored'","savedWindow.location.replace('replacement')"]){
+      console.log(JSON.stringify({fixture:'Frame window',proxy,step:action}));
       await evaluate(proxy,action+'; true');
       await findChild(proxy,origin+'/iframe-window/assets/'+(action.includes('authored')?'authored':'replacement'));
       values.push(await read(proxy,'({src:child.src,raw:child.getAttribute("src"),has:child.hasAttribute("src"),location:String(savedWindow.location)})'));
