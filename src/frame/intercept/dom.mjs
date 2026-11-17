@@ -4,11 +4,11 @@ import * as loader from "../loader.mjs";
 import {mutate_styles as mutate_style_sources} from '../rewrite/style.mjs';
 import {mutate_document_base} from '../document_base.mjs';
 import {reconcile_iframes} from '../iframe_lifecycle.mjs';
-import {html_fragment,range_fragment} from '../html_fragments.mjs';
+import {html_fragment,range_fragment,setter_fragment} from '../html_fragments.mjs';
 import {copy_resources,prepare_resources,pause_resources,mark_connected_scripts,mark_fragment_scripts,node_document,active_document,connected_node,walk_resources} from '../resource_nodes.mjs';
 import {detach_media_attribute,observe_media_container} from '../rewrite/media.mjs';
 import {detach_svg_attribute} from '../svg_resources.mjs';
-import {shadow_root} from '../shadow_roots.mjs';
+import {shadow_root,initialize_declarative_root} from '../shadow_roots.mjs';
 import {unwrap_document} from '../document_identity.mjs';
 import {range_sources} from './ranges.mjs';
 import {capture_range_copy,perform_range_copy,clone_range_contents} from '../range_copy.mjs';
@@ -85,6 +85,7 @@ if (globalThis.Node) {
     if(type===2){if(!detach_media_attribute(node))detach_svg_attribute(node);}
     if(active)prepare_resources(node);
     const result=Reflect.apply(target,receiver,args);
+    if(active)walk_resources(result,element=>{if(element instanceof Element)initialize_declarative_root(element);});
     if(!active)pause_resources(node);
     return result;
   }});
@@ -243,6 +244,27 @@ if (globalThis.Node) {
       if(!arguments.length)return shadow.set.call(this);
       value=value===null?'':markup_string(value);
       Reflect.apply(replace_shadow,this,[fragment(context,value)]);
+    }});
+  }
+  const parse_methods=Object.fromEntries(['setHTML','setHTMLUnsafe'].map(key=>[key,Element.prototype[key]]));
+  const upgrade_html=globalThis.CustomElementRegistry?.prototype.upgrade;
+  for(const prototype of [Element.prototype,globalThis.ShadowRoot?.prototype])if(prototype)for(const key of ['setHTML','setHTMLUnsafe']){
+    const method=prototype[key];if(typeof method!=='function')continue;
+    const shadow=prototype===globalThis.ShadowRoot?.prototype;
+    const host=shadow&&Object.getOwnPropertyDescriptor(ShadowRoot.prototype,'host').get;
+    const parse_method=parse_methods[key];
+    prototype[key]=new Proxy(method,{apply(target,receiver,args){
+      const context=shadow?host.call(receiver):(namespace.call(receiver),receiver);
+      const result=setter_fragment(context,parse_method,args),content=result.fragment;
+      if(!result.runScripts)mark_fragment_scripts(content);
+      const container=!shadow&&receiver instanceof HTMLTemplateElement?receiver.content:receiver;
+      if(active_document(node_document(container))){prepare(content,connected_node(container));Document.prototype.adoptNode.call(node_document(container),content);}
+      const inserted=[...content.childNodes];
+      Reflect.apply(container instanceof DocumentFragment?DocumentFragment.prototype.replaceChildren:replace,container,[content]);
+      if(active_document(node_document(container))&&upgrade_html){
+        const registry=container.customElementRegistry===undefined?globalThis.customElements:container.customElementRegistry;
+        if(registry)for(const node of inserted)upgrade_html.call(registry,node);
+      }
     }});
   }
   Element.prototype.insertAdjacentHTML = function(position, value) {

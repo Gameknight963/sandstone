@@ -7,7 +7,7 @@ const get=globalThis.Element?.prototype.getAttribute,remove=globalThis.Element?.
 const text=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'textContent').set;
 let sequence=0;
 
-function parsing_context(context){
+export function parsing_context(context){
   let element=context?.nodeType===1?context:context?.parentElement;
   if(!element||element.namespaceURI===html&&element.localName==='html')return tree.createElement('body',html,[]);
   const convert=node=>tree.createElement(node.localName,node.namespaceURI,[...attributes.call(node)].map(attribute=>({
