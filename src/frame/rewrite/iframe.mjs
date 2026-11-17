@@ -116,7 +116,8 @@ export function rewrite_iframe(iframe_element) {
         local_storage = ctx.localStorage._get_entries();
 
       iframe_url=final_url;
-      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode});
+      const opaque=iframe_element.hasAttribute('sandbox')&&!iframe_element.sandbox.contains('allow-same-origin');
+      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque});
       registered = true;
       if(!current())return;
       loader.child_navigators.set(frame_id, fetch_src);
@@ -133,7 +134,7 @@ export function rewrite_iframe(iframe_element) {
           version: loader.version,
           is_iframe: true,
           message_parent:{token:message_token},
-          message_origin:iframe_element.hasAttribute('sandbox')&&!iframe_element.sandbox.contains('allow-same-origin')?'null':undefined
+          message_origin:opaque?'null':undefined
         });
       }
       catch (error) {

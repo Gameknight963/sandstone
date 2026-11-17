@@ -41,6 +41,8 @@ const iframeWindowTest=await readFile(new URL('iframe-window.playwright.js',impo
 const verifyIframeWindow=runInThisContext(`(${iframeWindowTest})`);
 const windowMessagesTest=await readFile(new URL('window-messages.playwright.js',import.meta.url),'utf8');
 const verifyWindowMessages=runInThisContext(`(${windowMessagesTest})`);
+const broadcastTest=await readFile(new URL('broadcast.playwright.js',import.meta.url),'utf8');
+const verifyBroadcast=runInThisContext(`(${broadcastTest})`);
 const iframeRacesTest=await readFile(new URL('iframe-races.playwright.js',import.meta.url),'utf8');
 const verifyIframeRaces=runInThisContext(`(${iframeRacesTest})`);
 const scriptLabelsTest=await readFile(new URL('script-labels.playwright.js',import.meta.url),'utf8');
@@ -133,6 +135,7 @@ try {
     result.passed.push(...await timed(verifyRootInitialization(page), 'Root initialization fixture'));
     result.passed.push(...await timed(verifyIframeWindow(page), 'Frame window fixture'));
     result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
+    result.passed.push(...await timed(verifyBroadcast(page), 'Broadcast channel fixture'));
     result.passed.push(...await timed(verifyIframeRaces(page), 'Iframe race fixture'));
     result.passed.push(...await timed(verifyScriptLabels(page), 'Script filename fixture'));
     result.passed.push(...await timed(verifyLinks(page), 'Link event fixture'));

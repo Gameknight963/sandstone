@@ -81,6 +81,7 @@ export class CustomCTX {
   get localStorage() {return internal.localStorage}
   get sessionStorage() {return internal.sessionStorage}
   get WebSocket() {return network.WebSocket}
+  get BroadcastChannel(){return polyfill.BroadcastChannel;}
   get indexedDB() {return polyfill.idb.indexedDB}
   get IDBFactory() {return polyfill.idb.IDBFactory}
   get IDBDatabase() {return polyfill.idb.IDBDatabase}

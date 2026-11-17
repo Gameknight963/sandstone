@@ -122,7 +122,7 @@ export async function message_listener(event, target) {
   }
 }
 
-export async function call_procedure(target, procedure, args, {signal} = {}) {
+export async function call_procedure(target, procedure, args, {signal,transfer} = {}) {
   if (globalThis.HTMLIFrameElement && target instanceof globalThis.HTMLIFrameElement) {
     target = unwrap_global_target(target.contentWindow || target);
   }
@@ -143,7 +143,7 @@ export async function call_procedure(target, procedure, args, {signal} = {}) {
       else reject(reply.value);
     }
     signal?.addEventListener('abort',abort,{once:true});
-    try{target.postMessage(msg, {targetOrigin: "*"});}
+    try{target.postMessage(msg, {targetOrigin: "*",transfer});}
     catch(error){cleanup();reject(error);}
   });
 }

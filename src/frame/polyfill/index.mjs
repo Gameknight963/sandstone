@@ -8,3 +8,4 @@ export { fetch, FakeRequest } from "./fetch.mjs";
 export { FakeXMLHttpRequest } from "./xhr.mjs";
 export { FakeEventSource } from "./event_source.mjs";
 export * as idb from "./indexeddb.mjs";
+export {BroadcastChannel} from './broadcast.mjs';

@@ -157,6 +157,7 @@ export class ProxyFrame {
       finally{if(navigation_id===this.navigation_id)this.is_navigating=false;}
     }
     this.url = new URL(url);
+    this.broadcast_origin=this.url.origin==='null'?'opaque:'+this.id+':'+navigation_id:this.url.origin;
     this.iframe.style.backgroundColor = "#222222";
     this.history.save_scroll(navigation.scroll);
     this.on_navigate();
@@ -195,7 +196,7 @@ export class ProxyFrame {
     this.rpc_target.set_target(msg_channel.port1);
     msg_channel.port1.start();
     await rpc.set_host(this.iframe, msg_channel.port2);
-    const beacon_context = network.beacons.register(this.id, {url: this.url.href, top_url: this.url.href});
+    const beacon_context = network.beacons.register(this.id, {url: this.url.href, top_url: this.url.href,broadcast_origin:this.broadcast_origin});
 
     try {
       await this.send_page({
@@ -297,9 +298,12 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   const root = iframes[parent.root_id];
   const saved = saved_child_histories.get(child_id);
   saved_child_histories.delete(child_id);
+  const parent_broadcast=parent.broadcast_origin||parent.origin||parent.url.origin;
+  const opaque_broadcast='opaque:'+child_id;
   const child = {
     id: child_id, parent_id, root_id: root.id, url: new URL(url),
     origin: options.worker ? new URL(url).protocol === "data:" ? "null" : parent.origin || parent.url.origin : new URL(url).origin,
+    broadcast_origin:options.worker ? new URL(url).protocol==='data:'?opaque_broadcast:parent_broadcast : options.opaque||parent_broadcast.startsWith('opaque:')?opaque_broadcast:new URL(url).origin,
     session_storage: parent.session_storage,
     history: saved?.history || new NavigationHistory(),
     async navigate_to(url, form_data, navigation = {}) {
@@ -318,7 +322,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   iframes[child_id] = child;
   child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push"});
   return {
-    beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href,nested:true,cross_site:frame_cross_site(child,iframes)}),
+    beacon_context: network.beacons.register(child_id, {url:child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href, top_url: root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin}),
     cookie_cross_site:frame_cross_site(child,iframes),
     crypto_available: crypto_service.methods,
     local_storage: site_data.local[child.origin],
