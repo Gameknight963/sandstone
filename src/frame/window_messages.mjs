@@ -8,7 +8,7 @@ const data=globalThis.MessageEvent&&Object.getOwnPropertyDescriptor(MessageEvent
 const source=globalThis.MessageEvent&&Object.getOwnPropertyDescriptor(MessageEvent.prototype,'source');
 const origin=globalThis.MessageEvent&&Object.getOwnPropertyDescriptor(MessageEvent.prototype,'origin');
 const selfToken=Array.from(crypto.getRandomValues(new Uint32Array(4)),value=>value.toString(16)).join(':');
-let parentWindow,ownOrigin;
+let parentWindow,topWindow,ownOrigin,ancestorTokens=[];
 const current_origin=()=>ownOrigin??ctx.location.origin;
 
 function transfer_sequence(value){
@@ -55,28 +55,67 @@ export function window_post_message(target,token,args){
 
 export function register_message_peer(target,token,window){peers.set(target,{token,window});}
 export function parent_message_window(){return parentWindow||globalThis.parent;}
+export function top_message_window(){return topWindow||parent_message_window();}
+export function child_message_parent(token){return {token,ancestors:ancestorTokens};}
 export function self_post_message(...args){return window_post_message(globalThis,selfToken,args);}
+
+function ancestor_window(target,token,parent,top){
+  let window;
+  const replacements=Object.create(null);
+  Object.defineProperties(replacements,{
+    postMessage:{value:(...args)=>window_post_message(target,token,args)},
+    window:{get:()=>window},self:{get:()=>window},frames:{get:()=>window},
+    parent:{get:()=>parent?.()||window},top:{get:()=>top?.()||window}
+  });
+  window=create_obj_proxy(replacements,[],target);
+  register_message_peer(target,token,()=>window);
+  return window;
+}
+
+function descendant_peer(target,token){
+  // An ancestor token is passed down only along its own child branch. Bind it
+  // to that actual native Window ancestry before accepting a descendant sender.
+  let branch=target;
+  try{
+    while(branch&&branch!==globalThis){
+      const parent=branch.parent;
+      if(parent===globalThis){
+        if(peers.get(branch)?.token!==token)return;
+        const related=window=>{
+          if(window===globalThis)return ctx.window;
+          return peers.get(window)?.window()||ancestor_window(window,token,()=>related(window.parent),()=>ctx.top);
+        };
+        related(target);
+        return peers.get(target);
+      }
+      if(parent===branch)return;
+      branch=parent;
+    }
+  }catch{}
+}
 
 export function configure_window_messages(options){
   if(!post)return;
   ownOrigin=options.message_origin;
   register_message_peer(globalThis,selfToken,()=>ctx.window);
+  parentWindow=topWindow=undefined;ancestorTokens=[];
   if(!options.message_parent)return;
-  const {token}=options.message_parent;
-  const target=globalThis.parent,replacements=Object.create(null);
-  Object.defineProperties(replacements,{
-    postMessage:{value:(...args)=>window_post_message(target,token,args)},
-    window:{get:()=>parentWindow},self:{get:()=>parentWindow},frames:{get:()=>parentWindow}
-  });
-  parentWindow=create_obj_proxy(replacements,[],target);
-  register_message_peer(target,token,()=>parentWindow);
+  ancestorTokens=[options.message_parent.token,...options.message_parent.ancestors||[]];
+  const targets=[],windows=[];
+  let target=globalThis.parent;
+  for(const token of ancestorTokens){targets.push(target);target=target.parent;}
+  for(let index=targets.length-1;index>=0;index--){
+    windows[index]=ancestor_window(targets[index],ancestorTokens[index],()=>windows[index+1]||windows[index],()=>windows.at(-1));
+  }
+  parentWindow=windows[0];topWindow=windows.at(-1);
 }
 
 if(post){
   // Receive on the native posted-message task. Tokens are shared over the
   // private loader channel and bind the envelope to its actual source Window.
   globalThis.addEventListener('message',event=>{
-    const value=data.get.call(event),peer=peers.get(unwrap_global_target(source.get.call(event)));
+    const value=data.get.call(event),target=unwrap_global_target(source.get.call(event));
+    const peer=peers.get(target)||value?.sandstone_message&&descendant_peer(target,value.sandstone_message);
     if(!peer||!value||typeof value!=='object'||value.sandstone_message!==peer.token)return;
     const expected=current_origin()==='null'?'opaque:'+selfToken:current_origin();
     if(value.target!=='*'&&(value.target==='null'||value.target!==expected)){

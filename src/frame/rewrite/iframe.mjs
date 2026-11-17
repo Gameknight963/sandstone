@@ -8,6 +8,7 @@ import {document_referrer_policy} from '../intercept/document.mjs';
 import {is_download} from '../../download.mjs';
 import {save_response} from '../downloads.mjs';
 import {intercept_iframe_window} from '../iframe_window.mjs';
+import {child_message_parent} from '../window_messages.mjs';
 
 export function rewrite_iframe(iframe_element) {
   const frame_id = Math.random() + "";
@@ -127,7 +128,7 @@ export function rewrite_iframe(iframe_element) {
           default_settings: loader.default_settings,
           version: loader.version,
           is_iframe: true,
-          message_parent:{token:message_token},
+          message_parent:child_message_parent(message_token),
           message_origin:state.message_origin
         });
       }

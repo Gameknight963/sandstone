@@ -5,7 +5,7 @@ import * as parser from "./parser.mjs";
 import * as loader from "./loader.mjs";
 import { modules } from "./polyfill/module.mjs";
 import { create_obj_proxy, global_method_names } from "./global_functions.mjs";
-import {parent_message_window,self_post_message} from './window_messages.mjs';
+import {parent_message_window,top_message_window,self_post_message} from './window_messages.mjs';
 import {create_document_storage} from './storage_sync.mjs';
 const parse_json = JSON.parse;
 
@@ -51,6 +51,7 @@ export class CustomCTX {
   get globalThis() {return internal.globalThis}
 
   get window() {return is_worker ? undefined : this.__proxy__}
+  get frames() {return is_worker ? undefined : this.__proxy__}
   get origin() {return this.location.origin}
   get document() {return is_worker ? undefined : intercept.document.__proxy__}
   get parent() {
@@ -62,7 +63,7 @@ export class CustomCTX {
   get top() {
     if (is_worker) return undefined;
     if (loader.is_iframe)
-      return parent_message_window();
+      return top_message_window();
     return this.__proxy__;
   }
 
