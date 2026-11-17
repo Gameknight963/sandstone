@@ -13,6 +13,7 @@
     "test": "node --test test/*.test.mjs",
     "test:browser": "node test/run-browser.mjs",
     "test:relay": "node test/run-relay.mjs",
+    "test:live": "node test/run-live.mjs",
     "build": "npx webpack",
     "build:prod": "npx webpack --mode=production",
     "dev": "npx webpack --watch",
