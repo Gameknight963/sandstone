@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { runInThisContext } from "node:vm";
 import assert from "node:assert/strict";
+import {createHmac} from 'node:crypto';
 
 const testSource = await readFile(new URL("browser.playwright.js", import.meta.url), "utf8");
 const dexieSource = await readFile(new URL("../node_modules/dexie/dist/dexie.js", import.meta.url), "utf8");
@@ -26,6 +27,8 @@ const xhrTest = await readFile(new URL("xhr.playwright.js", import.meta.url), "u
 const verifyXHR = runInThisContext(`(${xhrTest})`);
 const cssomTest = await readFile(new URL("cssom.playwright.js", import.meta.url), "utf8");
 const verifyCSSOM = runInThisContext(`(${cssomTest})`);
+const cryptoTest = await readFile(new URL('crypto.playwright.js',import.meta.url),'utf8');
+const verifyCrypto = runInThisContext(`(${cryptoTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 async function timed(operation, label) {
@@ -55,6 +58,7 @@ try {
     result.passed.push(...moduleResults);
     result.passed.push(...await timed(verifyResources(page), "Resource fixture"));
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
+    result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
     result.passed.push(...await timed(verifyCSS(page), "CSS fixture"));
     result.passed.push(...await timed(verifyMedia(page), "Media fixture"));
@@ -113,6 +117,14 @@ try {
     const survivedReload = reloaded.existed;
     assert.equal(survivedReload, !storageDenied, "IndexedDB persistence did not match the storage capability");
     assert.equal(reloaded.name, storageDenied ? null : 'alpha');
+    const cryptoReload=JSON.parse(await page.evaluate(()=>main_frame.eval_js(`(async()=>{
+      const done=request=>new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+      let existed=true;const request=indexedDB.open('crypto-fixture');request.onupgradeneeded=()=>existed=false;
+      const database=await done(request);const stored=existed?await done(database.transaction('keys').objectStore('keys').get('saved')):null;database.close();
+      const signature=stored?await crypto.subtle.sign('HMAC',stored.key,new TextEncoder().encode('message')):null;
+      return JSON.stringify({existed,typed:stored?stored.key instanceof CryptoKey:false,extractable:stored?.key.extractable??null,signature:signature?Array.from(new Uint8Array(signature),byte=>byte.toString(16).padStart(2,'0')).join(''):null});
+    })()`)));
+    assert.deepEqual(cryptoReload,storageDenied?{existed:false,typed:false,extractable:null,signature:null}:{existed:true,typed:true,extractable:false,signature:createHmac('sha256','secret').update('message').digest('hex')},'Cryptographic key persistence did not match the storage capability');
     if (target.startsWith("file:")) assert.deepEqual(requests.filter(url => /^https?:/.test(url)), [], "The standalone fixture made a direct HTTP request");
     assert.deepEqual(browserErrors, [], "The browser reported an unexpected runtime error");
     console.log(JSON.stringify({storageDenied, survivedReload, ...result}));

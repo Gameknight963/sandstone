@@ -7,6 +7,7 @@ import { update_ctx, run_script, run_script_safe, ctx, convert_url } from "./con
 import { pending_scripts } from "./rewrite/script.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
 import { flush_import_map } from "./polyfill/module.mjs";
+import {configure_crypto} from './polyfill/crypto.mjs';
 
 export const navigate = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export const local_storage = rpc.create_rpc_wrapper(rpc.host, "local_storage");
@@ -19,6 +20,7 @@ export let worker_probe = false;
 export let url; //the proxied page url
 export let frame_id; //the current frame id
 export let beacon_context;
+export let crypto_available = false;
 export let frame_html; //the html for the frame runtime
 export let version; //the sandstone version
 export let is_loaded = false;
@@ -76,6 +78,8 @@ export function set_url(_url) {
 }
 
 export function set_worker_context(options) {
+  crypto_available = options.crypto_available || false;
+  if (!options.probe) configure_crypto(crypto_available);
   url = options.url;
   base_url = options.url;
   frame_id = options.frame_id;
@@ -93,6 +97,8 @@ function get_frame_html() {
 }
 
 async function load_html(options) {
+  crypto_available = options.crypto_available || false;
+  configure_crypto(crypto_available);
   beacon_context = options.beacon_context;
   version = options.version;
   is_iframe = options.is_iframe || false;

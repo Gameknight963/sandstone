@@ -165,6 +165,7 @@ export class FakeWorker extends EventTarget {
       source, url, sources: Object.fromEntries(sources), probe,
       frame_id: this.#id, token: this.#token, type: this.#options.type,
       credentials: this.#options.credentials, runtime_src: loader.runtime_src,
+      crypto_available: loader.crypto_available,
       origin: new URL(url).protocol === "data:" ? "null" : ctx.location.origin
     };
   }

@@ -3,6 +3,7 @@ import * as util from "../util.mjs";
 import * as network from "./network.mjs";
 import { site_data } from "./site_data.mjs";
 import { indexed_db } from "./indexeddb.mjs";
+import {crypto_service} from './crypto.mjs';
 import { NavigationHistory } from "../history.mjs";
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
@@ -182,6 +183,7 @@ export class ProxyFrame {
         html: html, 
         frame_id: this.id,
         beacon_context,
+        crypto_available: crypto_service.methods,
         error: error,
         settings: settings,
         default_settings: this.default_settings,
@@ -200,6 +202,7 @@ export class ProxyFrame {
         html: html, 
         frame_id: this.id,
         beacon_context,
+        crypto_available: crypto_service.methods,
         error: error_msg,
         settings: settings,
         default_settings: this.default_settings,
@@ -290,6 +293,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   child.history.navigate(url, {mode: saved?.navigation?.history_mode || "push"});
   return {
     beacon_context: network.beacons.register(child_id, {url: child.url.href, top_url: root.url.href}),
+    crypto_available: crypto_service.methods,
     local_storage: site_data.local[child.origin],
     session_storage: child.session_storage[child.origin],
     cookies: site_data.documentCookies(child.origin === "null" ? child.url.href : child.origin + "/"),

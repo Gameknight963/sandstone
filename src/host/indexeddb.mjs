@@ -2,6 +2,7 @@ import { IndexedDBService } from "../idb/service.mjs";
 import { iframes } from "./controller.mjs";
 import { rpc_handlers } from "../rpc.mjs";
 import { site_data } from "./site_data.mjs";
+import {crypto_service} from './crypto.mjs';
 
 let factory;
 let Range;
@@ -23,6 +24,6 @@ function origin(id) {
   return value;
 }
 
-rpc_handlers["idb_command"] = (id, command) => indexed_db.command(id, origin(id), command);
-rpc_handlers["idb_poll"] = id => indexed_db.poll(id, origin(id));
+rpc_handlers["idb_command"] = (id, command) => indexed_db.command(id, origin(id), crypto_service.decode(command));
+rpc_handlers["idb_poll"] = async id => crypto_service.encode(await indexed_db.poll(id, origin(id)));
 rpc_handlers["idb_databases"] = id => indexed_db.databases(origin(id));
