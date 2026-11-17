@@ -4,6 +4,9 @@ import { get_cookie, set_cookie } from "../polyfill/cookie.mjs";
 import * as loader from "../loader.mjs";
 import { rewrite_media } from "../rewrite/media.mjs";
 import {parse_referrer_policy} from '../../referrer.mjs';
+import {configure_document_base,document_base_url} from '../document_base.mjs';
+
+configure_document_base(()=>ctx.location?.href||loader.url,()=>loader.is_loaded?undefined:loader.base_url);
 
 function prepare_media(element) {
   if (element.matches("img, source, video, audio, input, track")) rewrite_media(element);
@@ -50,11 +53,7 @@ class CustomDocument {
   get location() {return ctx.location}
   get URL() {return ctx.location.href}
   get baseURI() {
-    const href = this.__target__.querySelector("base[href]")?.getAttribute("href");
-    if (href !== undefined && href !== null) {
-      try { return new URL(href, ctx.location.href).href; } catch {}
-    }
-    return loader.is_loaded ? ctx.location.href : loader.base_url || ctx.location.href;
+    return document_base_url();
   }
   get readyState() {return loader.ready_state}
   get documentURI() {return ctx.location.href}

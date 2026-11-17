@@ -6,6 +6,7 @@ import * as parser from "./parser.mjs";
 import { update_ctx, run_script, ctx } from "./context.mjs";
 import { pending_scripts } from "./rewrite/script.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
+import {resolve_base_href} from '../base_url.mjs';
 import { flush_import_map } from "./polyfill/module.mjs";
 import {configure_crypto} from './polyfill/crypto.mjs';
 import {default_referrer_policy} from '../referrer.mjs';
@@ -142,10 +143,8 @@ async function load_html(options) {
   let parser = new DOMParser();
   let html = parser.parseFromString(options.html, "text/html");  
   document_referrer_policy(html);
-  const base_href = html.querySelector("base[href]")?.getAttribute("href");
-  if (base_href !== undefined && base_href !== null) {
-    try { base_url = new URL(base_href, options.url).href; } catch {}
-  }
+  const base_href = [...html.querySelectorAll('base[href]')].find(node=>node instanceof HTMLBaseElement)?.getAttribute('href');
+  base_url=resolve_base_href(base_href,options.url);
   
   //rewrite all html elements
   await rewrite.element(html.documentElement);

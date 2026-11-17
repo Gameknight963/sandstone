@@ -21,6 +21,8 @@ const linkTest=await readFile(new URL('links.playwright.js',import.meta.url),'ut
 const verifyLinks=runInThisContext(`(${linkTest})`);
 const hyperlinkTest=await readFile(new URL('hyperlinks.playwright.js',import.meta.url),'utf8');
 const verifyHyperlinks=runInThisContext(`(${hyperlinkTest})`);
+const baseTest=await readFile(new URL('base.playwright.js',import.meta.url),'utf8');
+const verifyBase=runInThisContext(`(${baseTest})`);
 const cssTest = await readFile(new URL("css.playwright.js", import.meta.url), "utf8");
 const verifyCSS = runInThisContext(`(${cssTest})`);
 const mediaTest = await readFile(new URL("media.playwright.js", import.meta.url), "utf8");
@@ -51,9 +53,11 @@ try {
     });
     const page = await context.newPage();
     const browserErrors = [];
+    const expectedBaseWarnings=new Set();
     page.on("pageerror", error => { browserErrors.push(error.message); console.error("Browser error:", error.message); });
     page.on("console", message => {
-      if (message.type() === "error") { browserErrors.push(message.text()); console.error("Browser console:", message.text()); }
+      if(expectedBaseWarnings.has(message.text()))return;
+      if (message.type() === "error") { browserErrors.push(message.text()); console.error("Browser console:",message.text()); }
     });
     const requests = [];
     page.on("request", request => requests.push(request.url()));
@@ -149,6 +153,10 @@ try {
       return JSON.stringify({existed,typed:stored?stored.key instanceof CryptoKey:false,extractable:stored?.key.extractable??null,signature:signature?Array.from(new Uint8Array(signature),byte=>byte.toString(16).padStart(2,'0')).join(''):null});
     })()`)));
     assert.deepEqual(cryptoReload,storageDenied?{existed:false,typed:false,extractable:null,signature:null}:{existed:true,typed:true,extractable:false,signature:createHmac('sha256','secret').update('message').digest('hex')},'Cryptographic key persistence did not match the storage capability');
+    // Chrome can replay invalid-base diagnostics when another frame is loaded.
+    // Exercise those native diagnostics last, with no subsequent navigation.
+    try{result.passed.push(...await timed(verifyBase(page,warnings=>warnings.forEach(message=>expectedBaseWarnings.add(message))), 'Document base fixture'));}
+    finally{expectedBaseWarnings.clear();}
     if (target.startsWith("file:")) assert.deepEqual(requests.filter(url => /^https?:/.test(url)), [], "The standalone fixture made a direct HTTP request");
     assert.deepEqual(browserErrors, [], "The browser reported an unexpected runtime error");
     console.log(JSON.stringify({storageDenied, survivedReload, ...result}));

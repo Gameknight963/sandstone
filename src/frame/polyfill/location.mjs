@@ -1,8 +1,9 @@
 import * as loader from "../loader.mjs";
 import { ctx } from "../context.mjs";
+import {flush_document_base} from '../document_base.mjs';
 
 export let internal = null;
-export function set_location(value) { internal = new URL(value); loader.set_url(internal.href); }
+export function set_location(value) { flush_document_base();internal = new URL(value); loader.set_url(internal.href); }
 
 export class FakeWorkerLocation {
   constructor() {

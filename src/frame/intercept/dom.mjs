@@ -1,7 +1,9 @@
 import * as rewrite from "../rewrite/index.mjs";
 import { proxy_function, get_dom_property } from "../context.mjs";
 import * as loader from "../loader.mjs";
-import {mutate_styles} from '../rewrite/style.mjs';
+import {mutate_styles as mutate_style_sources} from '../rewrite/style.mjs';
+import {mutate_document_base} from '../document_base.mjs';
+const mutate_styles=(nodes,operation)=>mutate_document_base(()=>mutate_style_sources(nodes,operation));
 
 function prepare(node) {
   const pending = rewrite.element(node);
