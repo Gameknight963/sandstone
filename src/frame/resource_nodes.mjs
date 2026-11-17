@@ -6,6 +6,7 @@ import {shadow_root,clonable_shadow} from './shadow_roots.mjs';
 import {clone_script,mark_script_connected,capture_script} from './rewrite/script.mjs';
 import {copy_resource_attributes,capture_resource_attributes} from './resource_attributes.mjs';
 import {clone_style,capture_style} from './rewrite/style.mjs';
+import {import_declarative_host} from './declarative_html.mjs';
 
 const N=globalThis.Node?.prototype,D=globalThis.Document?.prototype;
 const owner=N&&Object.getOwnPropertyDescriptor(N,'ownerDocument').get;
@@ -49,12 +50,15 @@ export function copy_resource_node(source,copy,inactive=false,prime=false,serial
   if(serializing)capture_style(source,true)?.(copy);else clone_style(source,copy);
 }
 export function copy_resources(source,copy,inactive=false,prime=false){
-  if(source===copy)return;
+  if(source===copy)return copy;
+  const root=source instanceof Element&&clonable_shadow(source);
+  if(inactive&&root)copy=import_declarative_host(source,copy,root);
   copy_resource_node(source,copy,inactive,prime);
   const originals=[...children.call(source)],copies=[...children.call(copy)];
   for(let i=0;i<Math.min(originals.length,copies.length);i++)copy_resources(originals[i],copies[i],inactive,prime);
   if(source instanceof Element&&copy instanceof Element){const a=clonable_shadow(source),b=shadow_root(copy);if(a&&b)copy_resources(a,b,inactive,prime);}
   if(source instanceof HTMLTemplateElement&&copy instanceof HTMLTemplateElement)copy_resources(source.content,copy.content,true,prime);
+  return copy;
 }
 
 export function capture_resources(source,shallow=false){

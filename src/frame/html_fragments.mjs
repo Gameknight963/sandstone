@@ -19,6 +19,8 @@ const select=globalThis.Range?.prototype.selectNodeContents;
 const NativeSanitizer=globalThis.Sanitizer,sanitizer_config=NativeSanitizer?.prototype.get;
 const create=globalThis.Document?.prototype.createElement;
 const create_text=globalThis.Document?.prototype.createTextNode;
+const view=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get;
+const template_content=globalThis.HTMLTemplateElement&&Object.getOwnPropertyDescriptor(HTMLTemplateElement.prototype,'content').get;
 let validation_document;
 
 function clone_context(context){
@@ -107,10 +109,21 @@ export function setter_fragment(context,method,args,input=setter_input(method,ar
   const {text,options,runScripts}=input;
   // Coercions can move the receiver, change a form ancestor, or mutate a
   // namespace integration point. Capture the native parsing context afterward.
-  const {inert,copy}=clone_context(context),protected_roots=defer_declarative_roots(context,text),protected_scripting=scripting_html(context,protected_roots.value);
-  Reflect.apply(method,copy,[protected_scripting.value,options]);
-  const container=copy instanceof HTMLTemplateElement?copy.content:copy;
+  const document=owner.call(context),parsing_document=context instanceof HTMLTemplateElement?owner.call(template_content.call(context)):document;
+  const scripting=!!view.call(parsing_document);
+  const {inert,copy}=clone_context(context),protected_roots=defer_declarative_roots(context,text,false,scripting);
+  const protected_scripting=scripting?scripting_html(context,protected_roots.value):{value:protected_roots.value,restore(){}};
+  const raw=scripting&&context.namespaceURI==='http://www.w3.org/1999/xhtml'&&context.localName==='noscript';
+  const parsing=raw?create.call(inert,'style'):copy;
+  Reflect.apply(method,parsing,[protected_scripting.value,options]);
+  const container=parsing instanceof HTMLTemplateElement?parsing.content:parsing;
   protected_scripting?.restore(container);protected_roots?.restore(container);
   const fragment=inert.createDocumentFragment();while(first.call(container))append.call(fragment,first.call(container));
   return {fragment,runScripts};
+}
+
+export function parsed_document(method,receiver,args){
+  const input=setter_input(method,args),protected_roots=defer_declarative_roots(null,input.text,true);
+  const result=Reflect.apply(method,receiver,[protected_roots.value,input.options]);
+  protected_roots.restore(result);return result;
 }

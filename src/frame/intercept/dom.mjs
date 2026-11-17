@@ -4,12 +4,12 @@ import * as loader from "../loader.mjs";
 import {mutate_styles as mutate_style_sources} from '../rewrite/style.mjs';
 import {mutate_document_base} from '../document_base.mjs';
 import {reconcile_iframes} from '../iframe_lifecycle.mjs';
-import {html_fragment,range_fragment,setter_fragment,setter_input} from '../html_fragments.mjs';
+import {html_fragment,range_fragment,setter_fragment,setter_input,parsed_document} from '../html_fragments.mjs';
 import {template_host} from '../template_hosts.mjs';
 import {copy_resources,prepare_resources,pause_resources,mark_connected_scripts,mark_fragment_scripts,node_document,active_document,connected_node,walk_resources} from '../resource_nodes.mjs';
 import {detach_media_attribute,observe_media_container} from '../rewrite/media.mjs';
 import {detach_svg_attribute} from '../svg_resources.mjs';
-import {shadow_root,initialize_declarative_root} from '../shadow_roots.mjs';
+import {shadow_root} from '../shadow_roots.mjs';
 import {unwrap_document} from '../document_identity.mjs';
 import {range_sources} from './ranges.mjs';
 import {capture_range_copy,perform_range_copy,clone_range_contents} from '../range_copy.mjs';
@@ -58,10 +58,10 @@ if (globalThis.Node) {
   const clone=Node.prototype.cloneNode;
   const kind=Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get;
   Node.prototype.cloneNode=new Proxy(clone,{apply(target,receiver,args){
-    const copy=Reflect.apply(target,receiver,args);
+    let copy=Reflect.apply(target,receiver,args);
     // Source attributes may temporarily be absent or contain local blobs.
     // Restore their virtual values without ever assigning remote native URLs.
-    copy_resources(receiver,copy,!active_document(node_document(copy)));
+    copy=copy_resources(receiver,copy,!active_document(node_document(copy)));
     return copy;
   }});
   const import_node=Document.prototype.importNode,adopt_node=Document.prototype.adoptNode;
@@ -70,10 +70,10 @@ if (globalThis.Node) {
   Document.prototype.importNode=new Proxy(import_node,{apply(target,receiver,args){
     const active=!!document_view.call(receiver);
     if(!args.length)return Reflect.apply(target,receiver,args);
-    if(!active){const copy=Reflect.apply(target,receiver,args);copy_resources(args[0],copy,true,true);return copy;}
+    if(!active){const copy=Reflect.apply(target,receiver,args);return copy_resources(args[0],copy,true,true);}
     const inert=receiver.implementation.createHTMLDocument('');
-    const copy=Reflect.apply(target,inert,args);
-    copy_resources(args[0],copy,true,true);prepare_resources(copy);
+    let copy=Reflect.apply(target,inert,args);
+    copy=copy_resources(args[0],copy,true,true);prepare_resources(copy);
     adopt_node.call(receiver,copy);
     if(upgrade&&receiver===document)upgrade.call(registry,copy);
     return copy;
@@ -86,7 +86,6 @@ if (globalThis.Node) {
     if(type===2){if(!detach_media_attribute(node))detach_svg_attribute(node);}
     if(active)prepare_resources(node);
     const result=Reflect.apply(target,receiver,args);
-    if(active)walk_resources(result,element=>{if(element instanceof Element)initialize_declarative_root(element);});
     if(!active)pause_resources(node);
     return result;
   }});
@@ -95,7 +94,7 @@ if (globalThis.Node) {
     DOMParser.prototype.parseFromString=new Proxy(parse,{apply(target,receiver,args){const result=Reflect.apply(target,receiver,args);if(loader.is_loaded)mark_connected_scripts(result);return result;}});
   }
   for(const key of ['parseHTML','parseHTMLUnsafe'])if(typeof Document[key]==='function'){
-    const parse=Document[key];Document[key]=new Proxy(parse,{apply(target,receiver,args){const result=Reflect.apply(target,receiver,args);if(loader.is_loaded)mark_connected_scripts(result);return result;}});
+    const parse=Document[key];Document[key]=new Proxy(parse,{apply(target,receiver,args){const result=parsed_document(target,receiver,args);if(loader.is_loaded)mark_connected_scripts(result);return result;}});
   }
   for (const key of ["appendChild", "insertBefore", "replaceChild"]) intercept(Node.prototype, key, true);
   for (const target of [globalThis.Element?.prototype, globalThis.Document?.prototype, globalThis.DocumentFragment?.prototype]) {

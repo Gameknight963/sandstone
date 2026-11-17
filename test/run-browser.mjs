@@ -27,6 +27,8 @@ const htmlSettersTest=await readFile(new URL('html-setters.playwright.js',import
 const verifyHTMLSetters=runInThisContext(`(${htmlSettersTest})`);
 const htmlPositionTest=await readFile(new URL('html-position.playwright.js',import.meta.url),'utf8');
 const verifyHTMLPosition=runInThisContext(`(${htmlPositionTest})`);
+const parsedDocumentsTest=await readFile(new URL('parsed-documents.playwright.js',import.meta.url),'utf8');
+const verifyParsedDocuments=runInThisContext(`(${parsedDocumentsTest})`);
 const rangeFragmentTest=await readFile(new URL('range-fragments.playwright.js',import.meta.url),'utf8');
 const verifyRangeFragments=runInThisContext(`(${rangeFragmentTest})`);
 const documentTransferTest=await readFile(new URL('document-transfer.playwright.js',import.meta.url),'utf8');
@@ -209,6 +211,7 @@ try {
     result.passed.push(...await timed(verifyHTMLInsertion(page), 'HTML insertion fixture'));
     result.passed.push(...await timed(verifyHTMLSetters(page), 'HTML setters fixture'));
     result.passed.push(...await timed(verifyHTMLPosition(page), 'Positional HTML fixture'));
+    result.passed.push(...await timed(verifyParsedDocuments(page), 'Parsed document fixture'));
     result.passed.push(...await timed(verifyRangeFragments(page), 'Range fragment fixture'));
     result.passed.push(...await timed(verifyDocumentTransfer(page), 'Document transfer fixture'));
     result.passed.push(...await timed(verifyDocumentTraversal(page), 'Document traversal fixture'));
