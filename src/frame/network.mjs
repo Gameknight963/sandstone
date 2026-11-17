@@ -15,6 +15,7 @@ export const rpc_ws_close = rpc.create_rpc_wrapper(rpc.host, "ws_close");
 
 export const known_urls = {};
 export const resource_cache = {};
+export const stylesheet_contexts = {};
 export let requests_allowed = false;
 
 export function enable_network(allowed=true) {
@@ -96,10 +97,11 @@ function restore_response(data) {
   return response;
 }
 
-export function create_blob_url(blob, target_url = null) {
+export function create_blob_url(blob, target_url = null, request_context = null) {
   let url = URL.createObjectURL(blob);
   if (target_url)
     known_urls[url] = target_url;
+  if (request_context) stylesheet_contexts[url] = request_context;
   return url;
 }
 

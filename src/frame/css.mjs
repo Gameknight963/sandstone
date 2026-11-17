@@ -1,3 +1,5 @@
+import {parse_referrer_policy} from '../referrer.mjs';
+
 const whitespace = character => /[\t\n\f\r ]/.test(character || "\0");
 const name_character = character => /[\w\u0080-\uffff-]/.test(character || "\0");
 
@@ -223,7 +225,7 @@ export function edit_css_parts(parts, edits) {
   return output;
 }
 
-export function rewrite_css(source, base, {fetch, createURL, supports, transform}, ancestors = new Set()) {
+export function rewrite_css(source, base, {fetch, createURL, supports, transform, request, importPolicy}, ancestors = new Set()) {
   source = String(source);
   const references = css_resource_references(source);
   if (!references.length) return transform ? transform(source, []) : source;
@@ -241,15 +243,19 @@ export function rewrite_css(source, base, {fetch, createURL, supports, transform
     if (!pending.has(key)) pending.set(key, (async () => {
       try {
         if (reference.imported && ancestors.has(url.href)) return empty_stylesheet;
-        const response = await fetch(url.href);
+        const response = await fetch(url.href, reference.imported && importPolicy ? {...request, referrerPolicy: importPolicy} : request);
         if (!response.ok) return reference.imported ? empty_stylesheet : empty_resource;
         const final = response.url || url.href;
         let blob;
         if (reference.imported) {
           if (ancestors.has(final)) return empty_stylesheet;
           const next = new Set([...ancestors, url.href, final]);
-          const css = await rewrite_css(await response.text(), final, {fetch, createURL, supports}, next);
+          const policy = response.headers.get('referrer-policy');
+          const child_request = {...request, referrer: final, referrerPolicy: parse_referrer_policy(policy)};
+          const child_import_policy = parse_referrer_policy(policy, importPolicy || request?.referrerPolicy);
+          const css = await rewrite_css(await response.text(), final, {fetch, createURL, supports, request: child_request, importPolicy: child_import_policy}, next);
           blob = new Blob([css], {type: "text/css"});
+          return createURL(blob, final, {...child_request, importPolicy: child_import_policy});
         } else blob = await response.blob();
         return createURL(blob, final);
       } catch { return reference.imported ? empty_stylesheet : empty_resource; }

@@ -12,10 +12,30 @@ const held=new Map(),requests=[],closed=[],sockets=new Set(),timers=new Set();
 const authRequests=[];
 const beaconRequests=[],heldBeacons=new Map();
 const contextRequests=[];
+const cssRequests=[];
 const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
 const server=create_relay_server((request,response)=>{
   const url=new URL(request.url,'http://localhost');
   const client=url.searchParams.get('client');
+  if(url.pathname.startsWith('/css-context/')){
+    const policy=url.searchParams.get('policy')||'';
+    const query='?client='+encodeURIComponent(client)+'&policy='+encodeURIComponent(policy);
+    cssRequests.push({client,path:url.pathname,referrer:request.headers.referer||null});
+    if(url.pathname.endsWith('/page')){
+      response.writeHead(200,{'Content-Type':'text/html','Referrer-Policy':'origin'});
+      response.end('<!doctype html><link rel="stylesheet" '+(policy==='link-no-referrer'?'referrerpolicy="no-referrer" ':'')+'href="/css-context/redirect'+query+'"><body><div id="root">root</div><div id="child">child</div>');
+    }else if(url.pathname.endsWith('/redirect')){
+      response.writeHead(302,{Location:'/css-context/root.css'+query});response.end();
+    }else if(url.pathname.endsWith('.css')){
+      const root=url.pathname.endsWith('/root.css');
+      response.writeHead(200,{'Content-Type':'text/css',...(root?(policy&&policy!=='link-no-referrer'?{'Referrer-Policy':policy}:{}):{'Referrer-Policy':'no-referrer'})});
+      const cross='http://localhost:'+request.headers.host.split(':').at(-1)+'/css-context/';
+      response.end(root?'@import "'+cross+'child.css'+query+'"; #root{background-image:url(root.svg'+query+'),url('+cross+'cross.svg'+query+');padding-left:17px}':'#child{background-image:url(child.svg'+query+');padding-left:19px}');
+    }else{
+      response.writeHead(200,{'Content-Type':'image/svg+xml'});response.end('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>');
+    }
+    return;
+  }
   if(url.pathname==='/request-context/source'){
     response.writeHead(200,{'Content-Type':'text/html','Set-Cookie':'ctx_session=secret; HttpOnly; SameSite=Strict; Path=/',...(url.searchParams.has('policy')?{'Referrer-Policy':url.searchParams.get('policy')}:{})});
     const meta=url.searchParams.has('meta')?'<meta name="referrer" content='+JSON.stringify(url.searchParams.get('meta'))+'>':'';
@@ -197,6 +217,20 @@ const contextScript=client=>`(async()=>{
   return JSON.stringify({blocked,policy:document.referrerPolicy});
 })()`;
 const contextValues=client=>contextRequests.filter(value=>value.client===client).map(({client,...value})=>({...value,body:value.body.replace('client='+encodeURIComponent(client)+'&','')}));
+const cssValues=client=>cssRequests.filter(value=>value.client===client&&!value.path.endsWith('/page')).map(({client,...value})=>({...value,referrer:value.referrer?.replace('client='+encodeURIComponent(client)+'&','client=CLIENT&')||null})).sort((a,b)=>a.path.localeCompare(b.path));
+const cssEditScript=client=>`(async()=>{
+  let sheet;const deadline=Date.now()+5000;
+  while(!(sheet=document.querySelector('link[rel="stylesheet"]').sheet)||sheet.cssRules.length<2||getComputedStyle(document.querySelector('#child')).paddingLeft!=='19px'){
+    if(Date.now()>deadline)throw new Error('External stylesheet missing');await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  sheet.cssRules[1].style.backgroundImage='url("/css-context/edited.svg?client='+${JSON.stringify(client)}+'")';
+  sheet.insertRule('#child {border-image-source:url("/css-context/inserted.svg?client='+${JSON.stringify(client)}+'")}',sheet.cssRules.length);
+  return getComputedStyle(document.querySelector('#child')).paddingLeft;
+})()`;
+async function waitCSS(client){
+  const deadline=Date.now()+10000;
+  while(cssValues(client).length<8){if(Date.now()>deadline)throw new Error('CSS requests timed out: '+JSON.stringify(cssValues(client)));await new Promise(resolve=>setTimeout(resolve,10));}
+}
 const formCases=[['same','POST',false,'origin'],['cross','POST',true,'origin'],['private','POST',false,'no-referrer'],['get-cross','GET',true,'origin']];
 const submitFormScript=(client,label,method,target)=>`(()=>{
   const form=document.createElement('form');form.method=${JSON.stringify(method)};form.action=${JSON.stringify(target+'/request-context/echo?client='+client+'&label='+label)};
@@ -237,6 +271,13 @@ try{
   assert.equal(nativeRequestContexts.find(value=>value.label==='meta').referrer,null);
   await nativePage.goto(origin+'/request-context/source?policy=origin&meta=no-referrer&script=meta-native');
   const nativeDeclaredMeta=contextValues('meta-native');assert.equal(nativeDeclaredMeta.length,1);assert.equal(nativeDeclaredMeta[0].referrer,null);
+  const nativeCSS=new Map();
+  for(const policy of ['', 'unsafe-url', 'no-referrer', 'link-no-referrer']){
+    const client='css-native-'+policy;
+    await nativePage.goto(origin+'/css-context/page?client='+client+'&policy='+policy);
+    assert.equal(await nativePage.evaluate(source=>eval(source),cssEditScript(client)),'19px');
+    await waitCSS(client);nativeCSS.set(policy,cssValues(client));
+  }
   await nativeContext.addCookies([{url:origin.replace('127.0.0.1','localhost'),name:'ctx_target_strict',value:'s',sameSite:'Strict'},{url:origin.replace('127.0.0.1','localhost'),name:'ctx_target_lax',value:'l',sameSite:'Lax'}]);
   for(const [label,method,cross,policy] of formCases){
     await nativePage.goto(origin+'/request-context/source?policy='+policy);
@@ -291,6 +332,13 @@ try{
   const metaClient='declared-meta-'+storageDenied;
   await page.evaluate(url=>main_frame.navigate_to(url),origin+'/request-context/source?policy=origin&meta=no-referrer&script='+metaClient);
   assert.deepEqual(contextValues(metaClient),nativeDeclaredMeta,'Declared meta policy was ignored during initial script downloads');
+  for(const policy of ['', 'unsafe-url', 'no-referrer', 'link-no-referrer']){
+    const client='css-'+storageDenied+'-'+policy;
+    await page.evaluate(url=>main_frame.navigate_to(url),origin+'/css-context/page?client='+client+'&policy='+policy);
+    assert.equal(await page.evaluate(source=>main_frame.eval_js(source),cssEditScript(client)),'19px');
+    await waitCSS(client);
+    assert.deepEqual(cssValues(client),nativeCSS.get(policy),'External stylesheet/import/CSSOM referrers differ from native Chromium');
+  }
   await page.evaluate(origin=>{
     for(const cookie of ['ctx_target_strict=s; SameSite=Strict; Path=/','ctx_target_lax=l; SameSite=Lax; Path=/'])sandstone.controller.site_data.setCookie(origin.replace('127.0.0.1','localhost')+'/',cookie);
   },origin);

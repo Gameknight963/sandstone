@@ -32,6 +32,7 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
   const unwrap = value => proxy_to_raw.get(value) || value;
   const sheet_base = sheet => sheet_bases.get(sheet) || network.known_urls[sheet?.href] || sheet?.href || ctx.document.baseURI;
   const declaration_base = declaration => sheet_base(parent.get.call(declaration)?.parentStyleSheet);
+  const sheet_request = sheet => network.stylesheet_contexts[sheet?.href];
   const snapshot = (declaration, prefix) => {
     const result = new Map();
     for (let index = 0; index < length.get.call(declaration); index++) {
@@ -66,7 +67,7 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
     const expected = snapshot(declaration, prefix);
     if (expected.size) {
       const accepted = restore_css(text.get.call(declaration), prepared.markers);
-      const pending = parse_css(accepted, declaration_base(declaration));
+      const pending = parse_css(accepted, declaration_base(declaration), undefined, sheet_request(parent.get.call(declaration)?.parentStyleSheet));
       Promise.resolve(pending).then(css => {
         const resolved = scratch_declaration();
         text.set.call(resolved, css);
@@ -146,12 +147,12 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
     }
     return result;
   }
-  async function hydrate(rules, prepared, base, keyframe = false) {
+  async function hydrate(rules, prepared, base, keyframe = false, request) {
     const originals = declarations(rules);
     const expected = originals.map(declaration => snapshot(declaration, prepared.prefix));
     if (!expected.some(value => value.size)) return;
     const accepted = restore_css(Array.from(rules, rule => rule.cssText).join('\n'), prepared.markers);
-    const resolved = await parse_css(accepted, base);
+    const resolved = await parse_css(accepted, base, undefined, request);
     const sheet = new NativeSheet();
     nativeReplace.call(sheet, keyframe ? `@keyframes sandstone_pending {${resolved}}` : resolved);
     const replacements = declarations(sheet.cssRules);
@@ -170,11 +171,12 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
       const result = Reflect.apply(original, this, [prepared.css, ...args]);
       const rule = this.cssRules[keyframe ? this.cssRules.length - 1 : result];
       const base = sheet_base(this.parentStyleSheet || this);
+      const request = sheet_request(this.parentStyleSheet || this);
       if (rule instanceof CSSImportRule && prepared.markers.size) {
         // Import rule hrefs are read-only. Replace this one only if it still exists;
         // index shifts and deletions during the request must not resurrect it.
         const accepted = restore_css(rule.cssText, prepared.markers);
-        Promise.resolve(parse_css(accepted, base)).then(css => {
+        Promise.resolve(parse_css(accepted, base, undefined, request)).then(css => {
           const index = Array.from(this.cssRules).indexOf(rule);
           if (index < 0) return;
           const resolved = css_references(css).find(reference => reference.imported);
@@ -186,7 +188,7 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
           nativeDelete.call(this, index);
           nativeInsert.call(this, replacement, index);
         }).catch(console.error);
-      } else if (rule) hydrate([rule], prepared, base, keyframe).catch(console.error);
+      } else if (rule) hydrate([rule], prepared, base, keyframe, request).catch(console.error);
       return result;
     };
   }

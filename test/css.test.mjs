@@ -64,6 +64,30 @@ test('CSS import cycles terminate and failed resources cannot fall through to re
   assert.equal(calls.filter(url=>url.endsWith('root.css')).length,0);
 });
 
+test('Imported CSS uses its final URL and delivered referrer policy for its resources', async () => {
+  const requests = [], contexts = [];
+  const parent = {referrer:'https://site.test/css/root.css',referrerPolicy:'origin'};
+  await rewrite_css('@import "child.css"; .root{background:url(root.svg)}', parent.referrer, {
+    request: parent,
+    async fetch(url, options) {
+      requests.push({url, ...options});
+      if (url.endsWith('/child.css')) {
+        const response = new Response('@import "nested.css"; .child{background:url(child.svg)}', {headers:{'Referrer-Policy':'no-referrer'}});
+        Object.defineProperty(response,'url',{value:'https://cdn.test/final/child.css'});
+        return response;
+      }
+      if (url.endsWith('/nested.css')) return new Response('.nested{background:url(nested.svg)}');
+      return new Response('image');
+    },
+    createURL(blob, url, context) { if (context) contexts.push({url,...context}); return 'blob:'+url; }
+  });
+  assert.deepEqual(requests.find(value=>value.url.endsWith('/root.svg')), {url:'https://site.test/css/root.svg',...parent});
+  assert.deepEqual(requests.find(value=>value.url.endsWith('/child.svg')), {url:'https://cdn.test/final/child.svg',referrer:'https://cdn.test/final/child.css',referrerPolicy:'no-referrer'});
+  assert.deepEqual(requests.find(value=>value.url.endsWith('/nested.svg')), {url:'https://cdn.test/final/nested.svg',referrer:'https://cdn.test/final/nested.css',referrerPolicy:'strict-origin-when-cross-origin'});
+  assert.equal(requests.find(value=>value.url.endsWith('/nested.css')).referrerPolicy,'no-referrer');
+  assert.ok(contexts.some(value=>value.url.endsWith('/child.css')&&value.referrerPolicy==='no-referrer'));
+});
+
 test('CSS local references stay synchronous and repeated resource fetches are deduplicated', async () => {
   const local='@namespace svg url(http://www.w3.org/2000/svg); .x {mask:url(#id); background:url("data:image/svg+xml,(a,b)")}';
   assert.equal(rewrite_css(local,'https://site.test/',{fetch(){throw new Error('unexpected');}}),local);
