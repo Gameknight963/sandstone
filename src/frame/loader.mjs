@@ -49,7 +49,10 @@ export function eval_script(script_element, script_text) {
   let script = document.createElement("script");
   script.__rewritten__ = true;
   try {
-    let rewritten_js = parser.rewrite_js(script_text, {url: script_element.__sandstone_url__ || ctx.document.baseURI});
+    let rewritten_js = parser.rewrite_js(script_text, {
+      url: script_element.__sandstone_url__ || ctx.document.baseURI,
+      sourceURL:script_element.__sandstone_url__ || ctx.location.href
+    });
     script.innerHTML = rewritten_js;
     document.body.append(script);
   }

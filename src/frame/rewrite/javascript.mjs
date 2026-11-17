@@ -15,8 +15,12 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false, url, resolve, stripAttributes = false} = {}) {
-  const ast = parse(source, {ranges: true, webcompat: true, module, next: true});
+export function rewrite_source(source, globals, {module = false, url, resolve, stripAttributes = false, sourceURL} = {}) {
+  let named=false;
+  const onComment=sourceURL?(type,text)=>{
+    if(type==='SingleLine'&&/^[#@]\s+sourceURL=\s*\S+\s*$/.test(text))named=true;
+  }:undefined;
+  const ast = parse(source, {ranges: true, webcompat: true, module, next: true, onComment});
   const scopes = new WeakMap();
   const bindings = new WeakSet();
   const names = new Set(globals);
@@ -92,5 +96,9 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
     output += source.slice(offset, start) + replacement;
     offset = end;
   }
-  return output + source.slice(offset);
+  output+=source.slice(offset);
+  // Bundlers may derive their next asset URL from Error.stack. Give relocated
+  // scripts their virtual filename while retaining an author's explicit label.
+  if(sourceURL&&!named)output+='\n//# sourceURL='+String(sourceURL).replace(/[\r\n\u2028\u2029]/g,'')+'\n';
+  return output;
 }

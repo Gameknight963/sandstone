@@ -50,7 +50,7 @@ export function fakeImportScripts(...paths) {
     }
     if (typeof source !== "string") throw new DOMException(`Worker script is unavailable: ${url}`, "NetworkError");
     if (!imported_blobs.has(url)) {
-      const rewritten = parser.rewrite_js(source, {url});
+      const rewritten = parser.rewrite_js(source, {url,sourceURL:url});
       imported_blobs.set(url, network.create_blob_url(new Blob([rewritten], {type: "text/javascript"}), url));
     }
     return imported_blobs.get(url);
@@ -73,7 +73,7 @@ export function initialize_worker(options) {
     }
     globalThis.postMessage = () => {};
     for (const key of ["log", "warn", "error", "info"]) console[key] = () => {};
-    try { run_script(options.source); } catch {}
+    try { run_script(options.source,{sourceURL:options.url}); } catch {}
     setTimeout(() => native_post({sandstone_worker: options.token, type: "probe-done"}), 500);
     return;
   }
@@ -91,7 +91,7 @@ export function initialize_worker(options) {
         const record = modules.record(options.url, "javascript", options.credentials);
         record.source = options.source;
         await modules.import(options.url, options.url);
-      } else run_script(options.source);
+      } else run_script(options.source,{sourceURL:options.url});
       mark_worker_started();
     } catch (error) {
       native_post({sandstone_worker: options.token, type: "error", message: error.message, name: error.name, stack: error.stack});

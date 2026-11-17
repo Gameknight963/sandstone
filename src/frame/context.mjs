@@ -210,9 +210,9 @@ export function run_script_safe(js) {
   }
 }
 
-export function run_script(js) {
+export function run_script(js, options={}) {
   //indirect eval preserves global variables
-  let rewritten_js = parser.rewrite_js(js, {url: loader.url});
+  let rewritten_js = parser.rewrite_js(js, {url: loader.url,...options});
   return eval?.(rewritten_js);
 }
 

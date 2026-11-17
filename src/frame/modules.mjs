@@ -142,7 +142,7 @@ export class ModuleLoader {
     }
     const compile = record => {
       let source = record.type === "json" ? `export default __ctx__.__json_module__(${JSON.stringify(record.source)});` : this.rewrite(record.source, {
-        module: true, url: record.url, stripAttributes: true, resolve: specifier => {
+        module: true, url: record.url, sourceURL:record.url, stripAttributes: true, resolve: specifier => {
           const dependency = this.records.get(this.map.resolve(specifier, record.url));
           return dependency.blob || dependency.nativeKey;
         }
