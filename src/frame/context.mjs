@@ -5,6 +5,7 @@ import * as parser from "./parser.mjs";
 import * as loader from "./loader.mjs";
 import { modules } from "./polyfill/module.mjs";
 import { create_obj_proxy, global_method_names } from "./global_functions.mjs";
+import {html_constructor_names,virtual_html_constructor,notify_dom_access} from './dom_operations.mjs';
 import {parent_message_window,top_message_window,self_post_message} from './window_messages.mjs';
 import {create_document_storage} from './storage_sync.mjs';
 import {virtual_frame_window} from './iframe_window.mjs';
@@ -40,8 +41,8 @@ export function get_handler_keys(obj) {
 
 export class CustomCTX {
   constructor() {
-    ctx_vars.push(...new Set([...get_handler_keys(this),...global_method_names(globalThis)]));
-    this.__proxy__ = create_obj_proxy(this, ctx_vars, globalThis, virtual_frame_window);
+    ctx_vars.push(...new Set([...get_handler_keys(this),...global_method_names(globalThis),...html_constructor_names]));
+    this.__proxy__ = create_obj_proxy(this, ctx_vars, globalThis, (value,key)=>virtual_html_constructor(virtual_frame_window(value,key)));
   }
 
   set location(value) {internal.location.assign(value)}
@@ -122,6 +123,7 @@ export class CustomCTX {
   __get_this__(this_obj) {
     if (this_obj === globalThis)
       return ctx.__proxy__;
+    notify_dom_access(this_obj);
     return this_obj;
   }
 

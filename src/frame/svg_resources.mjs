@@ -127,6 +127,15 @@ export function clone_svg_resource(source,copy,inactive=false){
   }
   return false;
 }
+export function capture_svg_resource(source){
+  const state=states.get(source);if(!state)return;
+  const mirror=clone.call(state.mirror,true);
+  return (copy,inactive=false)=>{
+    if(inactive){for(const slot of slots){const original=attr(mirror,slot.ns,slot.name);if(original)methods.setAttributeNS.call(copy,slot.ns,qualified(original),value(original));else methods.removeAttributeNS.call(copy,slot.ns,slot.name);}}
+    else rewrite_svg_resource(copy,{mirror});
+    return true;
+  };
+}
 export function set_svg_active(element,active){const state=states.get(element);if(!state||state.active===active)return false;refresh(state,active);return true;}
 export function detach_svg_attribute(node){const element=owner(node),state=states.get(element);if(!state||!resource_attr(node))return false;remove_node(state,node,()=>methods.removeAttributeNode.call(element,node));return true;}
 

@@ -11,6 +11,10 @@ function descriptor(prototype,key){while(prototype){const property=Object.getOwn
 const start=NativeRange&&descriptor(NativeRange.prototype,'startContainer').property.get;
 const end=NativeRange&&descriptor(NativeRange.prototype,'endContainer').property.get;
 const common=NativeRange&&descriptor(NativeRange.prototype,'commonAncestorContainer').property.get;
+const startOffset=NativeRange&&descriptor(NativeRange.prototype,'startOffset').property.get;
+const endOffset=NativeRange&&descriptor(NativeRange.prototype,'endOffset').property.get;
+const collapsed=NativeRange&&descriptor(NativeRange.prototype,'collapsed').property.get;
+export function range_points(range){return {common:common.call(range),start:start.call(range),end:end.call(range),startOffset:startOffset.call(range),endOffset:endOffset.call(range),collapsed:collapsed.call(range)};}
 export function range_sources(range){
   // A cross-branch deletion can leave a modified style at either boundary,
   // even when its common ancestor is outside both stylesheets.

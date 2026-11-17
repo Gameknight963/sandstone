@@ -11,6 +11,7 @@ import {detach_svg_attribute} from '../svg_resources.mjs';
 import {shadow_root} from '../shadow_roots.mjs';
 import {unwrap_document} from '../document_identity.mjs';
 import {range_sources} from './ranges.mjs';
+import {capture_range_copy,perform_range_copy,clone_range_contents} from '../range_copy.mjs';
 const mutate_styles=(nodes,operation)=>mutate_document_base(()=>active_document(node_document(nodes[0]))?mutate_style_sources(nodes,operation):operation());
 
 function prepare(node,full=true) {
@@ -120,18 +121,22 @@ if (globalThis.Node) {
     }
   }
   if (globalThis.Range) {
+    const cloneContents=Range.prototype.cloneContents;
+    Range.prototype.cloneContents=new Proxy(cloneContents,{apply(_target,receiver,args){return clone_range_contents(receiver,args);}});
     for (const key of ['deleteContents', 'extractContents', 'insertNode', 'surroundContents']) {
       const original = Range.prototype[key];
       Range.prototype[key] = function(...args) {
         if((key==='insertNode'||key==='surroundContents')&&args.length)args[0]=unwrap_document(args[0]);
         const sources=range_sources(this),ancestor=sources[0];
+        const snapshot=key==='extractContents'?capture_range_copy(this,true):null;
         const active=active_document(node_document(ancestor)),full=active&&connected_node(ancestor);
         const inserting=key==='insertNode'||key==='surroundContents',node=args[0];
         const inserted=inserting?(node?.nodeType===11?[...node.childNodes]:[node]):[];
-        const result=mutate_styles([...sources,...args],()=>{
+        const operation=()=>mutate_styles([...sources,...args],()=>{
           if(inserting&&active)prepare(node,full);
           return Reflect.apply(original,this,args);
         });
+        const result=snapshot?perform_range_copy(snapshot,operation):operation();
         for(const node of inserted)if(node instanceof Node){
           if(active_document(node_document(node))){mark_connected_scripts(node);reconcile_iframes(node);execute(node);}
           else{pause_resources(node);mark_connected_scripts(node);}

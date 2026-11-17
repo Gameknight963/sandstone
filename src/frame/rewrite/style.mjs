@@ -128,3 +128,19 @@ export function clone_style(source,copy){
   const restored=restore_css(parts.join(''),markers,edits=>edit_css_parts(parts,edits),true);
   if(targets.length===restored.length)write(targets,restored);
 }
+export function capture_style(source){
+  const state=states.get(source);
+  if(!state){
+    const current=node_markers.get(source);if(!current?.size)return;
+    const markers=new Map(current);
+    return copy=>data.set.call(copy,restore_css(data.get.call(copy),markers,undefined,true));
+  }
+  const nodes=text_nodes(source),parts=nodes.map(node=>data.get.call(node)),markers=new Map(state.markers),type=getAttribute.call(source,'type');
+  for(const node of nodes)for(const entry of node_markers.get(node)||[])markers.set(...entry);
+  return (copy,partial=false)=>{
+    if(getAttribute.call(copy,'type')==='text/sandstone-pending'){if(type===null)removeAttribute.call(copy,'type');else setAttribute.call(copy,'type',type);}
+    const targets=text_nodes(copy),values=partial?targets.map(node=>data.get.call(node)):parts;
+    const restored=restore_css(values.join(''),markers,edits=>edit_css_parts(values,edits),true);
+    if(targets.length===restored.length)write(targets,restored);
+  };
+}

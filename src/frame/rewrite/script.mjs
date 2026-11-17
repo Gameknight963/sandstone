@@ -13,6 +13,8 @@ const N=globalThis.Node?.prototype,append=N?.appendChild,remove_child=N?.removeC
 const owner=N&&Object.getOwnPropertyDescriptor(N,'ownerDocument').get,connected=N&&Object.getOwnPropertyDescriptor(N,'isConnected').get;
 const data=N&&Object.getOwnPropertyDescriptor(N,'textContent');
 const view=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get;
+const baseURI=N&&Object.getOwnPropertyDescriptor(N,'baseURI').get;
+const src_property=globalThis.HTMLScriptElement&&Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,'src');
 const adopt=globalThis.Document?.prototype.adoptNode;
 let inert;
 function eligible(element,record){
@@ -38,14 +40,25 @@ function prime_inert_script(element){
   adopt.call(original,element);if(parent)insert.call(parent,element,next);
 }
 export function clone_script(source,copy,prime=false){
+  capture_script(source)?.(copy,prime);
+}
+export function capture_script(source){
   if(!globalThis.HTMLScriptElement||!(source instanceof HTMLScriptElement))return;
   const record=records.get(source),started=source.__sandstone_inert__||record&&(record.started||connected.call(source)&&eligible(source,record));
-  if(started)copy.__sandstone_inert__=true;
-  if(!record)return;
-  if(started&&prime)prime_inert_script(copy);
-  const type=started&&!prime?'application/x-sandstone-script':record.type(),src=record.src();
-  if(type===null)remove.call(copy,'type');else set.call(copy,'type',type);
-  if(src===null)remove.call(copy,'src');else set.call(copy,'src',src);
+  const type=record?.type(),src=record?.src();
+  return (copy,prime=false)=>{
+    if(started)copy.__sandstone_inert__=true;
+    if(record){
+      if(started&&prime)prime_inert_script(copy);
+      const restored=started&&!prime?'application/x-sandstone-script':type;
+      if(restored===null)remove.call(copy,'type');else set.call(copy,'type',restored);
+      if(src===null)remove.call(copy,'src');else set.call(copy,'src',src);
+    }
+    Object.defineProperty(copy,'src',{configurable:true,enumerable:src_property.enumerable,
+      get(){const native=src_property.get.call(this);if(this!==copy)return native;const value=get.call(copy,'src');if(value===null)return '';
+        try{return convert_url(value,owner.call(copy)===document?ctx.document.baseURI:baseURI.call(copy));}catch{return value;}},set:src_property.set
+    });
+  };
 }
 
 export function should_load(element) {

@@ -1,11 +1,11 @@
 import * as rewrite from './rewrite/index.mjs';
-import {clone_media,set_media_active} from './rewrite/media.mjs';
-import {clone_svg_resource,is_svg_resource,rewrite_svg_resource,set_svg_active} from './svg_resources.mjs';
+import {clone_media,set_media_active,capture_media} from './rewrite/media.mjs';
+import {clone_svg_resource,is_svg_resource,rewrite_svg_resource,set_svg_active,capture_svg_resource} from './svg_resources.mjs';
 import {rewrite_event_attributes} from './event_attributes.mjs';
-import {shadow_root} from './shadow_roots.mjs';
-import {clone_script,mark_script_connected} from './rewrite/script.mjs';
-import {copy_resource_attributes} from './resource_attributes.mjs';
-import {clone_style} from './rewrite/style.mjs';
+import {shadow_root,clonable_shadow} from './shadow_roots.mjs';
+import {clone_script,mark_script_connected,capture_script} from './rewrite/script.mjs';
+import {copy_resource_attributes,capture_resource_attributes} from './resource_attributes.mjs';
+import {clone_style,capture_style} from './rewrite/style.mjs';
 
 const N=globalThis.Node?.prototype,D=globalThis.Document?.prototype;
 const owner=N&&Object.getOwnPropertyDescriptor(N,'ownerDocument').get;
@@ -40,12 +40,29 @@ export function pause_resources(node){walk_resources(node,element=>{set_media_ac
 export function mark_connected_scripts(node){walk_resources(node,element=>mark_script_connected(element));}
 export function mark_fragment_scripts(node){walk_resources(node,element=>{if(element instanceof HTMLScriptElement)element.__sandstone_inert__=true;},true);}
 export function copy_resources(source,copy,inactive=false,prime=false){
+  if(source===copy)return;
   const restored=clone_media(source,copy,inactive)||clone_svg_resource(source,copy,inactive);
   if(restored&&!inactive)rewrite_event_attributes(copy);
   clone_script(source,copy,prime);
   copy_resource_attributes(source,copy);clone_style(source,copy);
   const originals=[...children.call(source)],copies=[...children.call(copy)];
   for(let i=0;i<Math.min(originals.length,copies.length);i++)copy_resources(originals[i],copies[i],inactive,prime);
-  if(source instanceof Element&&copy instanceof Element){const a=shadow_root(source),b=shadow_root(copy);if(a&&b)copy_resources(a,b,inactive,prime);}
+  if(source instanceof Element&&copy instanceof Element){const a=clonable_shadow(source),b=shadow_root(copy);if(a&&b)copy_resources(a,b,inactive,prime);}
   if(source instanceof HTMLTemplateElement&&copy instanceof HTMLTemplateElement)copy_resources(source.content,copy.content,true,prime);
+}
+
+export function capture_resources(source,shallow=false){
+  const media=capture_media(source),svg=capture_svg_resource(source),script=capture_script(source),attributes=capture_resource_attributes(source),style=capture_style(source);
+  const descendants=shallow?[]:[...children.call(source)].map(node=>capture_resources(node));
+  const root=source instanceof Element&&clonable_shadow(source),shadow=root&&capture_resources(root);
+  const template=source instanceof HTMLTemplateElement&&capture_resources(source.content);
+  return (copy,inactive=false,prime=false)=>{
+    if(copy===source)return;
+    const restored=media?.(copy,inactive)||svg?.(copy,inactive);
+    if(restored&&!inactive)rewrite_event_attributes(copy);
+    script?.(copy,prime);attributes(copy);style?.(copy,shallow);
+    const targets=[...children.call(copy)];for(let i=0;i<Math.min(descendants.length,targets.length);i++)descendants[i](targets[i],inactive,prime);
+    if(shadow&&copy instanceof Element){const root=shadow_root(copy);if(root)shadow(root,inactive,prime);}
+    if(template&&copy instanceof HTMLTemplateElement)template(copy.content,true,prime);
+  };
 }

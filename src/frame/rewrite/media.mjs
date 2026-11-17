@@ -39,6 +39,15 @@ export function clone_media(source,copy,inactive=false){
   else rewrite_media(copy,authored);
   return true;
 }
+export function capture_media(source){
+  const current=prepared.get(source);if(!current)return;
+  const authored=new Map(current);
+  return (copy,inactive=false)=>{
+    if(inactive){for(const [key,value] of authored)if(value===null)remove_attribute.call(copy,key);else set.call(copy,key,value);}
+    else rewrite_media(copy,authored);
+    return true;
+  };
+}
 
 export function detach_media_attribute(node){
   const element=attr_owner.call(node),session=sessions.get(element),key=node.localName;
