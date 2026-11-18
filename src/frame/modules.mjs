@@ -1,4 +1,5 @@
 import { parse } from "meriyah";
+const import_string=String;
 
 function url_like(value, base) {
   try {
@@ -190,9 +191,23 @@ export class ModuleLoader {
   }
 
   async import(specifier, base, options) {
-    const attributes = options?.with || options?.assert || {};
-    if (Object.keys(attributes).some(key => key !== "type")) throw new TypeError("Unsupported module import attribute");
-    const record = await this.prepare_url(specifier, base, options);
+    if(typeof specifier==='symbol')throw new TypeError('Cannot convert a Symbol to a string');
+    specifier=import_string(specifier);
+    const object=value=>value!==null&&(typeof value==='object'||typeof value==='function');
+    if(options!==undefined&&!object(options))throw new TypeError('Invalid module import options');
+    const provided=options?.with,attributes=provided===undefined?(options?.assert??{}):provided,snapshot=Object.create(null);
+    if(!object(attributes))throw new TypeError('Invalid module import attributes');
+    for(const [key,value] of Object.entries(attributes)){
+      if(typeof value!=='string')throw new TypeError('Module import attributes must be strings');
+      Object.defineProperty(snapshot,key,{value,enumerable:true});
+    }
+    if(Object.keys(snapshot).some(key=>key!=='type'))throw new TypeError('Unsupported module import attribute');
+    if(Object.hasOwn(snapshot,'type')&&snapshot.type!=='json')throw new TypeError('Unsupported module import type');
+    const credentials=options?.credentials;
+    // Constructor-created functions use the current document/worker base,
+    // after specifier conversion and option getters have finished running.
+    if(typeof base==='function')base=base();
+    const record = await this.prepare_url(specifier, base, {with:snapshot,credentials});
     return this.execute(record.blob);
   }
 

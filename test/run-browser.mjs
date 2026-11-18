@@ -20,6 +20,8 @@ const historyTest = await readFile(new URL("history.playwright.js", import.meta.
 const verifyHistory = runInThisContext(`(${historyTest})`);
 const javascriptASITest=await readFile(new URL('javascript-asi.playwright.js',import.meta.url),'utf8');
 const verifyJavascriptASI=runInThisContext(`(${javascriptASITest})`);
+const functionConstructorTest=await readFile(new URL('function-constructor.playwright.js',import.meta.url),'utf8');
+const verifyFunctionConstructor=runInThisContext(`(${functionConstructorTest})`);
 const environmentIdentityTest=await readFile(new URL('environment-identity.playwright.js',import.meta.url),'utf8');
 const verifyEnvironmentIdentity=runInThisContext(`(${environmentIdentityTest})`);
 const intersectionObserverTest=await readFile(new URL('intersection-observer.playwright.js',import.meta.url),'utf8');
@@ -261,6 +263,7 @@ try {
     assert.equal(await page.evaluate(()=>main_frame.eval_js('typeof navigation==="undefined"&&typeof window.navigation==="undefined"&&typeof NavigationPrecommitController==="undefined"')),true,'Native Navigation must not target the physical sandbox document');
     const moduleResults = await timed(verifyModules(page), "Module fixture");
     result.passed.push(...await timed(verifyJavascriptASI(page), 'JavaScript ASI fixture'));
+    result.passed.push(...await timed(verifyFunctionConstructor(page), 'Function constructor fixture'));
     result.passed.push(...await timed(verifyEnvironmentIdentity(page), 'Environment identity fixture'));
     result.passed.push(...await timed(verifyIntersectionObserver(page), 'Intersection observer fixture'));
     result.passed.push(...moduleResults);

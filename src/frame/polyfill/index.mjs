@@ -1,6 +1,7 @@
 export { FakeLocation, FakeWorkerLocation } from "./location.mjs";
 export { FakeURL } from "./url.mjs";
 export { FakeHistory } from "./history.mjs";
+export {Function} from './function.mjs';
 export { FakeStorage } from "./storage.mjs";
 export { fakeImportScripts, FakeWorker, mark_worker_started } from "./worker.mjs";
 

@@ -77,6 +77,18 @@ function environment(sources) {
   return {loader, requests, blobs, mappings};
 }
 
+test('Dynamic imports convert specifiers once and snapshot attributes before resolving a live base',async()=>{
+  const env=environment({'https://example.com/options/entry.js':'export default 7;'}),events=[];let base='https://example.com/start/';
+  const specifier={toString(){events.push('specifier');base='https://example.com/converted/';return './entry.js';}};
+  const options={get with(){events.push('with');base='https://example.com/options/';return {};}};
+  await env.loader.import(specifier,()=>{events.push('base');return base;},options);
+  assert.deepEqual(events,['specifier','with','base']);
+  assert.equal(env.requests[0].url,'https://example.com/options/entry.js');
+  for(const options of [null,3,{with:null},{with:3},{with:{type:3}},{with:{unsupported:'value'}}])await assert.rejects(env.loader.import('./invalid.js',base,options),TypeError);
+  await assert.rejects(env.loader.import(Symbol('specifier'),base),TypeError);
+  assert.equal(env.requests.length,1);
+});
+
 test("Module graphs register complete cyclic dependencies and cache module identity", async () => {
   const env = environment({
     "https://example.com/a.js": "import {b} from './b.js'; export const a = () => b;",

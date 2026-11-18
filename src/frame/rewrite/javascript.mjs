@@ -16,7 +16,7 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false, url, resolve, stripAttributes = false, sourceURL} = {}) {
+export function rewrite_source(source, globals, {module = false, url, resolve, stripAttributes = false, sourceURL, contextName='__ctx__',thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false} = {}) {
   let named=false;
   const onComment=sourceURL?(type,text)=>{
     if(type==='SingleLine'&&/^[#@]\s+sourceURL=\s*\S+\s*$/.test(text))named=true;
@@ -61,7 +61,7 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
   }
   build(ast, new Scope(null, "function"));
 
-  function visit(node, parent, key) {
+  function visit(node, parent, key, inWith=false) {
     if (node.type === "BlockStatement" && node.body[0]?.directive === "use asm") return;
     const for_binding=node.type==='VariableDeclaration'&&(parent?.type==='ForStatement'&&key==='init'||['ForInStatement','ForOfStatement'].includes(parent?.type)&&key==='left');
     const default_expression=node.type==='ExportDefaultDeclaration'&&!['FunctionDeclaration','ClassDeclaration'].includes(node.declaration.type);
@@ -73,26 +73,29 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
       edits.push([node.source.start, node.source.end, JSON.stringify(resolve(node.source.value))]);
       if (stripAttributes && node.attributes?.length) edits.push([node.source.end, node.end, ";"]);
     }
-    if (url && node.type === "ImportExpression") {
-      edits.push([node.start, node.start + 6, `__ctx__.__import__.bind(null,${JSON.stringify(url)})`]);
+    if ((url||dynamicImport) && node.type === "ImportExpression") {
+      edits.push([node.start, node.start + 6, `${contextName}.__import__.bind(null,${dynamicImport?'null':JSON.stringify(url)})`]);
     }
     if (url && node.type === "MetaProperty" && node.meta.name === "import") {
-      edits.push([node.start, node.end, `__ctx__.__module_meta__(${JSON.stringify(url)})`]);
+      edits.push([node.start, node.end, `${contextName}.__module_meta__(${JSON.stringify(url)})`]);
       return;
     }
     if (node.type === "ThisExpression") {
-      edits.push([node.start, node.end, "(__get_this__(this))"]);
+      edits.push([node.start, node.end, `(${thisName}(this))`]);
     } else if (node.type === "Identifier" && names.has(node.name) && !bindings.has(node) && !scopes.get(node).has(node.name)) {
       let reference = true;
       if ((parent?.type === "MemberExpression" || parent?.type === "OptionalMemberExpression") && key === "property" && !parent.computed) reference = false;
       if (["Property", "MethodDefinition", "PropertyDefinition", "FieldDefinition"].includes(parent?.type) && key === "key" && !parent.computed) reference = false;
       if (["LabeledStatement", "BreakStatement", "ContinueStatement", "MetaProperty", "ImportSpecifier", "ExportSpecifier"].includes(parent?.type)) reference = false;
+      if(preserveWith&&inWith)reference=false;
+      if(preserveGlobalScope&&node.name!=='eval')reference=false;
+      if(preserveDirectEval&&node.name==='eval'&&parent?.type==='CallExpression'&&key==='callee'&&!parent.optional)reference=false;
       if (reference) {
         const shorthand = parent?.type === "Property" && parent.shorthand && key === "value";
-        edits.push([node.start, node.end, `${shorthand ? node.name + ": " : ""}__ctx__.${node.name}`]);
+        edits.push([node.start, node.end, `${shorthand ? node.name + ": " : ""}${contextName}.${node.name}`]);
       }
     }
-    children(node, (child, childKey) => visit(child, node, childKey));
+    children(node, (child, childKey) => visit(child, node, childKey,inWith||node.type==='WithStatement'&&childKey==='body'));
   }
   visit(ast);
   edits.sort((a, b) => a[0] - b[0]);
@@ -108,4 +111,28 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
   // scripts their virtual filename while retaining an author's explicit label.
   if(sourceURL&&!named)output+='\n//# sourceURL='+String(sourceURL).replace(/[\r\n\u2028\u2029]/g,'')+'\n';
   return output;
+}
+
+// Dynamic constructors supply a native-validated function source. Rewrite the
+// complete parameter/body scope, using private bindings absent from that source.
+export function rewrite_dynamic_function(source,globals,options={}){
+  let expression='('+source+')';
+  const ast=parse(expression,{ranges:true,webcompat:true,next:true}),names=new Set();
+  let needsScope=false,hasDirectEval=false;
+  function collect(node){
+    if(node.type==='Identifier')names.add(node.name);
+    if(node.type==='WithStatement')needsScope=true;
+    if(node.type==='CallExpression'&&node.callee.type==='Identifier'&&node.callee.name==='eval'&&!node.optional){needsScope=true;hasDirectEval=true;}
+    children(node,collect);
+  }
+  collect(ast);
+  const unique=base=>{let name=base,index=0;while(names.has(name)||source.includes(name))name=base+(++index);names.add(name);return name;};
+  const contextName=unique('__sandstone_dynamic_context__'),thisName=unique('__sandstone_dynamic_this__'),scopeName=unique('__sandstone_dynamic_scope__');
+  // "anonymous" is the native display name, without a lexical name binding.
+  // Keep the expression anonymous and restore its native name after compiling.
+  const id=ast.body[0].expression.id;
+  if(id)expression=expression.slice(0,id.start)+expression.slice(id.end);
+  // Sloppy direct eval can introduce bindings that no static scope pass sees.
+  // Let the native environment resolve those names before its global fallback.
+  return {source:rewrite_source(expression,globals,{...options,contextName,thisName,dynamicImport:true,preserveWith:true,preserveDirectEval:true,preserveGlobalScope:hasDirectEval}),contextName,thisName,scopeName,needsScope};
 }

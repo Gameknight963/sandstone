@@ -1,6 +1,21 @@
 // Binding a global method must not write .call/.apply onto the original function:
 // window.addEventListener can share that function with EventTarget.prototype.
 const native_targets=new WeakMap();
+const scope_targets=new WeakMap();
+// Keep template-engine locals and intrinsic direct eval in native lexical
+// scopes, with virtual globals as their outer fallback environment.
+export function create_global_scope(context,names){
+  const keys=new Set(names.filter(name=>name!=='eval'));
+  const scope=new Proxy(Object.create(null),{
+    has:(_,key)=>keys.has(key),
+    get:(_,key)=>key===Symbol.unscopables?undefined:Reflect.get(context,key,context),
+    set:(_,key,value)=>Reflect.set(context,key,value,context)
+  });
+  native_targets.set(scope,unwrap_global_target(context));
+  scope_targets.set(scope,context);
+  return scope;
+}
+export function scope_global(value){return scope_targets.get(value);}
 // Bare globals must use the same receiver adapter as window.method. Frameworks
 // commonly save a native method with .bind(globalThis), whose virtual Window
 // does not satisfy the browser's native receiver checks.
@@ -18,7 +33,7 @@ export function unwrap_global_target(value){return native_targets.get(value)||va
 export function bind_global_function(target, method, virtual_target) {
   return new Proxy(method, {
     apply(method, receiver, args) {
-      if (receiver === virtual_target || receiver === undefined || receiver === null) receiver = target;
+      if (receiver === virtual_target || receiver === undefined || receiver === null || native_targets.get(receiver)===target) receiver = target;
       return Reflect.apply(method, receiver, args);
     }
   });

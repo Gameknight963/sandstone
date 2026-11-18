@@ -4,7 +4,7 @@ import * as intercept from "./intercept/index.mjs";
 import * as parser from "./parser.mjs";
 import * as loader from "./loader.mjs";
 import { modules } from "./polyfill/module.mjs";
-import { create_obj_proxy, global_method_names } from "./global_functions.mjs";
+import { create_obj_proxy, global_method_names,scope_global } from "./global_functions.mjs";
 import {html_constructor_names,virtual_html_constructor,notify_dom_access} from './dom_operations.mjs';
 import {parent_message_window,top_message_window,self_post_message} from './window_messages.mjs';
 import {create_document_storage} from './storage_sync.mjs';
@@ -78,6 +78,8 @@ export class CustomCTX {
   fetch() {return polyfill.fetch(...arguments)}
   postMessage(){return is_worker?globalThis.postMessage(...arguments):self_post_message(...arguments)}
   get Request() {return polyfill.FakeRequest}
+  get Function(){return Object.hasOwn(internal,'Function')?internal.Function:polyfill.Function;}
+  set Function(value){internal.Function=value;}
   get URL() {return polyfill.FakeURL}
   get Worker() {return polyfill.FakeWorker}
   get importScripts() {return is_worker ? polyfill.fakeImportScripts : undefined}
@@ -122,12 +124,16 @@ export class CustomCTX {
     return run_script(String(js));
   }
 
-  __import__(referrer, specifier, options) { return modules.import(specifier, referrer, options); }
+  __import__(referrer, specifier, options) {
+    const base=referrer===null?()=>is_worker?ctx.location.href:ctx.document.baseURI:referrer;
+    return modules.import(specifier,base,options);
+  }
   __module_meta__(url) { return modules.meta(url); }
   __json_module__(source) { return parse_json(source); }
   __worker_module_started__() { polyfill.mark_worker_started(); }
 
   __get_this__(this_obj) {
+    const scoped=scope_global(this_obj);if(scoped)return scoped;
     if (this_obj === globalThis)
       return ctx.__proxy__;
     notify_dom_access(this_obj);
