@@ -3,6 +3,8 @@ import {finish_event_listener} from './link_events.mjs';
 import {is_inert_node} from './dom_operations.mjs';
 import {listen_runtime} from './runtime_events.mjs';
 import * as loader from './loader.mjs';
+import {event_handler,event_handler_value,event_target} from './event_identity.mjs';
+import {with_event_scope} from '../event_scope.mjs';
 
 const states=new WeakMap(),supported=new Set(),nativeHandlers=new WeakMap();
 let assigning=0;
@@ -20,14 +22,16 @@ export function rewrite_event_attributes(element){
     let compiled;
     const handler=function(...args){
       if(loader.site_settings.allow_js===false)return;
-      const parameters=name==='onerror'&&(element instanceof HTMLBodyElement||element instanceof HTMLFrameSetElement)?'event,source,lineno,colno,error':'event';
-      compiled ||= run_script('(function('+parameters+'){\n'+source+'\n})');
-      try{
-        const result=compiled.apply(this,args);
-        // Virtual default actions mask their own physical cancellation.
-        if((name==='onclick'||name==='onsubmit')&&result===false)args[0]?.preventDefault();
-        return result;
-      }finally{finish_event_listener(args[0]);}
+      return with_event_scope(args[0],true,()=>{
+        const parameters=name==='onerror'&&(element instanceof HTMLBodyElement||element instanceof HTMLFrameSetElement)?'event,source,lineno,colno,error':'event';
+        compiled ||= run_script('(function('+parameters+'){\n'+source+'\n})');
+        try{
+          const result=compiled.apply(event_target(this),args);
+          // Virtual default actions mask their own physical cancellation.
+          if((name==='onclick'||name==='onsubmit')&&result===false)args[0]?.preventDefault();
+          return result;
+        }finally{finish_event_listener(args[0]);}
+      });
     };
     assigning++;
     try{
@@ -55,9 +59,9 @@ if(globalThis.Element){
         keys.add(key);supported.add(key);
         let setters=nativeHandlers.get(owner);if(!setters){setters=new Map();nativeHandlers.set(owner,setters);}setters.set(key,property.set);
         Object.defineProperty(owner,key,{...property,
-          get(){if(!assigning&&this instanceof Element)rewrite_event_attributes(this);return property.get.call(this);},
+          get(){if(!assigning&&this instanceof Element)rewrite_event_attributes(this);return event_handler_value(property.get.call(this));},
           set(value){
-            const result=property.set.call(this,value);
+            const result=property.set.call(this,event_handler(value));
             if(!assigning&&this instanceof Element)entries(this).set(key,{source:getAttribute.call(this,key),handler:value});
             return result;
           }

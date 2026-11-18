@@ -4,6 +4,9 @@ import {FakeStorage,install_storage_prototype,replace_storage_entries} from './p
 import {StorageReplica} from '../storage_replica.mjs';
 import {register_document} from './document_identity.mjs';
 import {configure_style_mutations} from './rewrite/style.mjs';
+import {configure_document_events} from './event_identity.mjs';
+import {configure_link_events} from './link_events.mjs';
+import {configure_form_submissions} from './rewrite/form.mjs';
 
 let active;
 const storage_prototype=globalThis.Storage?.prototype;
@@ -46,6 +49,9 @@ export function create_document_storage(options,url,window){
   try{if(parent!==globalThis)group=parent.sandstone_frame?.storage_sync.storage_group(origin);}catch{}
   group??={token,sequence:0,documents:new Map(),areas:{},storage_brand:new WeakMap()};
   register_document(group,window().document);
+  configure_document_events(group,window());
+  configure_link_events();
+  configure_form_submissions();
   configure_style_mutations();
   const document=active={token,window,origin,group,send:(kind,change)=>rpc.call_procedure(rpc.host,kind+'_storage',[id,undefined,change]).catch(console.error)};
   group.documents.set(token,document);

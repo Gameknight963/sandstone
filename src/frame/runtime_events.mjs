@@ -1,3 +1,5 @@
+import {with_event_scope} from '../event_scope.mjs';
+
 const native_events={add:EventTarget.prototype.addEventListener,remove:EventTarget.prototype.removeEventListener};
 const apply=Reflect.apply;
 const stop_message=Event.prototype.stopImmediatePropagation;
@@ -19,8 +21,11 @@ export function listen_runtime(target,type,listener,options){
   let entries=targets.get(target);if(!entries){entries=[];targets.set(target,entries);}
   const capturing=capture(options);
   if(entries.some(entry=>entry.type===type&&entry.listener===listener&&entry.capture===capturing))return;
-  const entry={type,listener,options,capture:capturing,callback:listener,active:true};
-  if(options?.once)entry.callback=function(event){forget(target,entry);return listener.call(this,event);};
+  const entry={type,listener,options,capture:capturing,active:true};
+  entry.callback=function(event){
+    if(options?.once)forget(target,entry);
+    return with_event_scope(event,false,()=>typeof listener==='function'?listener.call(this,event):listener.handleEvent(event));
+  };
   add(target,type,entry.callback,options);
   if(options?.signal?.aborted)return;
   entries.push(entry);

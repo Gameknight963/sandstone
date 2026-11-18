@@ -79,6 +79,12 @@ class CustomDocument {
   get cookie() {return Reflect.get(this.__target__,'cookie',this.__proxy__)}
   set cookie(value) {Reflect.set(this.__target__,'cookie',value,this.__proxy__)}
   get body() {return this.__target__.body}
+  get addEventListener(){return this.__target__.addEventListener;}
+  set addEventListener(value){this.__target__.addEventListener=value;}
+  get removeEventListener(){return this.__target__.removeEventListener;}
+  set removeEventListener(value){this.__target__.removeEventListener=value;}
+  get dispatchEvent(){return this.__target__.dispatchEvent;}
+  set dispatchEvent(value){this.__target__.dispatchEvent=value;}
   get createRange(){return Object.hasOwn(internal,'createRange')?internal.createRange:ranges.createRange;}
   set createRange(value){internal.createRange=value;}
   get getSelection(){return Object.hasOwn(internal,'getSelection')?internal.getSelection:ranges.getSelection;}
@@ -104,4 +110,10 @@ class CustomDocument {
 
 }
 
+if(globalThis.Document)for(const [name,property] of Object.entries(Object.getOwnPropertyDescriptors(Document.prototype))){
+  if(name.startsWith('on')&&property.get&&property.set)Object.defineProperty(CustomDocument.prototype,name,{
+    configurable:true,get(){return Reflect.get(this.__target__,name,this.__proxy__);},
+    set(value){Reflect.set(this.__target__,name,value,this.__proxy__);}
+  });
+}
 export const custom_document = new CustomDocument();

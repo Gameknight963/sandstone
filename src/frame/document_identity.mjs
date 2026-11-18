@@ -17,6 +17,7 @@ export function document_states(name){
   return {
     get(key){for(const registry of registries){const values=map(registry);if(values.has(key))return values.get(key);}},
     has(key){for(const registry of registries)if(map(registry).has(key))return true;return false;},
+    delete(key){let removed=false;for(const registry of registries)removed=map(registry).delete(key)||removed;return removed;},
     set(key,value){map(active).set(key,value);}
   };
 }

@@ -1,6 +1,7 @@
 import { ctx, convert_url } from "../context.mjs";
 import { serialize_request } from "../polyfill/request.mjs";
 import {navigate_target,navigation_target} from '../navigation_targets.mjs';
+import {document_states} from '../document_identity.mjs';
 
 const form_prototype = globalThis.HTMLFormElement?.prototype;
 const method_descriptor = form_prototype && Object.getOwnPropertyDescriptor(form_prototype, "method");
@@ -14,13 +15,20 @@ const input_form=globalThis.HTMLInputElement&&Object.getOwnPropertyDescriptor(HT
 const button_value=globalThis.HTMLButtonElement&&Object.getOwnPropertyDescriptor(HTMLButtonElement.prototype,'value').get;
 const input_value=globalThis.HTMLInputElement&&Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').get;
 const close_dialog=globalThis.HTMLDialogElement?.prototype.close;
+const submitters=document_states('form-submitters');
+export function configure_form_submissions(){submitters.set(globalThis.document,submit);}
+function submitter_property(submitter,button,input){
+  try{return button.call(submitter);}catch{return input.call(submitter);}
+}
 
 function method_for(form, submitter) {
   return attribute(submitter, "formmethod") !== null ? submitter.formMethod || "get" : method_descriptor.get.call(form);
 }
 
 export async function submit(form, submitter) {
-  if(!connected.call(form)||owner.call(form)!==document||constructing.has(form))return;
+  const document_owner=owner.call(form);
+  if(document_owner!==document)return submitters.get(document_owner)?.(form,submitter);
+  if(!connected.call(form)||constructing.has(form))return;
   const action = attribute(submitter, "formaction") ?? attribute(form, "action") ?? ctx.location.href;
   const method = method_for(form, submitter);
   const target=navigation_target(form,attribute(submitter,'formtarget'));
@@ -28,12 +36,12 @@ export async function submit(form, submitter) {
   if (method === "dialog") {
     const dialog=Element.prototype.closest.call(form,'dialog');
     if(dialog){
-      close_dialog.call(dialog,submitter?(submitter instanceof HTMLButtonElement?button_value:input_value).call(submitter):'');
+      close_dialog.call(dialog,submitter?submitter_property(submitter,button_value,input_value):'');
     }
     return;
   }
   const url = new URL(convert_url(action || ctx.location.href, ctx.document.baseURI));
-  const associated=submitter&&(submitter instanceof HTMLButtonElement?button_form:input_form).call(submitter)===form;
+  const associated=submitter&&submitter_property(submitter,button_form,input_form)===form;
   let data;constructing.add(form);
   try{data=associated?new FormData(form,submitter):new FormData(form);}finally{constructing.delete(form);}
   if(!connected.call(form)||owner.call(form)!==document)return;
@@ -62,7 +70,7 @@ if (form_prototype) {
   // native behavior and intercept the prototype API instead of assigning an own
   // submit property, which HTMLFormElement's named-property setter can reject.
   form_prototype.submit = function submit_form() {
-    if (!(this instanceof HTMLFormElement)) throw new TypeError("Invalid form receiver");
+    method_descriptor.get.call(this);
     submit(this).catch(console.error);
   };
 }
