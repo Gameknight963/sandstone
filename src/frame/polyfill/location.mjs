@@ -32,7 +32,7 @@ export class FakeLocation {
     }
   }
   #navigate(value, mode) {
-    const next = new URL(value, internal);
+    const next = new URL(value, loader.inherited_base_url ? ctx.document.baseURI : internal);
     const same_base = next.origin === internal.origin && next.pathname === internal.pathname && next.search === internal.search;
     if (same_base && (next.hash !== internal.hash || next.hash || String(value).startsWith("#"))) {
       ctx.history._hash(next.href, mode === "replace");

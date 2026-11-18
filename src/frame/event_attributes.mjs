@@ -2,6 +2,7 @@ import {run_script} from './context.mjs';
 import {finish_event_listener} from './link_events.mjs';
 import {is_inert_node} from './dom_operations.mjs';
 import {listen_runtime} from './runtime_events.mjs';
+import * as loader from './loader.mjs';
 
 const states=new WeakMap(),supported=new Set(),nativeHandlers=new WeakMap();
 let assigning=0;
@@ -18,6 +19,7 @@ export function rewrite_event_attributes(element){
     if(handlers.get(name)?.source===source)continue;
     let compiled;
     const handler=function(...args){
+      if(loader.site_settings.allow_js===false)return;
       const parameters=name==='onerror'&&(element instanceof HTMLBodyElement||element instanceof HTMLFrameSetElement)?'event,source,lineno,colno,error':'event';
       compiled ||= run_script('(function('+parameters+'){\n'+source+'\n})');
       try{

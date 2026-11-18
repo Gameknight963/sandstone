@@ -10,7 +10,7 @@ import * as ranges from './ranges.mjs';
 import {input_ready_state} from '../document_input.mjs';
 import {is_svg_script,rewrite_svg_script} from '../svg_scripts.mjs';
 
-configure_document_base(()=>ctx.location?.href||loader.url,()=>loader.is_loaded?undefined:loader.base_url);
+configure_document_base(()=>loader.inherited_base_url||ctx.location?.href||loader.url,()=>loader.is_loaded?undefined:loader.base_url);
 
 if(globalThis.document){
   const view=Object.getOwnPropertyDescriptor(Document.prototype,'defaultView');

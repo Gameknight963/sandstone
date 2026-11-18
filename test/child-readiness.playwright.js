@@ -19,20 +19,18 @@ async page=>{
   });
   const root=page.frames().find(frame=>frame.parentFrame()===page.mainFrame());
   await root.evaluate(()=>{
-    const property=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'src'),rpc=sandstone_frame.rpc,post=rpc.host.postMessage;
-    globalThis.childGate={enabled:false,held:[],registered:[],restore(){Object.defineProperty(HTMLIFrameElement.prototype,'src',property);rpc.host.postMessage=post;}};
-    Object.defineProperty(HTMLIFrameElement.prototype,'src',{...property,set(value){
-      if(childGate.enabled&&this.id==='readiness-child'){
-        if(value==='')return; // Retain the previous runtime while navigation is held.
-        if(value.startsWith('blob:')){
-          childGate.held.push({url:value,release:()=>property.set.call(this,value)});
-          // Reproduce a load notification left over from a previous document.
-          this.dispatchEvent(new Event('load'));
-          return;
-        }
-      }
-      property.set.call(this,value);
-    }});
+    const create=URL.createObjectURL,rpc=sandstone_frame.rpc,post=rpc.host.postMessage;
+    globalThis.childGate={enabled:false,held:[],registered:[],restore(){URL.createObjectURL=create;rpc.host.postMessage=post;}};
+    URL.createObjectURL=function(blob){
+      if(!childGate.enabled||blob.type!=='text/html')return create.call(this,blob);
+      // A physical document may load before its runtime is ready. Gate the
+      // runtime itself, independently of how the iframe source is installed.
+      const token=crypto.randomUUID();
+      const source='<script>addEventListener("message",async event=>{if(event.data?.token!=='+JSON.stringify(token)+')return;const html=await event.data.blob.text();document.open();document.write(html);document.close();});<\/script>';
+      const url=create.call(this,new Blob([source],{type:'text/html'}));
+      childGate.held.push({url,release:()=>globalThis[0].postMessage({token,blob},'*')});
+      return url;
+    };
     rpc.host.postMessage=function(message,...args){
       if(message.procedure==='frame_register')childGate.registered.push(message.arguments[2]);
       return Reflect.apply(post,this,[message,...args]);

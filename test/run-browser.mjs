@@ -96,6 +96,8 @@ const cryptoTest = await readFile(new URL('crypto.playwright.js',import.meta.url
 const verifyCrypto = runInThisContext(`(${cryptoTest})`);
 const iframeWindowTest=await readFile(new URL('iframe-window.playwright.js',import.meta.url),'utf8');
 const verifyIframeWindow=runInThisContext(`(${iframeWindowTest})`);
+const srcdocTest=await readFile(new URL('srcdoc.playwright.js',import.meta.url),'utf8');
+const verifySrcdoc=runInThisContext(`(${srcdocTest})`);
 const windowMessagesTest=await readFile(new URL('window-messages.playwright.js',import.meta.url),'utf8');
 const verifyWindowMessages=runInThisContext(`(${windowMessagesTest})`);
 const ancestorWindowsTest=await readFile(new URL('ancestor-windows.playwright.js',import.meta.url),'utf8');
@@ -242,6 +244,7 @@ try {
     result.passed.push(...await timed(verifyChildReadiness(page), 'Child readiness fixture'));
     result.passed.push(...await timed(verifyRootInitialization(page), 'Root initialization fixture'));
     result.passed.push(...await timed(verifyIframeWindow(page), 'Frame window fixture'));
+    result.passed.push(...await timed(verifySrcdoc(page), 'Inline frame fixture'));
     result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
     result.passed.push(...await timed(verifyAncestorWindows(page), 'Ancestor windows fixture'));
     result.passed.push(...await timed(verifyBroadcast(page), 'Broadcast channel fixture'));

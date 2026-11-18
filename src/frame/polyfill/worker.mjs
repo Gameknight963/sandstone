@@ -149,7 +149,7 @@ export class FakeWorker extends EventTarget {
     if (!["classic", "module"].includes(this.#options.type)) throw new TypeError("Invalid worker type");
     if (!["omit", "same-origin", "include"].includes(this.#options.credentials)) throw new TypeError("Invalid worker credentials");
     const target = new URL(this.#url);
-    if (/^https?:$/.test(target.protocol) && target.origin !== ctx.location.origin) throw new DOMException("Worker must be same-origin", "SecurityError");
+    if (/^https?:$/.test(target.protocol) && target.origin !== ctx.origin) throw new DOMException("Worker must be same-origin", "SecurityError");
     const channel = new MessageChannel();
     this.#port = channel.port1;
     this.#receiver = channel.port2;
@@ -171,7 +171,7 @@ export class FakeWorker extends EventTarget {
       credentials: this.#options.credentials, runtime_src: loader.runtime_src,
       crypto_available: loader.crypto_available,
       referrer_policy: loader.referrer_policy,
-      origin: new URL(url).protocol === "data:" ? "null" : ctx.location.origin
+      origin: new URL(url).protocol === "data:" ? "null" : ctx.origin
     };
   }
 

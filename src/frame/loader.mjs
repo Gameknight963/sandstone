@@ -35,14 +35,19 @@ export let is_loaded = false;
 export let ready_state = "loading";
 export function set_ready_state(value){ready_state=value;}
 export let base_url;
+// Inline frame documents have an about: URL but inherit a frozen creator base
+// and cookie URL. Their origin is distinct from Location.origin.
+export let inherited_base_url, document_origin, cookie_url;
 export let is_iframe = false;
 export let cookie_cross_site = false;
 export let site_settings = {};
 export let default_settings = {};
 export const child_navigators = new Map();
 export const child_names = new Map();
+export const child_urls = new Map();
 rpc.rpc_handlers["child_navigate"] = (id, url, form_data, navigation) => child_navigators.get(id)?.(url, form_data, navigation);
 rpc.rpc_handlers.child_window_name=(id,value)=>child_names.get(id)?.(value);
+rpc.rpc_handlers.child_url=(id,value)=>child_urls.get(id)?.(value);
 
 export function eval_script(script_element, script_text,{run=callback=>run_document_script(script_element,callback)}={}) {
   const previous_script=get_current_script();
@@ -109,7 +114,10 @@ async function load_html(options) {
   network.enable_network();
 
   set_url(options.url);
-  base_url = options.url;
+  inherited_base_url = options.inherited_base_url;
+  document_origin = options.document_origin;
+  cookie_url = options.cookie_url;
+  base_url = inherited_base_url || options.url;
   set_frame_id(options.frame_id);
   if(options.window_name!==undefined)globalThis.name=options.window_name;
   get_frame_html();

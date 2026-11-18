@@ -466,14 +466,18 @@ export class IDBFactory {
       version = Math.trunc(Number(version));
       if (!(version > 0 && version <= Number.MAX_SAFE_INTEGER)) throw new TypeError("Invalid database version");
     }
+    name=String(name);
+    this._transport.validate?.();
     const request = new IDBOpenDBRequest(this);
-    this._send({op: "open", request: request._id, database: "idb:" + ++this._sequence, transaction: "idb:" + ++this._sequence, name: String(name), version});
+    this._send({op: "open", request: request._id, database: "idb:" + ++this._sequence, transaction: "idb:" + ++this._sequence, name, version});
     return request;
   }
   deleteDatabase(name) {
     if (!arguments.length) throw new TypeError("A database name is required");
+    name=String(name);
+    this._transport.validate?.();
     const request = new IDBOpenDBRequest(this);
-    this._send({op: "delete", request: request._id, name: String(name)});
+    this._send({op: "delete", request: request._id, name});
     return request;
   }
   databases() { return this._transport.databases(); }

@@ -35,7 +35,7 @@ export function virtual_frame_window(value,key){
     for(let index=0;index<globalThis.length;index++){
       const target=globalThis[index],element=elements.find(element=>descriptor.get.call(element)===target),state=element&&frames.get(element);
       if(state?.name()!==key)continue;
-      const same=!state.opaque()&&(!state.url()||new URL(state.url()).origin===ctx.location.origin);
+      const same=!state.opaque()&&(!state.url()||state.origin()===ctx.origin);
       if(same||element.name===key)return element.contentWindow;
     }
     if(elements.some(element=>frames.has(element)&&descriptor.get.call(element)===value))return undefined;
@@ -65,12 +65,12 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
       // the virtual document, including the creator-origin initial blank page.
       if(state.opaque())throw new DOMException('Blocked access to a sandboxed frame','SecurityError');
       if(!url)return 'about:blank';
-      if(new URL(url).origin!==ctx.location.origin)throw new DOMException('Blocked access to a cross-origin frame','SecurityError');
+      if(state.origin()!==ctx.origin)throw new DOMException('Blocked access to a cross-origin frame','SecurityError');
       return url;
     };
     const navigate=(value,mode)=>{
       const url=new URL(`${value}`,ctx.document.baseURI);
-      if(url.protocol==='http:'||url.protocol==='https:')state.navigate(url.href,mode)?.catch(console.error);
+      if(url.protocol==='http:'||url.protocol==='https:'||url.protocol==='about:'&&url.pathname==='srcdoc')state.navigate(url.href,mode)?.catch(console.error);
       else if(mode==='replace')nativeLocation().replace(url.href);
       else nativeLocation().href=url.href;
     };
@@ -120,6 +120,6 @@ if(source)Object.defineProperty(MessageEvent.prototype,'source',{
   ...source,get(){const target=source.get.call(this);return windows.get(target)||target;}
 });
 
-export function intercept_iframe_window(element,url,navigate,token,{id,name=()=>'',opaque=()=>false}={}){
-  frames.set(element,{id,url,navigate,token,name,opaque:()=>opaque()||element.hasAttribute('sandbox')&&!sandbox_tokens(element.getAttribute('sandbox')).has('allow-same-origin')});
+export function intercept_iframe_window(element,url,navigate,token,{id,name=()=>'',opaque=()=>false,origin=()=>new URL(url()).origin}={}){
+  frames.set(element,{id,url,navigate,token,name,origin,opaque:()=>opaque()||!url()&&element.hasAttribute('sandbox')&&!sandbox_tokens(element.getAttribute('sandbox')).has('allow-same-origin')});
 }

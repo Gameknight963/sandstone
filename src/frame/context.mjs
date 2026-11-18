@@ -60,7 +60,7 @@ export class CustomCTX {
     globalThis.name=value;
     if(!is_worker&&loader.is_iframe)rpc.call_procedure(rpc.host,'window_name',[loader.frame_id,loader.beacon_context,globalThis.name]).catch(console.error);
   }
-  get origin() {return this.location.origin}
+  get origin() {return loader.document_origin ?? this.location.origin}
   get document() {return is_worker ? undefined : intercept.document.__proxy__}
   get parent() {
     if (is_worker) return undefined;
@@ -99,7 +99,7 @@ export class CustomCTX {
   get StaticRange(){return Object.hasOwn(internal,'StaticRange')?internal.StaticRange:intercept.ranges.StaticRange;}
   set StaticRange(value){internal.StaticRange=value;}
   get indexedDB() {return polyfill.idb.indexedDB}
-  get caches(){if(internal.storage_unavailable||this.location?.origin==='null')throw new DOMException('Cache origin is unavailable','SecurityError');return polyfill.cache.caches}
+  get caches(){if(internal.storage_unavailable||this.origin==='null')throw new DOMException('Cache origin is unavailable','SecurityError');return polyfill.cache.caches}
   get Cache(){return polyfill.cache.Cache}
   get CacheStorage(){return polyfill.cache.CacheStorage}
   get IDBFactory() {return polyfill.idb.IDBFactory}

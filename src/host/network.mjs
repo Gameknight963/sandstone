@@ -51,7 +51,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
   if (!frame) throw new TypeError("Unknown frame");
   if(navigation_source&&options?.mode!=='navigate')throw new TypeError('Navigation source requires navigation mode');
   const source_context=navigation_source?navigation_request_context(beacons.contexts,navigation_source,frame.root_id):{
-    url: options?.mode === 'navigate' && frame.pending_navigation?.source_url || (frame.url.origin === "null" && frame.origin && frame.origin !== "null" ? frame.origin + "/" : frame.url.href),
+    url: options?.mode === 'navigate' && frame.pending_navigation?.source_url || frame.request_url || (frame.url.origin === "null" && frame.origin && frame.origin !== "null" ? frame.origin + "/" : frame.url.href),
     top_url: iframes[frame.root_id]?.url?.href || frame.url.href,
     broadcast_origin:frame.broadcast_origin,
     navigation: options?.mode === 'navigate',nested:true,cross_site:frame_cross_site(frame,iframes)
@@ -73,7 +73,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
     has_body: !!request.reader,
     headers: [],
     items: {},
-    cookies: site_data.documentCookies(frame.url.href,{crossSite:frame_cross_site(frame,iframes)})
+    cookies: site_data.documentCookies(frame.cookie_url||frame.url.href,{crossSite:frame_cross_site(frame,iframes)})
   };  
   for (let key of keys) {
     payload.items[key] = response[key];
@@ -114,7 +114,7 @@ rpc_handlers["ws_new"] = function (frame_id, url, protocols) {
   let ws_id = Math.random() + "";
   const frame = iframes[frame_id];
   if (!frame) throw new TypeError('Unknown frame');
-  const source = frame.url.origin === 'null' && frame.origin && frame.origin !== 'null' ? frame.origin + '/' : frame.url.href;
+  const source = frame.request_url || (frame.url.origin === 'null' && frame.origin && frame.origin !== 'null' ? frame.origin + '/' : frame.url.href);
   const options = websocket_options(site_data, url, {
     url: source, top_url: iframes[frame.root_id]?.url.href || source, userAgent: navigator.userAgent,cross_site:frame_cross_site(frame,iframes)
   });

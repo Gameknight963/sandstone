@@ -17,6 +17,7 @@ const authored=(state,node)=>state.authored.get(local.call(node));
 let inert;
 export const media_placeholder='data:application/octet-stream,';
 export const raw_media_attribute=(element,key)=>methods.getAttributeNS.call(element,null,key);
+export const media_attribute_mirror=element=>states.get(element)?.mirror;
 export function pending_media_attribute(element,key){
   const state=states.get(element),source=methods.getAttributeNS.call(element,null,key);
   return source===media_placeholder||key==='srcset'&&source===''&&state.authored.get(key)!=='';

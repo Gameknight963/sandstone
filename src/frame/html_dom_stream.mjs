@@ -4,6 +4,7 @@ import {native_dom as dom} from './dom_operations.mjs';
 import {shadow_root,remember_declarative_root} from './shadow_roots.mjs';
 import {prepare_resources} from './resource_nodes.mjs';
 import {rewrite_element} from './rewrite/element.mjs';
+import {reconcile_iframes} from './iframe_lifecycle.mjs';
 import {prime_inert_script,mark_parser_script,capture_script} from './rewrite/script.mjs';
 import {mutate_styles} from './rewrite/style.mjs';
 import {document_base_url,with_document_base_url} from './document_base.mjs';
@@ -154,6 +155,7 @@ export class HTMLDOMStream {
         }
         if(!before&&target===this.#target&&this.#before&&dom.parent.call(this.#before)===target)before=this.#before;
         mutate_styles([target,node],()=>dom.insert.call(target,node,before));state.parent=parent;
+        reconcile_iframes(node);
       };
       const install=ast=>{
         if(!ast||ast===this.#input.document||visited.has(ast))return;
