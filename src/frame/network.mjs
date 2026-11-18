@@ -19,7 +19,7 @@ export const rpc_ws_event = rpc.create_rpc_wrapper(rpc.host, "ws_event");
 export const rpc_ws_send = rpc.create_rpc_wrapper(rpc.host, "ws_send");
 export const rpc_ws_close = rpc.create_rpc_wrapper(rpc.host, "ws_close");
 
-export const known_urls = {};
+export const known_urls = Object.create(null);
 export const resource_cache = {};
 export const stylesheet_contexts = {};
 export let requests_allowed = false;

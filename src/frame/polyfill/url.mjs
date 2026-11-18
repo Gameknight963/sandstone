@@ -1,11 +1,4 @@
 import { known_urls } from "../network.mjs";
+import {create_url_constructor} from '../url.mjs';
 
-export class FakeURL extends URL {
-  constructor(url, base) {
-    url = url instanceof URL ? url.href : url;
-    base = base instanceof URL ? base.href : base;
-    url = known_urls[url] || url;
-    base = known_urls[base] || base;
-    super(url, base);
-  }
-}
+export const FakeURL=create_url_constructor(globalThis.URL,url=>known_urls[url]??url);

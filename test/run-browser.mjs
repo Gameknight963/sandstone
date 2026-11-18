@@ -32,6 +32,8 @@ const globalFunctionTest=await readFile(new URL('javascript-global-functions.pla
 const verifyGlobalFunctions=runInThisContext(`(${globalFunctionTest})`);
 const environmentIdentityTest=await readFile(new URL('environment-identity.playwright.js',import.meta.url),'utf8');
 const verifyEnvironmentIdentity=runInThisContext(`(${environmentIdentityTest})`);
+const urlTest=await readFile(new URL('url.playwright.js',import.meta.url),'utf8');
+const verifyURL=runInThisContext(`(${urlTest})`);
 const intersectionObserverTest=await readFile(new URL('intersection-observer.playwright.js',import.meta.url),'utf8');
 const verifyIntersectionObserver=runInThisContext(`(${intersectionObserverTest})`);
 const historyInterfaceTest=await readFile(new URL('history-interface.playwright.js',import.meta.url),'utf8');
@@ -275,6 +277,7 @@ try {
     result.passed.push(...await timed(verifyBlockFunctions(page,blockFunctionCases,globalBlockFunctionCases), 'Block function scope fixture'));
     result.passed.push(...await timed(verifyGlobalFunctions(page,globalFunctionCases), 'Global function declaration fixture'));
     result.passed.push(...await timed(verifyEnvironmentIdentity(page), 'Environment identity fixture'));
+    result.passed.push(...await timed(verifyURL(page), 'URL API fixture'));
     result.passed.push(...await timed(verifyIntersectionObserver(page), 'Intersection observer fixture'));
     result.passed.push(...moduleResults);
     result.passed.push(...await timed(verifyResources(page), "Resource fixture"));
