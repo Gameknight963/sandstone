@@ -50,7 +50,8 @@ export class FakeHistory {
     this.#index = snapshot.index ?? 0;
     this.#native=globalThis.history;
     this.#document=globalThis.document;
-    const facade=Object.create(NativeHistory.prototype),controller=this;
+    // Native History rejects structured cloning; a plain facade would not.
+    const facade=new Proxy(Object.create(NativeHistory.prototype),{}),controller=this;
     // Private fields belong to the creating realm's class. Dispatch borrowed
     // prototype calls through that realm instead of applying a foreign class.
     views.set(facade,{invoke(name,operation,args){return Reflect.apply(Object.getOwnPropertyDescriptor(FakeHistory.prototype,name)[operation],controller,args);}});

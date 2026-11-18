@@ -1,4 +1,4 @@
-import {key_tag, transform_keys, crypto_methods} from './codec.mjs';
+import {key_metadata, transform_keys, crypto_methods} from './codec.mjs';
 
 const algorithm_fields = ['iv','nonce','additionalData','tagLength','counter','length','hash','salt','iterations','info','modulusLength','publicExponent','namedCurve','public','label','saltLength','context'];
 const algorithm_positions = {encrypt:[0],decrypt:[0],sign:[0],verify:[0],digest:[0],generateKey:[0],deriveKey:[0,2],deriveBits:[0],importKey:[2],exportKey:[],wrapKey:[3],unwrapKey:[3,4],getPublicKey:[],encapsulateBits:[0],encapsulateKey:[0,2],decapsulateBits:[0],decapsulateKey:[0,3]};
@@ -25,11 +25,16 @@ export function create_crypto_client(dispatch, {methods = crypto_methods} = {}) 
     Object.defineProperty(CryptoKey.prototype,name,{...Object.getOwnPropertyDescriptor(CryptoKey.prototype,name),enumerable:true});
   }
   Object.defineProperty(CryptoKey.prototype,Symbol.toStringTag,{value:'CryptoKey',configurable:true});
-  const encode = value => transform_keys(value, value => keys.get(value) || value);
+  // Node's native Blob clone hooks live on symbol properties of its prototype.
+  // Preserve those hooks when giving a handle its public CryptoKey prototype.
+  for(const symbol of Object.getOwnPropertySymbols(Blob.prototype))if(symbol!==Symbol.toStringTag)Object.defineProperty(CryptoKey.prototype,symbol,Object.getOwnPropertyDescriptor(Blob.prototype,symbol));
+  // Handle keys already carry native Blob slots. Never inspect user graphs
+  // before the browser applies its own clone validation and getter ordering.
+  const encode = value => value;
   const decode = value => transform_keys(value, value => {
-    if (!Object.hasOwn(value, key_tag)) return value;
-    const key = Object.create(CryptoKey.prototype);
-    keys.set(key, value);return key;
+    const metadata=key_metadata(value);if(!metadata)return value;
+    Object.setPrototypeOf(value,CryptoKey.prototype);
+    keys.set(value, metadata);return value;
   });
   function algorithm(value) {
     if (typeof value === 'string') return value;

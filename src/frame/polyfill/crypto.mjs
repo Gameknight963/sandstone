@@ -13,9 +13,7 @@ export function configure_crypto(available) {
   globalThis.SubtleCrypto = client.SubtleCrypto;
 
   const clone = globalThis.structuredClone;
-  globalThis.structuredClone = function structuredClone(value, options) {
-    return client.decode(Reflect.apply(clone,globalThis,[client.encode(value),options]));
-  };
+  globalThis.structuredClone = new Proxy(clone,{apply(target,receiver,args){return client.decode(Reflect.apply(target,receiver,args));}});
   const data = Object.getOwnPropertyDescriptor(MessageEvent.prototype,'data');
   const decoded = new WeakMap();
   Object.defineProperty(MessageEvent.prototype,'data',{...data,get() {
@@ -25,12 +23,4 @@ export function configure_crypto(available) {
     if(!previous||previous.source!==value)decoded.set(this,{source:value,value:client.decode(value)});
     return decoded.get(this).value;
   }});
-  const post = MessagePort.prototype.postMessage;
-  MessagePort.prototype.postMessage = function postMessage(value, transfer) {
-    return Reflect.apply(post,this,[client.encode(value),transfer]);
-  };
-  const globalPost = globalThis.postMessage;
-  if (globalPost) globalThis.postMessage = function postMessage(value, ...args) {
-    return Reflect.apply(globalPost,this,[client.encode(value),...args]);
-  };
 }

@@ -1,4 +1,4 @@
-import {key_tag, transform_keys, crypto_methods} from './codec.mjs';
+import {key_tag, key_handle, key_metadata, transform_keys, crypto_methods} from './codec.mjs';
 
 export class CryptoService {
   constructor(crypto = globalThis.crypto) {
@@ -18,13 +18,13 @@ export class CryptoService {
         id = Array.from(bytes, byte => byte.toString(16).padStart(2,'0')).join('');
         this.ids.set(value, id); this.keys.set(id, value);
       }
-      return {[key_tag]:id,type:value.type,extractable:value.extractable,algorithm:value.algorithm,usages:value.usages};
+      return key_handle({[key_tag]:id,type:value.type,extractable:value.extractable,algorithm:value.algorithm,usages:value.usages});
     });
   }
   decode(value) {
     return transform_keys(value, value => {
-      if (!Object.hasOwn(value, key_tag)) return value;
-      const key = this.keys.get(value[key_tag]);
+      const metadata=key_metadata(value);if(!metadata)return value;
+      const key = this.keys.get(metadata[key_tag]);
       if (!key) throw new DOMException('Unknown cryptographic key', 'DataCloneError');
       return key;
     });

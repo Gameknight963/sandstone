@@ -73,6 +73,9 @@ test('Key transport preserves cycles, aliases, Maps, Sets and sparse arrays with
   assert.equal(clone.self,clone);assert.equal(clone.key,clone.again);assert.notEqual(clone.key,key);
   assert.equal([...clone.map.keys()][0],clone.key);assert.equal([...clone.map.values()][0].has(clone.key),true);
   assert.equal(clone.sparse.length,5);assert.equal(0 in clone.sparse,false);
+  const caused=client.decode(structuredClone(client.encode({key,error:new Error('key cause',{cause:{key}})})));
+  assert.ok(caused.error instanceof Error);assert.equal(caused.error.cause.key,caused.key);
+  assert.equal(Object.getOwnPropertyDescriptor(caused.error,'cause').enumerable,false);
   const encoded=client.encode(key),native=service.decode(encoded);
   assert.ok(native instanceof CryptoKey);assert.equal(native.extractable,false);
   assert.ok(!('d' in encoded)&&!('k' in encoded));
@@ -80,6 +83,33 @@ test('Key transport preserves cycles, aliases, Maps, Sets and sparse arrays with
   assert.throws(()=>new client.CryptoKey(),TypeError);
   const ordinary={__proto__:null,value:new Uint8Array([1,2])};
   assert.deepEqual(transform_keys(ordinary,value=>value).value,new Uint8Array([1,2]));
+});
+
+test('Key transport lets native cloning reject proxies and preserve authored data and getter ordering',async()=>{
+  const {client}=fixture();
+  const proxy=new Proxy({},{ownKeys(){throw new Error('Proxy must never be inspected');}});
+  assert.throws(()=>structuredClone(client.encode(proxy)),{name:'DataCloneError'});
+  const buffer=new ArrayBuffer(8);
+  assert.throws(()=>structuredClone(client.encode({proxy,buffer}),{transfer:[buffer]}),{name:'DataCloneError'});
+  assert.equal(buffer.byteLength,8);
+  const value={__sandstone_crypto_key_v1__:'ordinary marker',saved:true};
+  Object.defineProperty(value,Symbol.toStringTag,{get(){throw new Error('Symbol tags are not cloned');}});
+  assert.deepEqual(client.decode(structuredClone(client.encode(value))),{__sandstone_crypto_key_v1__:'ordinary marker',saved:true});
+  const order=[],source={};
+  Object.defineProperties(source,{first:{enumerable:true,get(){order.push('first');delete source.second;return 1;}},second:{value:2,enumerable:true,configurable:true}});
+  assert.deepEqual(client.decode(structuredClone(client.encode(source))),{first:1});
+  assert.deepEqual(order,['first']);
+});
+
+test('Key handles restore RSA public exponent metadata and preserve native export restrictions',async()=>{
+  const {subtle,client}=fixture();
+  const pair=await subtle.generateKey({name:'RSA-PSS',modulusLength:1024,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},false,['sign','verify']);
+  const copy=client.decode(structuredClone(client.encode(pair)));
+  assert.ok(copy.publicKey.algorithm.publicExponent instanceof Uint8Array);
+  assert.deepEqual(copy.publicKey.algorithm.publicExponent,new Uint8Array([1,0,1]));
+  const signature=await subtle.sign({name:'RSA-PSS',saltLength:32},copy.privateKey,bytes('rsa handle'));
+  assert.equal(await subtle.verify({name:'RSA-PSS',saltLength:32},copy.publicKey,signature,bytes('rsa handle')),true);
+  await assert.rejects(subtle.exportKey('pkcs8',copy.privateKey),error=>/^InvalidAccess/.test(error.name));
 });
 
 test('Modern native key encapsulation and public key derivation are forwarded when available',async()=>{

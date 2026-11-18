@@ -96,6 +96,8 @@ const cssomTest = await readFile(new URL("cssom.playwright.js", import.meta.url)
 const verifyCSSOM = runInThisContext(`(${cssomTest})`);
 const cryptoTest = await readFile(new URL('crypto.playwright.js',import.meta.url),'utf8');
 const verifyCrypto = runInThisContext(`(${cryptoTest})`);
+const structuredCloneTest=await readFile(new URL('structured-clone.playwright.js',import.meta.url),'utf8');
+const verifyStructuredClone=runInThisContext(`(${structuredCloneTest})`);
 const iframeWindowTest=await readFile(new URL('iframe-window.playwright.js',import.meta.url),'utf8');
 const verifyIframeWindow=runInThisContext(`(${iframeWindowTest})`);
 const frameDOMTest=await readFile(new URL('frame-dom.playwright.js',import.meta.url),'utf8');
@@ -273,6 +275,7 @@ try {
     result.passed.push(...await timed(verifyGlobalDescriptors(page), 'Global descriptor fixture'));
     result.passed.push(...await timed(verifyWorkerBundles(page), 'Worker bundle fixture'));
     result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));
+    result.passed.push(...await timed(verifyStructuredClone(page), 'Structured clone fixture'));
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
     result.passed.push(...await timed(verifyHistoryInterface(page), 'History interface fixture'));
     result.passed.push(...await timed(verifyStorageWrites(page), 'Concurrent storage fixture'));
