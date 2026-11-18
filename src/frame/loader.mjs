@@ -151,7 +151,7 @@ function prepare_html(options) {
   get_frame_html();
   const ready=update_ctx(options);
   configure_window_messages(options);
-  return Promise.all([ready,configure_cookies(options.cookies)]);
+  return Promise.all([ready,configure_cookies(options.cookies,ctx.document)]);
 }
 
 export function initialize_blank(options,onload,onurl){

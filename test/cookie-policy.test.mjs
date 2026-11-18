@@ -7,6 +7,15 @@ import {websocket_options} from '../src/host/websocket.mjs';
 import {frame_cross_site} from '../src/host/frame_context.mjs';
 import {storage_cookie} from '../src/cookie.mjs';
 
+test('Unnamed cookie pairs support bare values without accepting ambiguous pairs or prefix lookalikes',()=>{
+  const store=new SiteDataStore(),url='https://cookie.test/page';
+  store.setCookie(url,'bare; Path=/',false);assert.equal(cookie_header(store.cookies,url),'bare');
+  store.setCookie(url,'=single; Path=/',false);store.setCookie(url,'with=real; Path=/',false);
+  assert.equal(cookie_header(store.cookies,url),'single; with=real');
+  for(const value of ['', '=; Path=/','; Path=/','=with=equals; Path=/','__Host-unnamed; Path=/; Secure','__Secure-unnamed; Secure'])assert.equal(storage_cookie(value),undefined);
+  assert.equal(cookie_header(store.cookies,url),'single; with=real');
+});
+
 test('Default SameSite cookies use Lax and allow only recent unsafe top-level navigation',async()=>{
   const store=new SiteDataStore(),url='https://target.test/';
   for(const value of ['default=d','strict=s; SameSite=Strict','lax=l; SameSite=Lax','none=n; SameSite=None; Secure','invalid=i; SameSite=unknown','insecure=x; SameSite=None'])store.setCookie(url,value+'; Path=/');

@@ -1,6 +1,6 @@
 import { ctx, get_handler_keys } from "../context.mjs";
 import { create_obj_proxy } from '../global_functions.mjs';
-import { get_cookie, set_cookie } from "../polyfill/cookie.mjs";
+import "../polyfill/cookie.mjs";
 import * as loader from "../loader.mjs";
 import { rewrite_media } from "../rewrite/media.mjs";
 import {parse_referrer_policy} from '../../referrer.mjs';
@@ -76,8 +76,8 @@ class CustomDocument {
     }   
   }
 
-  get cookie() {return get_cookie()}
-  set cookie(value) {set_cookie(value)}
+  get cookie() {return Reflect.get(this.__target__,'cookie',this.__proxy__)}
+  set cookie(value) {Reflect.set(this.__target__,'cookie',value,this.__proxy__)}
   get body() {return this.__target__.body}
   get createRange(){return Object.hasOwn(internal,'createRange')?internal.createRange:ranges.createRange;}
   set createRange(value){internal.createRange=value;}

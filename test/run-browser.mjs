@@ -124,6 +124,8 @@ const storageInterfaceTest=await readFile(new URL('storage-interface.playwright.
 const verifyStorageInterface=runInThisContext(`(${storageInterfaceTest})`);
 const cookieSharingTest=await readFile(new URL('cookie-sharing.playwright.js',import.meta.url),'utf8');
 const verifyCookieSharing=runInThisContext(`(${cookieSharingTest})`);
+const cookieAccessorTest=await readFile(new URL('cookie-accessor.playwright.js',import.meta.url),'utf8');
+const verifyCookieAccessor=runInThisContext(`(${cookieAccessorTest})`);
 const storageEventsTest=await readFile(new URL('storage-events.playwright.js',import.meta.url),'utf8');
 const verifyStorageEvents=runInThisContext(`(${storageEventsTest})`);
 const iframeRacesTest=await readFile(new URL('iframe-races.playwright.js',import.meta.url),'utf8');
@@ -260,6 +262,7 @@ try {
     result.passed.push(...await timed(verifyStorageSynchronous(page), 'Synchronous shared storage fixture'));
     result.passed.push(...await timed(verifyStorageInterface(page), 'Storage interface fixture'));
     result.passed.push(...await timed(verifyCookieSharing(page), 'Cookie sharing fixture'));
+    result.passed.push(...await timed(verifyCookieAccessor(page), 'Cookie accessor fixture'));
     result.passed.push(...await timed(verifyStorageEvents(page), 'Storage event fixture'));
     result.passed.push(...await timed(verifyFrameReadiness(page), 'Frame readiness fixture'));
     result.passed.push(...await timed(verifyChildReadiness(page), 'Child readiness fixture'));
