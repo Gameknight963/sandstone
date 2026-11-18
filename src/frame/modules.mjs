@@ -71,12 +71,13 @@ export function module_dependencies(source) {
 // The browser executes the graph. We provide local blobs and a complete import map
 // before it resolves any dependencies, retaining native cycles and live bindings.
 export class ModuleLoader {
-  constructor({fetch, rewrite, createURL, register, execute}) {
+  constructor({fetch, rewrite, createURL, register, execute, types=['javascript','json','css']}) {
     this.fetch = fetch;
     this.rewrite = rewrite;
     this.createURL = createURL;
     this.register = register;
     this.execute = execute;
+    this.types=new Set(types);
     this.map = new ImportMap();
     this.records = new Map();
     this.registered = new Set();
@@ -88,7 +89,7 @@ export class ModuleLoader {
   }
 
   record(key, type = "javascript", credentials = "same-origin") {
-    if (!["javascript", "json"].includes(type)) throw new TypeError(`Unsupported module type: ${type}`);
+    if (!this.types.has(type)) throw new TypeError(`Unsupported module type: ${type}`);
     let record = this.records.get(key);
     if (record && record.type !== type) throw new TypeError(`Conflicting module types for ${key}`);
     if (!record) {
@@ -122,10 +123,14 @@ export class ModuleLoader {
           const response = await this.fetch(record.key, {credentials: record.credentials});
           if (!response.ok) throw new TypeError(`Module request failed (${response.status}): ${record.key}`);
           record.url = response.url || record.key;
+          if(record.type==='css'){
+            if(response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()!=='text/css')throw new TypeError(`Invalid CSS module MIME type: ${record.key}`);
+          }
           record.source = await response.text();
           if (!this.records.has(record.url)) this.records.set(record.url, record);
         }
         if (record.type === "json") { JSON.parse(record.source); return; }
+        if(record.type==='css')return;
         record.dependencies = [];
         for (const dependency of module_dependencies(record.source)) {
           const key = this.map.resolve(dependency.specifier, record.url);
@@ -153,7 +158,7 @@ export class ModuleLoader {
 
   compile_graph(entry,graph){
     const compile = record => {
-      let source = record.type === "json" ? `export default __ctx__.__json_module__(${JSON.stringify(record.source)});` : this.rewrite(record.source, {
+      let source = record.type === "json" ? `export default __ctx__.__json_module__(${JSON.stringify(record.source)});` : record.type==='css'?`export default __ctx__.__css_module__(${JSON.stringify(record.source)},${JSON.stringify(record.url)});`:this.rewrite(record.source, {
         module: true, url: record.url, sourceURL:record.url, stripAttributes: true, resolve: specifier => {
           const dependency = this.records.get(this.map.resolve(specifier, record.url));
           return dependency.blob || dependency.nativeKey;
@@ -202,7 +207,7 @@ export class ModuleLoader {
       Object.defineProperty(snapshot,key,{value,enumerable:true});
     }
     if(Object.keys(snapshot).some(key=>key!=='type'))throw new TypeError('Unsupported module import attribute');
-    if(Object.hasOwn(snapshot,'type')&&snapshot.type!=='json')throw new TypeError('Unsupported module import type');
+    if(Object.hasOwn(snapshot,'type')&&!['json','css'].includes(snapshot.type))throw new TypeError('Unsupported module import type');
     const credentials=options?.credentials;
     // Constructor-created functions use the current document/worker base,
     // after specifier conversion and option getters have finished running.

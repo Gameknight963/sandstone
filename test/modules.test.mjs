@@ -61,7 +61,7 @@ function environment(sources) {
       requests.push({url, ...options});
       const fixture = sources[url];
       if (fixture === undefined) return new Response("missing", {status: 404});
-      const response = new Response(typeof fixture === "string" ? fixture : fixture.source);
+      const response = new Response(typeof fixture === "string" ? fixture : fixture.source,{headers:fixture.headers});
       if (typeof fixture === "object") Object.defineProperty(response, "url", {value: fixture.url});
       return response;
     },
@@ -76,6 +76,40 @@ function environment(sources) {
   });
   return {loader, requests, blobs, mappings};
 }
+
+test('CSS modules compile as shared stylesheet exports without parsing CSS as JavaScript or following imports',async()=>{
+  const env=environment({
+    'https://example.com/main.js':'export {default as sheet} from "./theme.css" with {type:"css"};',
+    'https://example.com/theme.css':{source:'@import "./ignored.css";body{color:red;background:url(./image.png)}',headers:{'Content-Type':'TEXT/CSS; charset=utf-8','Referrer-Policy':'no-referrer'}}
+  });
+  await env.loader.prepare_url('./main.js','https://example.com/');
+  const first=await env.loader.import('./theme.css','https://example.com/',{with:{type:'css'}});
+  const second=await env.loader.import('./theme.css','https://example.com/',{with:{type:'css'}});
+  assert.equal(first.blob,second.blob);
+  assert.equal(env.requests.length,2);
+  const compiled=env.blobs.get(first.blob);
+  assert.equal(compiled.type,'text/javascript');
+  assert.match(compiled.source,/export default __ctx__\.__css_module__/);
+  assert.ok(compiled.source.includes(JSON.stringify('https://example.com/theme.css')));
+  assert.deepEqual(module_dependencies('import sheet from "./theme.css" with {type:"css"};'),[{specifier:'./theme.css',type:'css'}]);
+});
+
+test('CSS module redirects retain the final stylesheet URL and reject incorrect MIME types before execution',async()=>{
+  const env=environment({'https://example.com/theme.css':{url:'https://cdn.test/styles/theme.css',source:'body{color:red}',headers:{'Content-Type':'text/css'}}});
+  const entry=await env.loader.prepare_url('./theme.css','https://example.com/',{with:{type:'css'}});
+  assert.ok(env.blobs.get(entry.blob).source.includes(JSON.stringify('https://cdn.test/styles/theme.css')));
+  for(const type of [undefined,'text/plain','text/javascript','application/json']){
+    const rejected=environment({'https://example.com/theme.css':{source:'body{color:red}',headers:type?{'Content-Type':type}:{}}});
+    await assert.rejects(rejected.loader.import('./theme.css','https://example.com/',{with:{type:'css'}}),/MIME type/);
+    assert.equal(rejected.blobs.size,0);
+  }
+});
+
+test('Environments without CSSStyleSheet reject CSS modules before requesting them',async()=>{
+  const env=environment({});env.loader.types.delete('css');
+  await assert.rejects(env.loader.import('./theme.css','https://example.com/',{with:{type:'css'}}),/Unsupported module type/);
+  assert.equal(env.requests.length,0);
+});
 
 test('Dynamic imports convert specifiers once and snapshot attributes before resolving a live base',async()=>{
   const env=environment({'https://example.com/options/entry.js':'export default 7;'}),events=[];let base='https://example.com/start/';

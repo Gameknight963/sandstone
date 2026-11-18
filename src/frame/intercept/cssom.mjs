@@ -4,9 +4,12 @@ import { prepare_css, restore_css, css_references } from '../css.mjs';
 import { parse_css } from '../rewrite/css.mjs';
 import {style_change,resolved_style,serialized_inline_style} from '../style_sources.mjs';
 import {resource_attribute} from '../resource_attributes.mjs';
+import {document_referrer_policy} from './document.mjs';
 
 const NativeSheet = globalThis.CSSStyleSheet;
 const sheet_bases = new WeakMap();
+const sheet_requests=new WeakMap();
+let replace_module_sheet;
 let sequence = 0;
 const supports = condition => CSS.supports(condition) || CSS.supports(`(${condition})`);
 
@@ -19,6 +22,17 @@ export const FakeCSSStyleSheet = NativeSheet && new Proxy(NativeSheet, {
     return sheet;
   }
 });
+
+export function create_css_module(source,url){
+  const sheet=new FakeCSSStyleSheet({baseURL:url});
+  // CSS module URLs use the stylesheet base, while referrers retain the
+  // creating document's URL and policy even after same-document navigation.
+  sheet_requests.set(sheet,{referrer:ctx.location.href,referrerPolicy:document_referrer_policy()});
+  // Native replacement drops @import rules. Hydrate only the accepted rules,
+  // using local placeholders until their images and fonts reach the relay.
+  replace_module_sheet(sheet,source);
+  return sheet;
+}
 
 if (globalThis.CSSStyleDeclaration && NativeSheet) {
   const prototype = CSSStyleDeclaration.prototype;
@@ -34,7 +48,7 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
   const unwrap = value => proxy_to_raw.get(value) || value;
   const sheet_base = sheet => sheet_bases.get(sheet) || network.known_urls[sheet?.href] || sheet?.href || ctx.document.baseURI;
   const declaration_base = declaration => sheet_base(parent.get.call(declaration)?.parentStyleSheet);
-  const sheet_request = sheet => network.stylesheet_contexts[sheet?.href];
+  const sheet_request = sheet => sheet_requests.get(sheet)||network.stylesheet_contexts[sheet?.href];
   const snapshot = (declaration, prefix) => {
     const result = new Map();
     for (let index = 0; index < length.get.call(declaration); index++) {
@@ -214,19 +228,24 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
   intercept_insert(NativeSheet.prototype, 'insertRule');
   intercept_insert(globalThis.CSSGroupingRule?.prototype, 'insertRule');
   intercept_insert(globalThis.CSSKeyframesRule?.prototype, 'appendRule', true);
-  if (nativeReplace) NativeSheet.prototype.replaceSync = function(source) {
-    if (!arguments.length) return nativeReplace.call(this);
-    const prepared = prepare(source);
-    const result = nativeReplace.call(this, prepared.css);
-    hydrate(Array.from(this.cssRules), prepared, sheet_base(this)).catch(console.error);
-    return result;
-  };
+  if (nativeReplace) {
+    replace_module_sheet=(sheet,source)=>{
+      const prepared = prepare(source);
+      const result = nativeReplace.call(sheet, prepared.css);
+      hydrate(Array.from(sheet.cssRules), prepared, sheet_base(sheet),false,sheet_request(sheet)).catch(console.error);
+      return result;
+    };
+    NativeSheet.prototype.replaceSync = function(source) {
+      if (!arguments.length) return nativeReplace.call(this);
+      return replace_module_sheet(this,source);
+    };
+  }
   const replace = NativeSheet.prototype.replace;
   if (replace) NativeSheet.prototype.replace = function(source) {
     if (!arguments.length) return replace.call(this);
     const prepared = prepare(source);
     return replace.call(this, prepared.css).then(async sheet => {
-      await hydrate(Array.from(sheet.cssRules), prepared, sheet_base(sheet));
+      await hydrate(Array.from(sheet.cssRules), prepared, sheet_base(sheet),false,sheet_request(sheet));
       return sheet;
     });
   };

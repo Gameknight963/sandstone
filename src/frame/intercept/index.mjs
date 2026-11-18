@@ -10,4 +10,4 @@ export * as function from "./function.mjs";
 import './crypto.mjs';
 import './fonts.mjs';
 import './links.mjs';
-export { FakeCSSStyleSheet } from "./cssom.mjs";
+export { FakeCSSStyleSheet,create_css_module } from "./cssom.mjs";

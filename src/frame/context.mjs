@@ -135,6 +135,7 @@ export class CustomCTX {
   }
   __module_meta__(url) { return modules.meta(url); }
   __json_module__(source) { return parse_json(source); }
+  __css_module__(source,url){return intercept.create_css_module(source,url);}
   __worker_module_started__() { polyfill.mark_worker_started(); }
   get __globals__(){return global_bindings.globals;}
   __declare_global_lexicals__(definitions){global_bindings.declare(definitions);}
