@@ -98,6 +98,10 @@ const iframeWindowTest=await readFile(new URL('iframe-window.playwright.js',impo
 const verifyIframeWindow=runInThisContext(`(${iframeWindowTest})`);
 const rpcSourceTest=await readFile(new URL('rpc-source.playwright.js',import.meta.url),'utf8');
 const verifyRPCSource=runInThisContext(`(${rpcSourceTest})`);
+const bootstrapTest=await readFile(new URL('bootstrap.playwright.js',import.meta.url),'utf8');
+const verifyBootstrap=runInThisContext(`(${bootstrapTest})`);
+const insecureHostTest=await readFile(new URL('insecure-host.playwright.js',import.meta.url),'utf8');
+const verifyInsecureHost=runInThisContext(`(${insecureHostTest})`);
 const srcdocTest=await readFile(new URL('srcdoc.playwright.js',import.meta.url),'utf8');
 const verifySrcdoc=runInThisContext(`(${srcdocTest})`);
 const windowMessagesTest=await readFile(new URL('window-messages.playwright.js',import.meta.url),'utf8');
@@ -247,6 +251,8 @@ try {
     result.passed.push(...await timed(verifyRootInitialization(page), 'Root initialization fixture'));
     result.passed.push(...await timed(verifyIframeWindow(page), 'Frame window fixture'));
     result.passed.push(...await timed(verifyRPCSource(page), 'RPC source fixture'));
+    result.passed.push(...await timed(verifyBootstrap(page), 'Bootstrap message fixture'));
+    result.passed.push(...await timed(verifyInsecureHost(page,await readFile(artifact,'utf8')), 'Insecure host fixture'));
     result.passed.push(...await timed(verifySrcdoc(page), 'Inline frame fixture'));
     result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
     result.passed.push(...await timed(verifyAncestorWindows(page), 'Ancestor windows fixture'));

@@ -1,4 +1,13 @@
 const native_events={add:EventTarget.prototype.addEventListener,remove:EventTarget.prototype.removeEventListener};
+const apply=Reflect.apply;
+const stop_message=Event.prototype.stopImmediatePropagation;
+const window_post=globalThis.Window&&globalThis.postMessage,worker_post=globalThis.Worker?.prototype.postMessage;
+const message_fields=Object.fromEntries(['data','source','ports'].map(key=>[key,globalThis.MessageEvent&&Object.getOwnPropertyDescriptor(MessageEvent.prototype,key)?.get]));
+export function runtime_message(event,key){try{return apply(message_fields[key],event,[]);}catch{return event[key];}}
+export const stop_runtime_message=event=>apply(stop_message,event,[]);
+export function post_bootstrap_message(target,message,ports=[],worker=false){
+  return apply((worker?worker_post:window_post)||target.postMessage,target,[message,{targetOrigin:'*',transfer:ports}]);
+}
 
 // document.open removes native listeners. Keep only runtime registrations so
 // restoring the relay never restores the page's own discarded listeners.

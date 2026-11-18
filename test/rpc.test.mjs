@@ -91,11 +91,11 @@ test('Frame readiness requires the request nonce, source Window and intended doc
   const waiting=rpc.wait_on_frame(frame).then(()=>{resolved=true;});
   const ping=messages[0];
   events.emit(null,target);
-  events.emit({type:'pong',id:ping.id,url:'blob:runtime#old-document'},target);
-  events.emit({type:'pong',id:'old-request',url:ping.url},target);
-  events.emit({type:'pong',id:ping.id,url:ping.url},{});
+  events.emit({...ping,type:'pong',url:'blob:runtime#old-document'},target);
+  events.emit({...ping,type:'pong',id:'old-request'},target);
+  events.emit({...ping,type:'pong'},{});
   await Promise.resolve();assert.equal(resolved,false);
-  events.emit({type:'pong',id:ping.id,url:ping.url},target);
+  events.emit({...ping,type:'pong'},target);
   await waiting;assert.equal(events.listeners(),0);
   await new Promise(resolve=>setTimeout(resolve,65));assert.equal(messages.length,1);
 });
@@ -115,8 +115,18 @@ test('Child readiness uses the physical runtime URL instead of a reflected virtu
   const waiting=rpc.wait_on_frame(frame,{url:'blob:child-runtime'}).then(()=>{resolved=true;});
   const ping=messages[0];
   assert.equal(ping.url,'blob:child-runtime');
-  events.emit({type:'pong',id:ping.id,url:frame.src},target);
+  events.emit({...ping,type:'pong',url:frame.src},target);
   await Promise.resolve();assert.equal(resolved,false);
-  events.emit({type:'pong',id:ping.id,url:ping.url},target);
+  events.emit({...ping,type:'pong'},target);
   await waiting;assert.equal(events.listeners(),0);
+});
+
+test('Readiness authenticates the new document without disclosing its bootstrap nonce',async t=>{
+  const events=window_events(t),messages=[],target={postMessage:message=>messages.push(message)};
+  let resolved=false;const waiting=rpc.wait_on_frame({src:'blob:runtime',contentWindow:target},{nonce:'new-secret'}).then(()=>resolved=true);
+  const ping=messages[0];assert.equal(ping.nonce,undefined);
+  events.emit({...ping,type:'pong',nonce:'old-secret'},target);
+  events.emit({type:'pong',id:ping.id,url:ping.url,nonce:'new-secret'},target);
+  await Promise.resolve();assert.equal(resolved,false);
+  events.emit({...ping,type:'pong',nonce:'new-secret'},target);await waiting;assert.equal(events.listeners(),0);
 });

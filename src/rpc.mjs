@@ -1,5 +1,6 @@
 import {unwrap_global_target} from './frame/global_functions.mjs';
-import {listen_runtime,unlisten_runtime} from './frame/runtime_events.mjs';
+import {listen_runtime,unlisten_runtime,runtime_message,stop_runtime_message,post_bootstrap_message} from './frame/runtime_events.mjs';
+import {bootstrap_attribute,bootstrap_global} from './bootstrap.mjs';
 
 export let role = null;
 export const rpc_handlers = Object.create(null);
@@ -7,6 +8,19 @@ export const rpc_requests = Object.create(null);
 export let host = null;
 export let on_attach = () => {};
 const rpc_targets=new WeakSet();
+const bootstrap_waiters=new Set();
+const bootstrap_parent=globalThis.parent;
+const bootstrap_worker=typeof globalThis.importScripts==='function';
+const bootstrap_window=typeof globalThis.Window==='function';
+const bootstrap_script=globalThis.document?.currentScript;
+let bootstrap_config;
+try{bootstrap_config=bootstrap_script?.hasAttribute(bootstrap_attribute)?JSON.parse(decodeURIComponent(bootstrap_script.getAttribute(bootstrap_attribute))):globalThis[bootstrap_global];}catch{}
+bootstrap_script?.removeAttribute(bootstrap_attribute);delete globalThis[bootstrap_global];
+const bootstrap_nonce=bootstrap_config?.nonce;
+const bootstrap_channels=bootstrap_config?.channels===1?1:2;
+let bootstrap_connections=0,bootstrap_listening=false;
+function listen_bootstrap(){if(!bootstrap_listening){listen_runtime(globalThis,'message',host_set_handler,true);bootstrap_listening=true;}}
+function release_bootstrap(){if(bootstrap_listening&&!host&&!bootstrap_waiters.size){unlisten_runtime(globalThis,'message',host_set_handler,true);bootstrap_listening=false;}}
 
 //a flexible wrapper for message ports
 export class RPCTarget {
@@ -201,33 +215,34 @@ export function attach_host(msg_port, frame_id) {
 }
 
 //tell a child frame to set a message port as the host rpc target
-export function set_host(frame, msg_port) {
+export function set_host(frame, msg_port, {nonce}={}) {
   let msg = {
     type: "set_host",
+    sandstone_bootstrap:1,nonce,
     id: Math.random() + ""
   };
-  let msg_target = unwrap_global_target(frame.contentWindow || frame);
-  msg_target.postMessage(msg, {targetOrigin: "*", transfer: [msg_port]})
+  const window_frame=!!globalThis.HTMLIFrameElement&&frame instanceof HTMLIFrameElement;
+  const msg_target=unwrap_global_target(window_frame?frame.contentWindow:frame);
+  post_bootstrap_message(msg_target,msg,[msg_port],!window_frame);
 }
 
-export function wait_on_frame(frame,{signal,url=frame.src}={}) {
+export function wait_on_frame(frame,{signal,url=frame.src,nonce}={}) {
   const id=Math.random()+':'+Math.random();
   return new Promise((resolve,reject)=>{
     let timer,finished=false;
-    const cleanup=()=>{finished=true;clearTimeout(timer);unlisten_runtime(globalThis,'message',receive);signal?.removeEventListener('abort',abort);};
+    const cleanup=()=>{finished=true;clearTimeout(timer);bootstrap_waiters.delete(receive);release_bootstrap();signal?.removeEventListener('abort',abort);};
     const abort=()=>{cleanup();reject(signal.reason||new DOMException('The operation was aborted','AbortError'));};
-    const receive=event=>{
-      const message=event.data;
-      if(message?.type!=='pong'||message.id!==id||message.url!==url||unwrap_global_target(event.source)!==unwrap_global_target(frame.contentWindow))return;
+    const receive=(message,source)=>{
+      if(message.id!==id||message.url!==url||nonce!==undefined&&message.nonce!==nonce||unwrap_global_target(source)!==unwrap_global_target(frame.contentWindow))return;
       cleanup();resolve();
     };
     const ping=()=>{
-      try{unwrap_global_target(frame.contentWindow)?.postMessage({type:'ping',id,url},'*');}
+      try{const target=unwrap_global_target(frame.contentWindow);if(target)post_bootstrap_message(target,{type:'ping',sandstone_bootstrap:1,id,url});}
       catch(error){cleanup();reject(error);return;}
       if(!finished)timer=setTimeout(ping,50);
     };
     if(signal?.aborted){abort();return;}
-    listen_runtime(globalThis,'message',receive);
+    bootstrap_waiters.add(receive);listen_bootstrap();
     signal?.addEventListener('abort',abort,{once:true});
     ping();
   });
@@ -235,21 +250,25 @@ export function wait_on_frame(frame,{signal,url=frame.src}={}) {
 
 //handle the initial set_host message from the host
 function host_set_handler(event) {
-  let msg = event.data;
-  if (!msg || typeof msg !== "object") return;
-  let msg_port = event.ports[0];
-
-  if (msg.type === "ping" && event.source && msg.url===globalThis.location.href) {
-    let msg = {
-      type: "pong",
-      id: event.data.id,
-      url:globalThis.location.href
-    };
-    unwrap_global_target(event.source).postMessage(msg, "*");
+  const msg=runtime_message(event,'data'),source=runtime_message(event,'source'),ports=runtime_message(event,'ports')||[];
+  if(!msg||msg.sandstone_bootstrap!==1||!['ping','pong','set_host'].includes(msg.type))return;
+  if((bootstrap_window||host)&&!event.isTrusted)return;
+  stop_runtime_message(event);
+  if(msg.type==='pong'){
+    for(const receive of [...bootstrap_waiters])receive(msg,source);
+    for(const port of ports)port.close();
     return;
   }
-
-  if (msg.type === "set_host" && msg_port) {
+  if(!host||!bootstrap_worker&&source!==bootstrap_parent){for(const port of ports)port.close();return;}
+  if(msg.type==='ping'){
+    if(source&&msg.url===globalThis.location.href)post_bootstrap_message(source,{type:'pong',sandstone_bootstrap:1,id:msg.id,url:globalThis.location.href,nonce:bootstrap_nonce});
+    for(const port of ports)port.close();
+    return;
+  }
+  const msg_port=ports[0];
+  if(ports.length!==1||msg.nonce!==bootstrap_nonce||!bootstrap_nonce||bootstrap_connections>=bootstrap_channels){for(const port of ports)port.close();return;}
+  if (msg_port) {
+    bootstrap_connections++;
     if (!host.target) {
       host.set_target(msg_port);
       on_attach();
@@ -272,5 +291,5 @@ export function set_on_attach(callback) {
 if (self.parent !== globalThis || typeof globalThis.importScripts === "function") {
   host = new RPCTarget();
   host.onmessage = message_listener;
-  listen_runtime(self,"message",host_set_handler);
+  listen_bootstrap();
 }

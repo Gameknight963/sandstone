@@ -28,6 +28,7 @@ test('RPC ports bind frame IDs and document capabilities independently of suppli
 
 test('Child registration and channel attachment cannot replace unrelated or ancestor sources',()=>{
   const {policy,port,call,child}=fixture(),first={},second={};
+  assert.throws(()=>policy.attach(port,undefined,'first'),{name:'SecurityError'});
   policy.attach(port,first,'first');child('first');policy.attach(port,second,'second');child('second');
   assert.throws(()=>policy.attach(port,{},'first'),{name:'SecurityError'});
   assert.throws(()=>policy.attach(first,{},'root'),{name:'SecurityError'});

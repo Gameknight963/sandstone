@@ -1,6 +1,7 @@
 import * as network from "../network.mjs";
 import * as loader from "../loader.mjs";
 import * as rpc from "../../rpc.mjs";
+import {bootstrap_worker,create_bootstrap_nonce} from '../../bootstrap.mjs';
 import * as parser from "../parser.mjs";
 import { ctx, update_ctx, run_script, convert_url } from "../context.mjs";
 import { modules } from "./module.mjs";
@@ -138,6 +139,7 @@ export class FakeWorker extends EventTarget {
   #token = "" + Math.random();
   #registered = false;
   #bootstrap;
+  #bootstrap_nonce=create_bootstrap_nonce();
   #controller = new AbortController();
   #unload;
   #source_urls=new Map();
@@ -177,7 +179,7 @@ export class FakeWorker extends EventTarget {
 
   #blob(payload) {
     return URL.createObjectURL(new Blob([
-      loader.runtime_src, "\nsandstone_frame.worker.initialize_worker(", JSON.stringify(payload), ");"
+      bootstrap_worker(loader.runtime_src,this.#bootstrap_nonce), "\nsandstone_frame.worker.initialize_worker(", JSON.stringify(payload), ");"
     ], {type: "text/javascript"}));
   }
 
@@ -254,7 +256,7 @@ export class FakeWorker extends EventTarget {
     this.#worker.onerror = event => { event.preventDefault(); this.#error(event.error || new Error(event.message)); };
     const channel = new MessageChannel();
     rpc.attach_host(channel.port1, this.#id);
-    rpc.set_host(this.#worker, channel.port2);
+    rpc.set_host(this.#worker, channel.port2,{nonce:this.#bootstrap_nonce});
     this.#worker.postMessage({sandstone_worker: this.#token, type: "connect"}, [this.#receiver]);
     this.#receiver = null;
   }

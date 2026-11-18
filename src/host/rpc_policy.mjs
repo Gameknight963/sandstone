@@ -19,6 +19,7 @@ export class RPCSourcePolicy {
   owns(scope,id){const child=this.frames()[id];return child?.parent_id===scope.id&&child.parent_context===scope.context;}
   attach(source,port,id){
     const scope=this.scope(source);this.active(scope);
+    if(!port||typeof port!=='object')denied();
     if(typeof id!=='string'||!id||id===scope.id)denied();
     const child=this.frames()[id],pending=this.pending.get(id);
     if(pending?.context)denied();

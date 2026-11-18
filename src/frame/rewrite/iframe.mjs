@@ -14,6 +14,7 @@ import {sandbox_tokens} from '../../navigation_policy.mjs';
 import {resource_attribute} from '../resource_attributes.mjs';
 import {register_media_attributes,render_media_attribute,media_attribute_mirror} from '../media_attributes.mjs';
 import {delay_script_load} from '../script_lifetime.mjs';
+import {bootstrap_html,create_bootstrap_nonce} from '../../bootstrap.mjs';
 
 const inline_frames=new WeakMap(),sandbox_lists=new WeakMap();
 const inline_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'srcdoc');
@@ -155,9 +156,10 @@ export function rewrite_iframe(iframe_element) {
       if(!current())return;
 
       //load the frame runtime
+      const bootstrap_nonce=create_bootstrap_nonce(),runtime_source=bootstrap_html(loader.frame_html,bootstrap_nonce,2);
       const use_inline=authored.get('srcdoc')!==null;
-      const runtime_url=use_inline?'about:srcdoc#'+crypto.randomUUID():network.create_blob_url(new Blob([loader.frame_html], {type: "text/html"}));
-      const runtime_html=use_inline?loader.frame_html.replace(/(<head[^>]*>)/i,'$1<script>history.replaceState(null,"",'+JSON.stringify(runtime_url)+');document.currentScript.remove();<\/script>'):undefined;
+      const runtime_url=use_inline?'about:srcdoc#'+crypto.randomUUID():network.create_blob_url(new Blob([runtime_source], {type: "text/html"}));
+      const runtime_html=use_inline?runtime_source.replace(/(<head[^>]*>)/i,'$1<script>history.replaceState(null,"",'+JSON.stringify(runtime_url)+');document.currentScript.remove();<\/script>'):undefined;
       await new Promise((resolve) => {
         const cleanup=()=>{if(native_runtime_load===loaded)native_runtime_load=undefined;controller.signal.removeEventListener('abort',aborted);};
         const aborted=()=>{cleanup();resolve();};
@@ -174,14 +176,14 @@ export function rewrite_iframe(iframe_element) {
       if(!current())return;
       // A load event may belong to the previous document or the blank reset.
       // The reflected src is virtual, so identify the physical runtime explicitly.
-      try{await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:runtime_url});}
+      try{await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:runtime_url,nonce:bootstrap_nonce});}
       catch(error){if(!current())return;throw error;}
       if(!current())return;
 
       //create the rpc message channel
       let msg_channel = new MessageChannel();
       rpc.attach_host(msg_channel.port1, frame_id);
-      rpc.set_host(iframe_element, msg_channel.port2);
+      rpc.set_host(iframe_element, msg_channel.port2,{nonce:bootstrap_nonce});
 
       //create additional rpc target for sending the html
       let msg_channel_2 = new MessageChannel();
@@ -194,7 +196,7 @@ export function rewrite_iframe(iframe_element) {
         for(const port of event.ports)port.close();
       };
       msg_channel_2.port1.start();
-      rpc.set_host(iframe_element, msg_channel_2.port2);
+      rpc.set_host(iframe_element, msg_channel_2.port2,{nonce:bootstrap_nonce});
       const send_page=options=>rpc.call_procedure(rpc_target,'html',[options],{signal:controller.signal});
 
       iframe_url=final_url;

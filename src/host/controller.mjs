@@ -12,6 +12,7 @@ import './storage.mjs';
 import './navigation_targets.mjs';
 import {navigation_sandbox} from '../navigation_policy.mjs';
 import {RPCSourcePolicy} from './rpc_policy.mjs';
+import {bootstrap_html,create_bootstrap_nonce} from '../bootstrap.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 export {cache_storage} from './cache.mjs';
@@ -23,7 +24,6 @@ import { libcurl } from "libcurl.js/bundled";
 //frame_js is a string, which is imported using webpack
 import frame_js from "../../dist/sandstone_frame.js";
 
-let frame_blob = null;
 let frame_html = `
   <!DOCTYPE html>
   <head>
@@ -65,9 +65,8 @@ export const persist_storage_key = "proxy_local_storage";
 export let local_storage = {};
 local_storage = site_data.local;
 
-function get_frame_bundle() {
-  frame_blob ||= new Blob([frame_html], {type: "text/html"});
-  return URL.createObjectURL(frame_blob);
+function get_frame_bundle(nonce) {
+  return URL.createObjectURL(new Blob([bootstrap_html(frame_html,nonce)],{type:'text/html'}));
 }
 
 export class ProxyFrame {
@@ -173,7 +172,8 @@ export class ProxyFrame {
     // A fresh URL identifies the intended document and forces a real load;
     // changing only a fragment would keep the old runtime alive.
     const previous_runtime=this.runtime_url;
-    this.runtime_url=get_frame_bundle();
+    const bootstrap_nonce=create_bootstrap_nonce();
+    this.runtime_url=get_frame_bundle(bootstrap_nonce);
     this.iframe.src = this.runtime_url;
     if(previous_runtime)URL.revokeObjectURL(previous_runtime);
     indexed_db.disconnect(this.id);
@@ -198,13 +198,13 @@ export class ProxyFrame {
     settings = {...this.default_settings, ...settings};
     console.log("site settings:", settings);
 
-    try{await rpc.wait_on_frame(this.iframe,{signal:runtime_wait.signal});}
+    try{await rpc.wait_on_frame(this.iframe,{signal:runtime_wait.signal,nonce:bootstrap_nonce});}
     catch(error){if(navigation_id!==this.navigation_id)return;throw error;}
     if (navigation_id !== this.navigation_id) return;
     let msg_channel = new MessageChannel();
     this.rpc_target.set_target(msg_channel.port1);
     msg_channel.port1.start();
-    await rpc.set_host(this.iframe, msg_channel.port2);
+    await rpc.set_host(this.iframe, msg_channel.port2,{nonce:bootstrap_nonce});
     const beacon_context = network.beacons.register(this.id, {url: this.url.href, top_url: this.url.href,broadcast_origin:this.broadcast_origin,root_id:this.id});
     this.document_context=beacon_context;
     this.rpc_policy.bind_root(msg_channel.port1,beacon_context);
