@@ -136,6 +136,8 @@ const scriptAttributesTest=await readFile(new URL('script-attributes.playwright.
 const verifyScriptAttributes=runInThisContext(`(${scriptAttributesTest})`);
 const scriptTypesTest=await readFile(new URL('script-types.playwright.js',import.meta.url),'utf8');
 const verifyScriptTypes=runInThisContext(`(${scriptTypesTest})`);
+const scriptPreparationTest=await readFile(new URL('script-preparation.playwright.js',import.meta.url),'utf8');
+const verifyScriptPreparation=runInThisContext(`(${scriptPreparationTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 let activeStorageMode;
@@ -207,6 +209,7 @@ try {
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyScriptAttributes(page), 'Script attribute fixture'));
     result.passed.push(...await timed(verifyScriptTypes(page), 'Script type fixture'));
+    result.passed.push(...await timed(verifyScriptPreparation(page), 'Script preparation fixture'));
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));

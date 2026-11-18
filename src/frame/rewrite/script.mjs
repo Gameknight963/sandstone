@@ -6,6 +6,7 @@ import {schedule_resource_event} from '../resource_events.mjs';
 import {remember_attribute_order} from '../resource_attributes.mjs';
 import {is_svg_script,rewrite_svg_script,capture_svg_script,mark_svg_parser_script,mark_svg_script_connected} from '../svg_scripts.mjs';
 import {script_kind} from '../script_types.mjs';
+import {defer_script,deferred_script} from '../script_preparation.mjs';
 
 export const pending_scripts = [];
 let script_num = 0;
@@ -29,6 +30,7 @@ function eligible(element,record){
 export function mark_script_connected(element){
   if(is_svg_script(element)){mark_svg_script_connected(element);return;}
   if(!globalThis.HTMLScriptElement||!(element instanceof HTMLScriptElement)||!connected.call(element))return;
+  if(deferred_script(element))return;
   const record=records.get(element);if(!eligible(element,record))return;
   if(record)record.started=true;
   else if(!view.call(owner.call(element))||element.__rewritten__===true)element.__sandstone_inert__=true;
@@ -72,11 +74,15 @@ export function should_load(element) {
   return loader.site_settings.allow_js && (kind==='classic'||kind==='module');
 }
 
-export function rewrite_script(element,{parser=false,signal,run,sourceElement=element}={}) {
+export function rewrite_script(element,{parser=false,signal,run,sourceElement=element,awakened=false}={}) {
   if(is_svg_script(element))return rewrite_svg_script(element,{parser,signal,run});
+  if(deferred_script(element))return;
   remember_attribute_order(element,['src','type']);
   const original_type=get.call(element,'type');
   const kind=script_kind(original_type,get.call(element,'language'));
+  if(!awakened&&!element.__sandstone_inert__&&(kind===null||get.call(element,'src')===null&&data.get.call(element)==='')){
+    defer_script(element,()=>rewrite_script(element,{sourceElement,awakened:true}));return;
+  }
   if (kind === "importmap") {
     records.set(element,{started:false,type:()=>get.call(element,'type')==='application/x-sandstone-importmap'?original_type:get.call(element,'type'),src:()=>get.call(element,'src')});
     element.type = "application/x-sandstone-importmap";
