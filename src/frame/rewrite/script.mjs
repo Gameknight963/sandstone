@@ -8,6 +8,7 @@ import {is_svg_script,rewrite_svg_script,capture_svg_script,mark_svg_parser_scri
 import {script_kind} from '../script_types.mjs';
 import {defer_script,deferred_script} from '../script_preparation.mjs';
 import {ordered_script,ordered_classic} from '../script_schedule.mjs';
+import {delay_script_load} from '../script_lifetime.mjs';
 
 export const pending_scripts = [];
 let script_num = 0;
@@ -107,25 +108,28 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
   let executed = false;
   let started = false;
   let prepared;
-  let resource,order,failure,preparation_document,was_connected=false,order_released=false;
+  let resource,order,failure,preparation_document,finish_load=()=>{},was_connected=false,order_released=false,load_started=false;
   element.type = "application/x-sandstone-script";
   element.removeAttribute("src");
 
   element.__sandstone_execute__ = () => {
-    if(!was_connected&&element.isConnected){was_connected=true;preparation_document=owner.call(sourceElement);}
+    if(!was_connected&&element.isConnected){
+      was_connected=true;preparation_document=owner.call(sourceElement);
+    }
     if (!enabled || executed || !was_connected || (script_url===null && !element.textContent.trim())) return;
+    if(!parser&&!load_started&&(is_module||script_url!==null)){load_started=true;finish_load=delay_script_load();}
     if(ordered){
       executed=true;order=ordered_script();
       Promise.resolve(is_module?prepared:resource).then(record=>order.ready(()=>{
         order_released=true;
-        if(owner.call(sourceElement)!==preparation_document)return;
-        if(failure)return ordered_classic(()=>deliver_error(failure));
-        if(is_module)return record?execute_module(record,{ordered:true}).then(()=>sourceElement.dispatchEvent(new Event('load'))):undefined;
-        return ordered_classic(()=>loader.eval_script(sourceElement,text,{run}));
+        if(owner.call(sourceElement)!==preparation_document){finish_load();return;}
+        if(failure)return ordered_classic(()=>{try{deliver_error(failure);}finally{finish_load();}});
+        if(is_module)return record?execute_module(record,{ordered:true}).then(()=>{sourceElement.dispatchEvent(new Event('load'));finish_load();}):undefined;
+        return ordered_classic(()=>{try{return loader.eval_script(sourceElement,text,{run});}finally{finish_load();}});
       }));
       return order.finished.catch(report_error);
     }
-    if(owner.call(sourceElement)!==preparation_document){executed=true;return;}
+    if(owner.call(sourceElement)!==preparation_document){executed=true;finish_load();return;}
     if (is_module) {
       executed = true;
       prepared ||= prepare_module();
@@ -133,18 +137,24 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
         if (!record) return;
         await execute_module(record);
         sourceElement.dispatchEvent(new Event("load"));
+        finish_load();
       }).catch(report_error);
     }
     if (!ready) return;
     started = true;
     executed = true;
-    return loader.eval_script(sourceElement, script_url ? text : element.textContent,{run});
+    try{return loader.eval_script(sourceElement, script_url ? text : element.textContent,{run});}finally{finish_load();}
   };
 
   function report_error(error) {
     if(signal?.aborted)return;
     if(ordered&&!order_released){failure=error;return;}
-    schedule_resource_event(sourceElement,()=>deliver_error(error));
+    if(parser){schedule_resource_event(sourceElement,()=>deliver_error(error));return;}
+    const deliver=()=>{
+      if(!was_connected){schedule_resource_event(sourceElement,deliver);return;}
+      try{if(owner.call(sourceElement)===preparation_document)deliver_error(error);}finally{finish_load();}
+    };
+    setTimeout(deliver,0);
   }
   function deliver_error(error){
     if(signal?.aborted)return;

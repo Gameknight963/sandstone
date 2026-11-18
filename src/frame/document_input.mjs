@@ -12,6 +12,7 @@ import {pending_media_attribute} from './media_attributes.mjs';
 import {pending_style_request} from './style_requests.mjs';
 import {is_svg_script} from './svg_scripts.mjs';
 import {script_kind,svg_script_kind} from './script_types.mjs';
+import {pending_script_loads,wait_script_loads} from './script_lifetime.mjs';
 
 let session,writer,writerOwner,ignoreWrites=0,validation;
 const type=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'contentType').get;
@@ -114,15 +115,21 @@ function close(current){
   if(current.stream.closed)interactive();
   if(!live()){current.finished=Promise.resolve();return;}
   const imageLoads=current.stream.closed?images(current):[];
-  if(live()&&current.stream.closed&&!current.stream.pendingResources&&!current.deferred.length&&!current.async.length&&!imageLoads.length){
-    emit(document,'DOMContentLoaded');complete();current.finished=Promise.resolve();return;
+  if(live()&&current.stream.closed&&!current.stream.pendingResources&&!current.deferred.length&&!current.async.length&&!imageLoads.length&&!pending_script_loads()){
+    emit(document,'DOMContentLoaded');
+    if(!current.source&&!pending_script_loads()){complete();current.finished=Promise.resolve();return;}
+    // Source parsing yields for DOMContentLoaded microtasks before deciding
+    // whether load is still delayed. Explicit document.close stays synchronous
+    // when it has no pending resources, as in native written documents.
+    current.finished=Promise.resolve().then(()=>wait_script_loads(current.controller.signal)).then(()=>{if(live())complete();});return;
   }
   current.finished=parsed.then(async()=>{
     if(!live())return;interactive();
     if(!live())return;
     for(const execute of current.deferred){await execute();if(!live())return;}
     emit(document,'DOMContentLoaded');
-    await Promise.allSettled([...current.async,current.stream.settled(),...styles(current),...imageLoads,...images(current)]);if(!live())return;complete();
+    await Promise.allSettled([...current.async,current.stream.settled(),...styles(current),...imageLoads,...images(current)]);
+    await wait_script_loads(current.controller.signal);if(!live())return;complete();
   }).catch(error=>{if(!current.controller.signal.aborted)console.error(error);});
 }
 
