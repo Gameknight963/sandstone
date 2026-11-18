@@ -2,6 +2,7 @@ import * as rpc from '../rpc.mjs';
 import * as loader from './loader.mjs';
 import {FakeStorage,install_storage_prototype,replace_storage_entries} from './polyfill/storage.mjs';
 import {StorageReplica} from '../storage_replica.mjs';
+import {register_document} from './document_identity.mjs';
 
 let active;
 const storage_prototype=globalThis.Storage?.prototype;
@@ -43,6 +44,7 @@ export function create_document_storage(options,url,window){
   // whose virtual origin matches; other frame trees continue through host sync.
   try{if(parent!==globalThis)group=parent.sandstone_frame?.storage_sync.storage_group(origin);}catch{}
   group??={token,sequence:0,documents:new Map(),areas:{},storage_brand:new WeakMap()};
+  register_document(group,window().document);
   const document=active={token,window,origin,group,send:(kind,change)=>rpc.call_procedure(rpc.host,kind+'_storage',[id,undefined,change]).catch(console.error)};
   group.documents.set(token,document);
   for(const kind of ['local','session']){
