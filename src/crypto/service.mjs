@@ -1,4 +1,5 @@
 import {key_tag, key_handle, key_metadata, transform_keys, crypto_methods} from './codec.mjs';
+const clone=globalThis.structuredClone;
 
 export class CryptoService {
   constructor(crypto = globalThis.crypto) {
@@ -26,7 +27,10 @@ export class CryptoService {
       const metadata=key_metadata(value);if(!metadata)return value;
       const key = this.keys.get(metadata[key_tag]);
       if (!key) throw new DOMException('Unknown cryptographic key', 'DataCloneError');
-      return key;
+      // Each distinct serialized handle is a separate key object, even when
+      // its material and capability match another handle. The graph traversal
+      // still reuses this clone for repeated references to that same handle.
+      return clone(key);
     });
   }
   async call(method, args) {

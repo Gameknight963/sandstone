@@ -112,6 +112,23 @@ test('Key handles restore RSA public exponent metadata and preserve native expor
   await assert.rejects(subtle.exportKey('pkcs8',copy.privateKey),error=>/^InvalidAccess/.test(error.name));
 });
 
+test('Broker round-trips preserve separate clones of one key and shared references within each graph',async()=>{
+  const {subtle,client,service}=fixture();
+  const key=await subtle.generateKey({name:'HMAC',hash:'SHA-256'},false,['sign','verify']);
+  const independent=client.decode(structuredClone(client.encode(key)));
+  const graph={key,again:key,independent,map:new Map([[key,'original'],[independent,'clone']]),set:new Set([key,independent])};
+  const native=service.decode(structuredClone(client.encode(graph)));
+  assert.equal(native.key,native.again);assert.notEqual(native.key,native.independent);
+  assert.equal(native.map.size,2);assert.equal(native.set.size,2);
+  assert.equal(native.map.get(native.key),'original');assert.equal(native.map.get(native.independent),'clone');
+  const roundTrip=client.decode(structuredClone(service.encode(native)));
+  assert.equal(roundTrip.key,roundTrip.again);assert.notEqual(roundTrip.key,roundTrip.independent);
+  assert.equal(roundTrip.map.size,2);assert.equal(roundTrip.set.size,2);
+  const signature=await subtle.sign('HMAC',roundTrip.key,bytes('shared material'));
+  assert.equal(await subtle.verify('HMAC',roundTrip.independent,signature,bytes('shared material')),true);
+  assert.equal(roundTrip.key.extractable,false);assert.equal(roundTrip.independent.extractable,false);
+});
+
 test('Modern native key encapsulation and public key derivation are forwarded when available',async()=>{
   const {subtle}=fixture();
   const pair=await subtle.generateKey('ML-KEM-768',false,['encapsulateBits','decapsulateBits','encapsulateKey','decapsulateKey']);
