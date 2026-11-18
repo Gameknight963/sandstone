@@ -4,6 +4,7 @@ const states=new WeakMap(),registries=new Set([states]);
 function lookup(receiver){
   for(const registry of registries){const state=registry.get(receiver);if(state)return state;}
 }
+export const is_virtual_storage=receiver=>!!lookup(receiver);
 function brand(receiver){
   const value=lookup(receiver);if(!value)throw new TypeError('Illegal invocation');
   return value;

@@ -1,8 +1,9 @@
 import * as rpc from '../rpc.mjs';
 import * as loader from './loader.mjs';
-import {FakeStorage,install_storage_prototype,replace_storage_entries} from './polyfill/storage.mjs';
+import {FakeStorage,install_storage_prototype,replace_storage_entries,is_virtual_storage} from './polyfill/storage.mjs';
 import {StorageReplica} from '../storage_replica.mjs';
-import {register_document} from './document_identity.mjs';
+import {register_document,document_states} from './document_identity.mjs';
+import {install_storage_events} from '../storage_events.mjs';
 import {configure_style_mutations} from './rewrite/style.mjs';
 import {cookie_document_active} from './polyfill/cookie.mjs';
 import {configure_document_events} from './event_identity.mjs';
@@ -12,6 +13,7 @@ import {configure_form_submissions} from './rewrite/form.mjs';
 let active;
 const storage_prototype=globalThis.Storage?.prototype;
 install_storage_prototype(globalThis.Storage);
+if(globalThis.StorageEvent)globalThis.StorageEvent=install_storage_events(globalThis.StorageEvent,is_virtual_storage,document_states('storage-event-areas'));
 export function storage_group(origin){return active?.origin===origin&&origin!=='null'?active.group:undefined;}
 const dispatch=globalThis.dispatchEvent;
 const current=globalThis.Event&&Object.getOwnPropertyDescriptor(Event.prototype,'currentTarget');
@@ -38,9 +40,9 @@ rpc.rpc_handlers.storage_update=(token,kind,change,ack,event,revision)=>{
   if(!event)return;
   setTimeout(()=>{
     if(active!==document)return;
-    const notification=new StorageEvent('storage',event),window=document.window();
+    const notification=new StorageEvent('storage',{...event,storageArea:store.storage}),window=document.window();
     Object.defineProperties(notification,{
-      storageArea:{value:store.storage},target:{value:window},
+      target:{value:window},
       currentTarget:{get(){const target=current.get.call(this);return target===globalThis?window:target;}},
       composedPath:{value(){return path.call(this).map(target=>target===globalThis?window:target);}}
     });

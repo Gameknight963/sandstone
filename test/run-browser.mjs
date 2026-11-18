@@ -110,6 +110,8 @@ const lifecycleTest=await readFile(new URL('lifecycle-events.playwright.js',impo
 const verifyLifecycleEvents=runInThisContext(`(${lifecycleTest})`);
 const storageUnloadTest=await readFile(new URL('storage-unload.playwright.js',import.meta.url),'utf8');
 const verifyStorageUnload=runInThisContext(`(${storageUnloadTest})`);
+const storageEventInterfaceTest=await readFile(new URL('storage-event-interface.playwright.js',import.meta.url),'utf8');
+const verifyStorageEventInterface=runInThisContext(`(${storageEventInterfaceTest})`);
 const blankFramesTest=await readFile(new URL('blank-frames.playwright.js',import.meta.url),'utf8');
 const verifyBlankFrames=runInThisContext(`(${blankFramesTest})`);
 const rpcSourceTest=await readFile(new URL('rpc-source.playwright.js',import.meta.url),'utf8');
@@ -273,6 +275,7 @@ try {
     result.passed.push(...await timed(verifyStorageWrites(page), 'Concurrent storage fixture'));
     result.passed.push(...await timed(verifyStorageSynchronous(page), 'Synchronous shared storage fixture'));
     result.passed.push(...await timed(verifyStorageInterface(page), 'Storage interface fixture'));
+    result.passed.push(...await timed(verifyStorageEventInterface(page), 'Storage event interface fixture'));
     result.passed.push(...await timed(verifyCookieSharing(page), 'Cookie sharing fixture'));
     result.passed.push(...await timed(verifyCookieAccessor(page), 'Cookie accessor fixture'));
     result.passed.push(...await timed(verifyStorageEvents(page), 'Storage event fixture'));
