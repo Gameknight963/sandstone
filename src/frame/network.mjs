@@ -5,6 +5,7 @@ import { ctx } from "./context.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
 import {document_referrer_policy} from './intercept/document.mjs';
 import {reserve_keepalive} from './keepalive_budget.mjs';
+const native_fetch=globalThis.fetch;
 
 export const rpc_fetch = rpc.create_rpc_wrapper(rpc.host, "fetch");
 const rpc_fetch_read = rpc.create_rpc_wrapper(rpc.host, "fetch_read");
@@ -37,7 +38,7 @@ export async function fetch(url, options) {
   let base_url = ctx.location?.href || loader.url;
   url = new URL(url, base_url);
   if (url.protocol === "data:" || url.protocol === "blob:") {
-    try { return await globalThis.fetch(url.href, options); }
+    try { return await native_fetch(url.href, options); }
     finally { options?.sandstone_keepalive_release?.(); }
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {

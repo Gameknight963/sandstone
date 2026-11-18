@@ -6,7 +6,7 @@ import { update_ctx, run_script, ctx } from "./context.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
 import {configure_crypto} from './polyfill/crypto.mjs';
 import {default_referrer_policy} from '../referrer.mjs';
-import {document_referrer_policy,reset_document_referrer_policy} from './intercept/document.mjs';
+import {document_referrer_policy,reset_document_referrer_policy,set_current_script,get_current_script} from './intercept/document.mjs';
 import {configure_window_messages} from './window_messages.mjs';
 import {load_document_html,run_document_script} from './document_input.mjs';
 
@@ -45,8 +45,8 @@ rpc.rpc_handlers["child_navigate"] = (id, url, form_data, navigation) => child_n
 rpc.rpc_handlers.child_window_name=(id,value)=>child_names.get(id)?.(value);
 
 export function eval_script(script_element, script_text,{run=callback=>run_document_script(script_element,callback)}={}) {
-  const previous_script=ctx.document.currentScript;
-  ctx.document.currentScript = script_element;
+  const previous_script=get_current_script();
+  set_current_script(script_element);
   let script = document.createElement("script");
   script.__rewritten__ = true;
   try {
@@ -61,7 +61,7 @@ export function eval_script(script_element, script_text,{run=callback=>run_docum
     console.error(e);
   }
   script.remove();
-  ctx.document.currentScript = previous_script;
+  set_current_script(previous_script);
   script_element.dispatchEvent(new Event("load"));
 }
 

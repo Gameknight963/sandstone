@@ -84,3 +84,93 @@ test('Explicit undefined overrides hide native features without reading their ge
   virtual.method=undefined;
   assert.equal(virtual.method,undefined);assert.equal(typeof target.method,'function');
 });
+
+test('Reflected data properties expose the same virtual APIs and method identities as normal reads',()=>{
+  const target={api(){return 'native';},method(){return this===target;}},api=()=> 'virtual';
+  const virtual=create_obj_proxy({api},['api'],target);
+  assert.equal(Object.getOwnPropertyDescriptor(virtual,'api').value,api);
+  assert.equal(Reflect.getOwnPropertyDescriptor(virtual,'api').value,virtual.api);
+  const descriptors=Object.getOwnPropertyDescriptors(virtual);
+  assert.equal(descriptors.api.value,api);assert.equal(descriptors.method.value,virtual.method);
+  const method=descriptors.method.value;assert.equal(method(),true);
+  virtual.alias=api;assert.equal(virtual.alias,virtual.api);
+});
+
+test('Reflected virtual accessors stay lazy, retain getter identity and preserve borrowed native receivers',()=>{
+  let nativeReads=0,virtualReads=0;
+  const target={backing:'native'};
+  Object.defineProperty(target,'storage',{configurable:true,enumerable:true,get(){nativeReads++;return this.backing;}});
+  const obj={get storage(){virtualReads++;return 'virtual';}},virtual=create_obj_proxy(obj,['storage'],target);
+  const original=Object.getOwnPropertyDescriptor(virtual,'storage');
+  assert.equal(nativeReads,0);assert.equal(virtualReads,0);
+  assert.equal(original.get,Object.getOwnPropertyDescriptor(virtual,'storage').get);
+  assert.equal(original.get.call(virtual),'virtual');assert.equal(virtualReads,1);assert.equal(nativeReads,0);
+  assert.equal(original.get.call({backing:'borrowed'}),'borrowed');assert.equal(nativeReads,1);
+  Object.defineProperty(virtual,'storage',{get(){return this===virtual?'patched':'wrong';}});
+  assert.equal(virtual.storage,'patched');assert.equal(original.get.call(virtual),'virtual');
+});
+
+test('Descriptor-based instrumentation and restoration preserve virtual APIs and writable flags',()=>{
+  const target={api(){return 'native';}},api=()=> 'virtual',virtual=create_obj_proxy({api},['api'],target);
+  const original=Object.getOwnPropertyDescriptor(virtual,'api');
+  const patched=()=>original.value()+' patched';
+  Object.defineProperty(virtual,'api',{value:patched,writable:false});
+  assert.equal(virtual.api(), 'virtual patched');assert.equal(Object.getOwnPropertyDescriptor(virtual,'api').value,patched);
+  assert.equal(Reflect.set(virtual,'api',api),false);assert.throws(()=>{virtual.api=api;},TypeError);
+  Object.defineProperty(virtual,'api',original);assert.equal(virtual.api,api);assert.equal(target.api(),'native');
+});
+
+test('Fixed virtual data descriptors obey Proxy invariants and cannot be rewritten or deleted',()=>{
+  const api=()=> 'virtual',target={api(){return 'native';}},virtual=create_obj_proxy({api},['api'],target);
+  Object.defineProperty(virtual,'api',{configurable:false,writable:false});
+  assert.equal(virtual.api,api);assert.equal(target.api,api);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(virtual,'api'),Object.getOwnPropertyDescriptor(target,'api'));
+  assert.equal(Reflect.set(virtual,'api',()=>{}),false);assert.equal(Reflect.deleteProperty(virtual,'api'),false);
+  assert.equal(Reflect.defineProperty(virtual,'api',{value:()=>{}}),false);
+});
+
+test('Deleting and restoring an API updates property reads, keys, descriptors and presence consistently',()=>{
+  const api=()=> 'virtual',target={api(){return 'native';}},virtual=create_obj_proxy({api},['api'],target);
+  const original=Object.getOwnPropertyDescriptor(virtual,'api');
+  assert.equal(Reflect.deleteProperty(virtual,'api'),true);assert.equal(virtual.api,undefined);
+  assert.equal('api'in virtual,false);assert.equal(Object.hasOwn(virtual,'api'),false);assert.ok(!Reflect.ownKeys(virtual).includes('api'));
+  Object.defineProperty(virtual,'api',original);assert.equal(virtual.api,api);
+  assert.equal('api'in virtual,true);assert.equal(Object.hasOwn(virtual,'api'),true);assert.ok(Reflect.ownKeys(virtual).includes('api'));
+  assert.equal(Reflect.deleteProperty(virtual,'api'),true);assert.equal(virtual.api,undefined);
+});
+
+test('Preventing extensions and freezing retains virtual values without violating descriptor invariants',()=>{
+  const api=()=> 'virtual',target={api(){return 'native';}},virtual=create_obj_proxy({api},['api','extra'],target);
+  virtual.extra=42;
+  Object.preventExtensions(virtual);assert.equal(Object.isExtensible(virtual),false);
+  assert.deepEqual(Reflect.ownKeys(virtual),Reflect.ownKeys(target));assert.equal(virtual.extra,42);assert.equal(virtual.api,api);
+  assert.equal(Reflect.defineProperty(virtual,'missing',{value:1}),false);
+  Object.freeze(virtual);assert.equal(Object.isFrozen(virtual),true);assert.equal(virtual.api,api);
+  assert.equal(Reflect.set(virtual,'api',null),false);
+});
+
+test('Reflect.set and inherited writes update their receiver without replacing a virtual API',()=>{
+  const api=()=> 'virtual',target={api(){return 'native';}},virtual=create_obj_proxy({api},['api'],target),other={};
+  assert.equal(Reflect.set(virtual,'api',42,other),true);assert.equal(other.api,42);assert.equal(virtual.api,api);
+  const child=Object.create(virtual);child.api='child';assert.equal(child.api,'child');assert.equal(virtual.api,api);
+  assert.equal(Reflect.set(virtual,'api','invalid',null),false);assert.equal(virtual.api,api);
+  Object.defineProperty(virtual,'api',{value:api});
+  Object.defineProperty(target,'api',{value:1,writable:false,configurable:false});
+  assert.equal(Reflect.set(virtual,'api',2,other),false);assert.equal(virtual.api,1);
+});
+
+test('Virtual callable reflection and aliases never inspect authored function properties',()=>{
+  let reads=0;
+  const api=new Proxy(()=>42,{get(target,key,receiver){reads++;throw new Error('Unexpected callable property read: '+String(key));}});
+  const virtual=create_obj_proxy({api},['api'],{api(){return 'native';}});
+  assert.equal(virtual.api,api);assert.equal(Object.getOwnPropertyDescriptor(virtual,'api').value,api);
+  virtual.alias=api;assert.equal(virtual.alias,api);assert.equal(virtual.alias(),42);assert.equal(reads,0);
+});
+
+test('Virtual own keys retain numeric/string/symbol ordering when new API slots are defined',()=>{
+  const symbol=Symbol('metadata'),target={[symbol]:'symbol'},virtual=create_obj_proxy({},['2','1','extra'],target);
+  virtual['2']='two';virtual.extra='extra';virtual['1']='one';
+  const native={[symbol]:'symbol'};native['2']='two';native.extra='extra';native['1']='one';
+  assert.deepEqual(Reflect.ownKeys(virtual),Reflect.ownKeys(native));
+  assert.deepEqual(Object.keys(virtual),Object.keys(native));
+});

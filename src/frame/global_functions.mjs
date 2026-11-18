@@ -25,13 +25,25 @@ export function bind_global_function(target, method, virtual_target) {
 }
 
 export function create_obj_proxy(obj, ctx_vars, target, map_value) {
-  const methods = new WeakMap();
-  const proxy = new Proxy(target, {
-    get: (_, key) => {
-      const replacement = obj[key];
-      if (replacement !== undefined || key in obj) return replacement;
+  const methods = new WeakMap(),overrides=new Map(),deleted=new Set(),accessors=new Map();
+  const originalOwn=new Set(Reflect.ownKeys(target));
+  const descriptor=(object,key)=>{while(object){const found=Reflect.getOwnPropertyDescriptor(object,key);if(found)return found;object=Reflect.getPrototypeOf(object);}};
+  const remember=value=>{if(typeof value==='function'&&!methods.has(value))methods.set(value,value);return value;};
+  const read=(key,receiver=proxy)=>{
+      const fixed=Reflect.getOwnPropertyDescriptor(target,key);
+      if(fixed&&!fixed.configurable){
+        if('value'in fixed&&!fixed.writable)return fixed.value;
+        if(!('value'in fixed)&&!fixed.get)return undefined;
+      }
+      const override=overrides.get(key);
+      if(override)return remember('value'in override?override.value:override.get?.call(receiver));
+      if(!deleted.has(key)){
+        const replacement = obj[key];
+        if (replacement !== undefined || key in obj) return remember(replacement);
+      }
       const native_value = target[key];
       const value = map_value ? map_value(native_value,key) : native_value;
+      if (typeof value === 'function' && methods.has(value))return methods.get(value);
       if (typeof value === 'function' && !value.prototype) {
         // Sites patch globals after first use. Cache by function identity so a
         // replacement takes effect, and restoring a method restores its wrapper.
@@ -43,10 +55,94 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value) {
         return methods.get(value);
       }
       return value;
+  };
+  const own=key=>{
+    const native=Reflect.getOwnPropertyDescriptor(target,key),override=overrides.get(key);
+    if(native&&!native.configurable)return 'value'in native&&native.writable?{...native,value:read(key)}:native;
+    if(!native&&!Reflect.isExtensible(target))return;
+    if(override)return {...override};
+    if(!native)return;
+    if('value'in native)return {...native,value:read(key)};
+    if(deleted.has(key)||!(key in obj))return native;
+    const implementation=descriptor(obj,key);
+    if(!implementation)return native;
+    let cached=accessors.get(key);
+    if(!cached||cached.nativeGet!==native.get||cached.nativeSet!==native.set||cached.get!==implementation.get||cached.set!==implementation.set||cached.value!==implementation.value){
+      const adapt=(method,operation)=>method&&new Proxy(method,{apply(fn,receiver,args){
+        if(receiver===proxy||receiver===target)return operation(...args);
+        return Reflect.apply(fn,unwrap_global_target(receiver),args);
+      }});
+      cached={nativeGet:native.get,nativeSet:native.set,...implementation,
+        getter:adapt(native.get,()=>implementation.get?implementation.get.call(obj):implementation.value),
+        setter:adapt(native.set,value=>implementation.set?implementation.set.call(obj,value):Reflect.set(target,key,value,target))};
+      accessors.set(key,cached);
+    }
+    return {...native,get:cached.getter,set:cached.setter};
+  };
+  const keys=()=>{
+    const native=Reflect.ownKeys(target);if(!Reflect.isExtensible(target))return native;
+    const all=[...new Set([...native,...overrides.keys()])],indices=[],strings=[],symbols=[];
+    for(const key of all){
+      if(typeof key==='symbol'){symbols.push(key);continue;}
+      const index=Number(key);
+      if(Number.isInteger(index)&&index>=0&&index<2**32-1&&String(index)===key)indices.push(key);
+      else strings.push(key);
+    }
+    return [...indices.sort((a,b)=>Number(a)-Number(b)),...strings,...symbols];
+  };
+  const define=(key,input)=>{
+    const current=own(key),scratch=Object.create(null);
+    if(current)Reflect.defineProperty(scratch,key,current);
+    if(!Reflect.defineProperty(scratch,key,input))return false;
+    const complete=Reflect.getOwnPropertyDescriptor(scratch,key);
+    const virtual=overrides.has(key)||ctx_vars.includes(key)||!deleted.has(key)&&key in obj;
+    // Fixed descriptors must agree with the real Proxy target. Configurable
+    // virtual slots can stay separate from native APIs used by the runtime.
+    const fixed=Reflect.getOwnPropertyDescriptor(target,key);
+    if(!virtual||!complete.configurable){
+      if(!Reflect.defineProperty(target,key,complete))return false;
+    }else if(!Reflect.getOwnPropertyDescriptor(target,key)&&!Reflect.isExtensible(target))return false;
+    if(virtual){if(!fixed||fixed.configurable||'value'in fixed)overrides.set(key,complete);deleted.delete(key);}
+    return true;
+  };
+  const proxy = new Proxy(target, {
+    get: (_, key, receiver) => read(key,receiver),
+    getOwnPropertyDescriptor:(_,key)=>own(key),
+    ownKeys:keys,
+    has:(_,key)=>overrides.has(key)||Reflect.has(target,key),
+    defineProperty:(_,key,input)=>define(key,input),
+    deleteProperty:(_,key)=>{
+      const current=own(key);if(current&&!current.configurable)return false;
+      if(!Reflect.deleteProperty(target,key))return false;
+      overrides.delete(key);
+      if(originalOwn.has(key)&&key in obj)deleted.add(key);
+      return true;
     },
-    set: (_, key, value) => {
-      if (ctx_vars.includes(key)) obj[key] = value;
-      else target[key] = value;
+    set: (_, key, value,receiver) => {
+      if(receiver!==proxy&&receiver!==target){
+        const fixed=Reflect.getOwnPropertyDescriptor(target,key),current=fixed&&!fixed.configurable?fixed:overrides.get(key)||descriptor(target,key),scratch=Object.create(null);
+        if(current)Reflect.defineProperty(scratch,key,current);
+        return Reflect.set(scratch,key,value,receiver);
+      }
+      const override=overrides.get(key);
+      if(override){
+        if(!('value'in override)){if(!override.set)return false;override.set.call(receiver,value);return true;}
+        if(!override.writable)return false;
+        return define(key,{value});
+      }
+      if(ctx_vars.includes(key)){
+        const native=descriptor(target,key),virtual=deleted.has(key)?undefined:descriptor(obj,key);
+        if(native&&('value'in native?!native.writable:!native.set))return false;
+        if(virtual?.set){virtual.set.call(obj,value);return true;}
+        if(virtual&&'value'in virtual&&virtual.writable)Reflect.set(obj,key,value,obj);
+        return define(key,Reflect.has(target,key)&&Reflect.getOwnPropertyDescriptor(target,key)?{value}:{value,writable:true,enumerable:true,configurable:true});
+      }
+      return Reflect.set(target,key,value,target);
+    },
+    preventExtensions:()=>{
+      for(const key of overrides.keys())if(!Reflect.getOwnPropertyDescriptor(target,key)&&!Reflect.defineProperty(target,key,own(key)))return false;
+      if(!Reflect.preventExtensions(target))return false;
+      for(const key of Reflect.ownKeys(target))if(!Reflect.defineProperty(target,key,own(key)))return false;
       return true;
     }
   });

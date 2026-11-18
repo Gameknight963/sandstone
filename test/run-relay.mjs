@@ -420,6 +420,9 @@ try{
   },origin);
   const authResult=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),authenticatedScript));
   assert.deepEqual(authResult,authBaseline,'WebSocket login/handshake cookie behavior differs from the native browser');
+  const reflectedAuthScript=authenticatedScript.replace('new WebSocket(', 'new (Object.getOwnPropertyDescriptor(globalThis,"WebSocket").value)(');
+  const reflectedAuth=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),reflectedAuthScript));
+  assert.deepEqual(reflectedAuth,authBaseline,'Reflected WebSocket bypassed virtual authentication or the relay');
   const beaconClient='beacon-'+storageDenied;
   const beaconResult=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),beaconScript(beaconClient)));
   assert.deepEqual(beaconResult,beaconBaseline,'sendBeacon synchronous behavior differs from native Chromium');
