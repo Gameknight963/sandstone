@@ -24,6 +24,14 @@ test('Switch discriminants use the outer scope while case expressions retain the
   assert.throws(()=>compile(Function,['switch("value"){case location:let location="body";}'],context)(),ReferenceError);
 });
 
+test('Class static blocks isolate declarations from sibling blocks, fields and enclosing functions',()=>{
+  const context={location:{href:'https://virtual.test/'},fetch:()=>7};
+  const source='class Model{static{var location="first";this.first=()=>location;}static url=location.href;static{let location="second";this.second=()=>location;}static later=location.href;}return [location.href,Model.url,Model.later,Model.first(),Model.second()];';
+  assert.deepEqual(compile(Function,[source],context)(),[context.location.href,context.location.href,context.location.href,'first','second']);
+  assert.equal(compile(Function,['class Model{static{var fetch=7;}static fn=fetch;}return Model.fn===fetch;'],context)(),true);
+  assert.throws(()=>compile(Function,['class Model{static{this.value=location;let location;}}'],context)(),ReferenceError);
+});
+
 test('Dynamic template scopes retain local methods, assignments, unscopables and direct eval bindings',()=>{
   const context={location:{href:'https://virtual.test/'}};context.globalThis=context;
   const locals={location:'local',value:7,fetch(){return this.value;}};

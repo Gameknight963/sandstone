@@ -1,10 +1,11 @@
 async page=>{
   const url='https://function-constructor.test/start/',html='<!doctype html><base href="/assets/"><body>Function constructor fixture';
   const workerSource=`onmessage=async()=>{try{
+    class StaticScope{static{var location='worker local';this.local=()=>location;}static url=location.href;}
     const Async=Object.getPrototypeOf(async function(){}).constructor,Generator=Object.getPrototypeOf(function*(){}).constructor,AsyncGenerator=Object.getPrototypeOf(async function*(){}).constructor;
     const regular=Function('return {url:location.href,global:this===self}')(),asyncValue=await Async('return location.href')(),generator=Generator('yield location.href')().next().value,asyncGenerator=(await AsyncGenerator('yield location.href')().next()).value;
     const module=await Function('return import("./dependency.js")')(),fetchValue=await Function('return fetch("./api").then(response=>response.text())')();
-    postMessage({regular,asyncValue,generator,asyncGenerator,module:module.href,fetch:fetchValue});
+    postMessage({regular,asyncValue,generator,asyncGenerator,module:module.href,fetch:fetchValue,staticScope:[location.href,StaticScope.url,StaticScope.local()]});
   }catch(error){postMessage({error:error.name,message:error.message})}}`;
   const context=await page.context().browser().newContext(),native=await context.newPage();
   await context.route('https://function-constructor.test/**',route=>{const path=new URL(route.request().url()).pathname;return route.fulfill({contentType:path.endsWith('.js')?'text/javascript':path.endsWith('.json')?'application/json':path.endsWith('/api')?'text/plain':'text/html',body:path==='/workers/entry.js'?workerSource:path.endsWith('.js')?'export default "imported";export const href=import.meta.url;':path.endsWith('.json')?'{"value":"json-imported"}':path.endsWith('/api')?'relayed':html});});
@@ -18,6 +19,9 @@ async page=>{
     const arrowScope=(value=()=>location.href)=>{var location;return value();};
     results.push(capture(()=>parameterScope()),capture(()=>arrowScope()));
     results.push(capture(()=>Function('switch(location.href){default:let location="body";return location;}')()),capture(()=>Function('switch("value"){case location:let location="body";}')()));
+    results.push(capture(()=>Function('class Model{static{var location="first";this.first=()=>location;}static url=location.href;static{let location="second";this.second=()=>location;}static later=location.href;}return [location.href,Model.url,Model.later,Model.first(),Model.second()];')()));
+    class StaticScope{static{var location='first';this.first=()=>location;}static url=location.href;static{let location='second';this.second=()=>location;}static later=location.href;}
+    results.push({staticScope:[location.href,StaticScope.url,StaticScope.later,StaticScope.first(),StaticScope.second()]});
     results.push(capture(()=>Function('__ctx__','return [__ctx__,location.href]')('local')),capture(()=>Function('__get_this__','return [__get_this__,this===globalThis]')('local')),capture(()=>Function('return typeof anonymous')()),capture(()=>Function('return typeof __sandstone_dynamic_context__')()));
     const locals={name:'local name',location:'local location',value:7,fetch(){return this.value;}};
     results.push(capture(()=>Function('data','with(data){return [name,location,fetch(),this===globalThis]}')(locals)));

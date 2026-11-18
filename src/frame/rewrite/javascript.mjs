@@ -50,6 +50,10 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
       const bodyScope=new Scope(scope,"function");
       children(node,(child,key)=>build(child,key==='body'?bodyScope:scope));
       return;
+    } else if(node.type==='StaticBlock'){
+      // A class static block owns both its lexical and var declarations.
+      // Neither may suppress global rewriting in other fields or outer code.
+      scope=new Scope(scope,"function");
     } else if(node.type==='SwitchStatement'){
       scopes.set(node,scope);
       build(node.discriminant,scope);
