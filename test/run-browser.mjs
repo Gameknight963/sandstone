@@ -5,6 +5,7 @@ import { runInThisContext } from "node:vm";
 import assert from "node:assert/strict";
 import {createHmac} from 'node:crypto';
 import {verifyHTMLInputStream} from './html-input-native.mjs';
+import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 
 const testSource = await readFile(new URL("browser.playwright.js", import.meta.url), "utf8");
 const dexieSource = await readFile(new URL("../node_modules/dexie/dist/dexie.js", import.meta.url), "utf8");
@@ -22,6 +23,8 @@ const javascriptASITest=await readFile(new URL('javascript-asi.playwright.js',im
 const verifyJavascriptASI=runInThisContext(`(${javascriptASITest})`);
 const functionConstructorTest=await readFile(new URL('function-constructor.playwright.js',import.meta.url),'utf8');
 const verifyFunctionConstructor=runInThisContext(`(${functionConstructorTest})`);
+const blockFunctionTest=await readFile(new URL('javascript-block-functions.playwright.js',import.meta.url),'utf8');
+const verifyBlockFunctions=runInThisContext(`(${blockFunctionTest})`);
 const environmentIdentityTest=await readFile(new URL('environment-identity.playwright.js',import.meta.url),'utf8');
 const verifyEnvironmentIdentity=runInThisContext(`(${environmentIdentityTest})`);
 const intersectionObserverTest=await readFile(new URL('intersection-observer.playwright.js',import.meta.url),'utf8');
@@ -264,6 +267,7 @@ try {
     const moduleResults = await timed(verifyModules(page), "Module fixture");
     result.passed.push(...await timed(verifyJavascriptASI(page), 'JavaScript ASI fixture'));
     result.passed.push(...await timed(verifyFunctionConstructor(page), 'Function constructor fixture'));
+    result.passed.push(...await timed(verifyBlockFunctions(page,blockFunctionCases,globalBlockFunctionCases), 'Block function scope fixture'));
     result.passed.push(...await timed(verifyEnvironmentIdentity(page), 'Environment identity fixture'));
     result.passed.push(...await timed(verifyIntersectionObserver(page), 'Intersection observer fixture'));
     result.passed.push(...moduleResults);

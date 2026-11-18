@@ -29,6 +29,11 @@ async page=>{
     results.push(capture(()=>Function('value','return eval("value")')(7)),capture(()=>Function('return eval("location.href")')()),capture(()=>Function('return (0,eval)("location.href")')()));
     results.push(capture(()=>Function('eval("var location=7");return location')()));
     results.push(await Function('with({}){return new Promise(resolve=>setTimeout(()=>resolve(location.href),0))}')().then(value=>({withAsync:value}),error=>({error:error.name})));
+    const savedFetch=window.fetch;
+    try{
+      window.fetch=function(){'use strict';return [this===undefined,this===globalThis]};
+      results.push(Function('with({}){return fetch()}')(),Function('eval("");return fetch()')(),Function('return fetch()')(),fetch(),window.fetch(),Function('with({}){return fetch\`value\`}')());
+    }finally{window.fetch=savedFetch;}
     const calls=[],param={toString(){calls.push('parameter');return 'value';}},body={toString(){calls.push('body');return 'return value';}},converted=Function(param,body);results.push({calls,value:converted(7)});
     const strict=Function('"use strict";return this'),sloppy=Function('return this');results.push({strict:strict()===undefined,sloppy:sloppy.call(null)===globalThis,object:sloppy.call({value:7}).value});
     const target=Function('return new.target');results.push({newTarget:new target()===target,prototype:target.prototype.constructor===target});

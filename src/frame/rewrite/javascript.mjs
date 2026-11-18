@@ -2,7 +2,7 @@ import { parse } from "meriyah";
 const terminated_nodes=new Set(['ExpressionStatement','VariableDeclaration','ReturnStatement','ThrowStatement','BreakStatement','ContinueStatement','DebuggerStatement','DoWhileStatement','PropertyDefinition','FieldDefinition']);
 
 class Scope {
-  constructor(parent, kind) { this.parent = parent; this.kind = kind; this.names = new Set(); }
+  constructor(parent, kind) { this.parent = parent; this.kind = kind; this.names = new Set(); this.lexical=new Set();this.strict=parent?.strict??false; }
   has(name) { return this.names.has(name) || !!this.parent?.has(name); }
   variable() { return this.kind === "function" || !this.parent ? this : this.parent.variable(); }
 }
@@ -26,29 +26,41 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
   const bindings = new WeakSet();
   const names = new Set(globals);
   const edits = [];
+  const functionBodies=new WeakSet(),legacyFunctions=[];
+  const strictBody=node=>Array.isArray(node?.body)&&node.body.some(statement=>statement.directive==='use strict');
 
-  function bind(pattern, scope) {
+  function bind(pattern, scope, lexical=false) {
     if (!pattern) return;
     if (pattern.type === "Identifier") {
       scope.names.add(pattern.name);
+      if(lexical)scope.lexical.add(pattern.name);
       bindings.add(pattern);
-    } else if (pattern.type === "AssignmentPattern") bind(pattern.left, scope);
-    else if (pattern.type === "RestElement") bind(pattern.argument, scope);
-    else if (pattern.type === "ArrayPattern") pattern.elements.forEach(element => bind(element, scope));
-    else if (pattern.type === "ObjectPattern") pattern.properties.forEach(property => bind(property.type === "RestElement" ? property.argument : property.value, scope));
+    } else if (pattern.type === "AssignmentPattern") bind(pattern.left, scope,lexical);
+    else if (pattern.type === "RestElement") bind(pattern.argument, scope,lexical);
+    else if (pattern.type === "ArrayPattern") pattern.elements.forEach(element => bind(element, scope,lexical));
+    else if (pattern.type === "ObjectPattern") pattern.properties.forEach(property => bind(property.type === "RestElement" ? property.argument : property.value, scope,lexical));
   }
 
-  function build(node, scope) {
-    if (node.type === "FunctionDeclaration") bind(node.id, scope);
+  function build(node, scope,parent) {
+    if (node.type === "FunctionDeclaration") {
+      // Annex B treats unbraced if arms as implicit lexical blocks.
+      if(parent?.type==='IfStatement')scope=new Scope(scope,"block");
+      const block=scope.kind!=="function"&&!scope.body;
+      bind(node.id,block?scope:scope.variable(),block&&(node.async||node.generator));
+      if(block&&!scope.strict&&!node.async&&!node.generator&&names.has(node.id.name))legacyFunctions.push({node,scope,implicit:parent?.type==='IfStatement'});
+    }
     if (["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(node.type)) {
       // Parameter initializers run outside the body's variable environment.
       // Closures created there must not capture a later body var/function.
       scope = new Scope(scope, "block");
+      scope.strict ||= strictBody(node.body);
       if (node.type === "FunctionExpression") bind(node.id, scope);
       node.params.forEach(param => bind(param, scope));
       scopes.set(node,scope);
       const bodyScope=new Scope(scope,"function");
-      children(node,(child,key)=>build(child,key==='body'?bodyScope:scope));
+      bodyScope.parameters=scope.names;
+      if(node.body.type==='BlockStatement')functionBodies.add(node.body);
+      children(node,(child,key)=>build(child,key==='body'?bodyScope:scope,node));
       return;
     } else if(node.type==='StaticBlock'){
       // A class static block owns both its lexical and var declarations.
@@ -56,27 +68,53 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
       scope=new Scope(scope,"function");
     } else if(node.type==='SwitchStatement'){
       scopes.set(node,scope);
-      build(node.discriminant,scope);
+      build(node.discriminant,scope,node);
       // The discriminant precedes the shared lexical environment of all cases.
       const caseScope=new Scope(scope,"block");
-      node.cases.forEach(branch=>build(branch,caseScope));
+      node.cases.forEach(branch=>build(branch,caseScope,node));
       return;
     } else if (node.type === "ClassDeclaration" || node.type === "ClassExpression") {
-      if (node.type === "ClassDeclaration") bind(node.id, scope);
+      if (node.type === "ClassDeclaration") bind(node.id, scope,true);
       scope = new Scope(scope, "block");
-      bind(node.id, scope);
+      scope.strict=true;
+      bind(node.id, scope,true);
     } else if (["BlockStatement", "CatchClause", "ForStatement", "ForInStatement", "ForOfStatement"].includes(node.type)) {
       scope = new Scope(scope, "block");
-      if (node.type === "CatchClause") bind(node.param, scope);
+      if(functionBodies.has(node))scope.body=true;
+      // Legacy var declarations may cross a simple catch parameter, but not
+      // a destructuring catch binding or other intervening lexical bindings.
+      if (node.type === "CatchClause") bind(node.param, scope,node.param?.type!=='Identifier');
     }
     scopes.set(node, scope);
     if (node.type === "VariableDeclaration") {
-      for (const declaration of node.declarations) bind(declaration.id, node.kind === "var" ? scope.variable() : scope);
+      for (const declaration of node.declarations) bind(declaration.id, node.kind === "var" ? scope.variable() : scope,node.kind!=='var');
     }
-    if (node.type === "ImportDeclaration") node.specifiers.forEach(specifier => bind(specifier.local, scope));
-    children(node, child => build(child, scope));
+    if (node.type === "ImportDeclaration") node.specifiers.forEach(specifier => bind(specifier.local, scope,true));
+    children(node, child => build(child, scope,node));
   }
-  build(ast, new Scope(null, "function"));
+  const root=new Scope(null,"function");root.strict=module||strictBody(ast);
+  build(ast,root);
+  // Add only the outer var bindings a browser actually instantiates. Keep the
+  // authored declarations intact so native execution handles assignment order.
+  for(const {node,scope,implicit} of legacyFunctions){
+    const name=node.id.name,target=scope.variable();
+    if(target.parameters?.has(name)||name==='arguments')continue;
+    let blocked=false;
+    for(let current=scope;current;current=current.parent){
+      if(current.lexical.has(name)){blocked=true;break;}
+      if(current===target)break;
+    }
+    if(blocked)continue;
+    if(target===root){
+      // Existing browser globals retain their virtual value until the authored
+      // declaration executes. Publish that function to the virtual Window at
+      // the same statement; leaving reads native would expose physical APIs.
+      if(implicit)edits.push([node.start,node.start,'{']);
+      // An empty binding pattern adds no names and retains the declaration's
+      // empty completion, including eval's last preceding expression value.
+      edits.push([node.end,node.end,`;var {}=(${contextName}.${name}=${name});${implicit?'}':''}`]);
+    }else target.names.add(name);
+  }
 
   function visit(node, parent, key, inWith=false) {
     if (node.type === "BlockStatement" && node.body[0]?.directive === "use asm") return;
@@ -98,7 +136,7 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
       return;
     }
     if (node.type === "ThisExpression") {
-      edits.push([node.start, node.end, `(${thisName}(this))`]);
+      edits.push([node.start, node.end, `(${thisName}(this,${scopes.get(node).strict}))`]);
     } else if (node.type === "Identifier" && names.has(node.name) && !bindings.has(node) && !scopes.get(node).has(node.name)) {
       let reference = true;
       if ((parent?.type === "MemberExpression" || parent?.type === "OptionalMemberExpression") && key === "property" && !parent.computed) reference = false;
@@ -109,7 +147,12 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
       if(preserveDirectEval&&node.name==='eval'&&parent?.type==='CallExpression'&&key==='callee'&&!parent.optional)reference=false;
       if (reference) {
         const shorthand = parent?.type === "Property" && parent.shorthand && key === "value";
-        edits.push([node.start, node.end, `${shorthand ? node.name + ": " : ""}${contextName}.${node.name}`]);
+        const value=`${contextName}.${node.name}`;
+        // An identifier call has no property receiver. Native global methods
+        // already bind their required Window; authored strict functions must
+        // receive undefined here, including optional calls and template tags.
+        const unbound=parent?.type==='CallExpression'&&key==='callee'||parent?.type==='TaggedTemplateExpression'&&key==='tag';
+        edits.push([node.start, node.end, `${shorthand ? node.name + ": " : ""}${unbound?'(0,'+value+')':value}`]);
       }
     }
     children(node, (child, childKey) => visit(child, node, childKey,inWith||node.type==='WithStatement'&&childKey==='body'));

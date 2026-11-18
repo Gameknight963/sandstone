@@ -132,8 +132,8 @@ export class CustomCTX {
   __json_module__(source) { return parse_json(source); }
   __worker_module_started__() { polyfill.mark_worker_started(); }
 
-  __get_this__(this_obj) {
-    const scoped=scope_global(this_obj);if(scoped)return scoped;
+  __get_this__(this_obj,strict=false) {
+    const scoped=scope_global(this_obj);if(scoped)return strict?undefined:scoped;
     if (this_obj === globalThis)
       return ctx.__proxy__;
     notify_dom_access(this_obj);

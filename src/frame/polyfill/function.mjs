@@ -13,7 +13,7 @@ function compile(original){
   const rewritten=rewrite_dynamic_function(source,ctx_vars,{url,sourceURL:url});
   const body=rewritten.needsScope?'with('+rewritten.scopeName+'){return '+rewritten.source+'\n}':'return '+rewritten.source;
   const factory=Reflect.apply(Native,undefined,[rewritten.contextName,rewritten.thisName,rewritten.scopeName,body]);
-  const fn=Reflect.apply(factory,undefined,[ctx.__proxy__,value=>ctx.__get_this__(value),rewritten.needsScope?create_global_scope(ctx.__proxy__,ctx_vars):undefined]);
+  const fn=Reflect.apply(factory,undefined,[ctx.__proxy__,(value,strict)=>ctx.__get_this__(value,strict),rewritten.needsScope?create_global_scope(ctx.__proxy__,ctx_vars):undefined]);
   setPrototype(fn,getPrototype(original));define(fn,'name',descriptor(original,'name'));
   sources.set(fn,source);return fn;
 }
