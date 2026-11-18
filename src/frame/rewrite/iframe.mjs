@@ -17,6 +17,7 @@ import {delay_script_load} from '../script_lifetime.mjs';
 import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../../bootstrap.mjs';
 import {on_shadow_root} from '../shadow_roots.mjs';
 import {cookie_snapshot} from '../polyfill/cookie.mjs';
+import {storage_entries} from '../polyfill/storage.mjs';
 
 const inline_frames=new WeakMap(),sandbox_lists=new WeakMap();
 const runtime_loads=new WeakMap();
@@ -134,7 +135,7 @@ export function rewrite_iframe(iframe_element) {
       // succeeds so early requests queue behind their document's capability.
       runtime.rpc.connect_frame_host(channel.port2,nonce);
       const creator_url=loader.cookie_url||loader.url,policy=document_referrer_policy();
-      let local=[],session=[];try{local=ctx.localStorage._get_entries();session=ctx.sessionStorage._get_entries();}catch{}
+      let local=[],session=[];try{local=storage_entries(ctx.localStorage);session=storage_entries(ctx.sessionStorage);}catch{}
       const ready=runtime.loader.initialize_blank({url,frame_id,beacon_context:token,document_origin:ctx.origin,cookie_url:creator_url,
         inherited_base_url:ctx.document.baseURI,document_referrer:request_referrer(creator_url,creator_url,policy),referrer_policy:policy,
         message_origin:ctx.origin,message_parent:child_message_parent(message_token),is_iframe:true,window_name:window_name,

@@ -1,9 +1,11 @@
 import * as rpc from '../rpc.mjs';
 import * as loader from './loader.mjs';
-import {FakeStorage} from './polyfill/storage.mjs';
+import {FakeStorage,install_storage_prototype,replace_storage_entries} from './polyfill/storage.mjs';
 import {StorageReplica} from '../storage_replica.mjs';
 
 let active;
+const storage_prototype=globalThis.Storage?.prototype;
+install_storage_prototype(globalThis.Storage);
 export function storage_group(origin){return active?.origin===origin&&origin!=='null'?active.group:undefined;}
 const dispatch=globalThis.dispatchEvent;
 const current=globalThis.Event&&Object.getOwnPropertyDescriptor(Event.prototype,'currentTarget');
@@ -40,16 +42,16 @@ export function create_document_storage(options,url,window){
   // Native SOP still bounds this lookup. Share only with an accessible parent
   // whose virtual origin matches; other frame trees continue through host sync.
   try{if(parent!==globalThis)group=parent.sandstone_frame?.storage_sync.storage_group(origin);}catch{}
-  group??={token,sequence:0,documents:new Map(),areas:{}};
+  group??={token,sequence:0,documents:new Map(),areas:{},storage_brand:new WeakMap()};
   const document=active={token,window,origin,group,send:(kind,change)=>rpc.call_procedure(rpc.host,kind+'_storage',[id,undefined,change]).catch(console.error)};
   group.documents.set(token,document);
   for(const kind of ['local','session']){
     const entries=options[kind+'_storage'];
     const storage=new FakeStorage(entries,(_snapshot,change)=>{
       replica.write({...change,context:token,url:url(),group:group.token,order:++group.sequence},operation=>document.send(kind,operation));
-    },()=>{if(active!==document)throw new DOMException('Storage document is unavailable','SecurityError');});
+    },()=>{if(active!==document)throw new DOMException('Storage document is unavailable','SecurityError');},{prototype:storage_prototype,registry:group.storage_brand});
     const replica=group.areas[kind]??=new StorageReplica(entries,{
-      replace:entries=>{for(const peer of group.documents.values())peer[kind]?.storage._replace_entries(entries);},
+      replace:entries=>{for(const peer of group.documents.values())if(peer[kind])replace_storage_entries(peer[kind].storage,entries);},
       submit:()=>{}
     });
     document[kind]={storage,replica};
