@@ -11,6 +11,7 @@ import * as loader from './loader.mjs';
 import {pending_media_attribute} from './media_attributes.mjs';
 import {pending_style_request} from './style_requests.mjs';
 import {is_svg_script} from './svg_scripts.mjs';
+import {script_kind,svg_script_kind} from './script_types.mjs';
 
 let session,writer,writerOwner,ignoreWrites=0,validation;
 const type=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'contentType').get;
@@ -59,7 +60,7 @@ function images(current){
 
 function prepare_script(current,node,input){
   if(current.controller.signal.aborted||!loader.site_settings.allow_js)return;
-  const svg=is_svg_script(node),module=(node.getAttribute('type')||'').trim().toLowerCase()==='module';
+  const svg=is_svg_script(node),kind=svg?svg_script_kind(node.getAttribute('type')):script_kind(node.getAttribute('type'),node.getAttribute('language')),module=kind==='module';
   const external=svg?node.hasAttribute('href')||node.hasAttributeNS('http://www.w3.org/1999/xlink','href'):node.hasAttribute('src');
   const deferred=module||!svg&&external&&node.hasAttribute('defer'),asynchronous=external&&node.hasAttribute('async');
   const run=callback=>deferred||asynchronous?ignored(callback):scoped(input,callback,current);
@@ -70,7 +71,7 @@ function prepare_script(current,node,input){
   };
   if(asynchronous){current.async.push(Promise.resolve(pending).then(execute));return;}
   if(deferred){current.deferred.push(()=>Promise.all([pending,...styles(current)]).then(execute));return;}
-  const blocking=node.__sandstone_execute__?styles(current):[];
+  const blocking=(kind==='classic'||kind==='module')&&node.__sandstone_execute__?styles(current):[];
   return pending||blocking.length?Promise.all([pending,...blocking]).then(execute):execute();
 }
 export function run_late_script(execute){

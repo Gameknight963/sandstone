@@ -5,13 +5,13 @@ import { modules, execute_module } from "../polyfill/module.mjs";
 import {schedule_resource_event} from '../resource_events.mjs';
 import {remember_attribute_order} from '../resource_attributes.mjs';
 import {is_svg_script,rewrite_svg_script,capture_svg_script,mark_svg_parser_script,mark_svg_script_connected} from '../svg_scripts.mjs';
+import {script_kind} from '../script_types.mjs';
 
 export const pending_scripts = [];
 let script_num = 0;
-const classic_types = new Set(["", "application/javascript", "text/javascript", "application/ecmascript", "text/ecmascript"]);
 const records=new WeakMap();
 const parser_scripts=new WeakSet();
-export function mark_parser_script(element){if(is_svg_script(element))mark_svg_parser_script(element);else parser_scripts.add(element);}
+export function mark_parser_script(element){if(is_svg_script(element))mark_svg_parser_script(element);else if(eligible(element))parser_scripts.add(element);}
 const get=globalThis.Element?.prototype.getAttribute,set=globalThis.Element?.prototype.setAttribute,remove=globalThis.Element?.prototype.removeAttribute;
 const N=globalThis.Node?.prototype,append=N?.appendChild,remove_child=N?.removeChild,insert=N?.insertBefore;
 const owner=N&&Object.getOwnPropertyDescriptor(N,'ownerDocument').get,connected=N&&Object.getOwnPropertyDescriptor(N,'isConnected').get;
@@ -22,8 +22,8 @@ const src_property=globalThis.HTMLScriptElement&&Object.getOwnPropertyDescriptor
 const adopt=globalThis.Document?.prototype.adoptNode;
 let inert;
 function eligible(element,record){
-  const type=((record?record.type():get.call(element,'type'))||'').trim();
-  return (classic_types.has(type.toLowerCase())||type==='module'||type==='importmap')&&
+  const kind=script_kind(record?record.type():get.call(element,'type'),get.call(element,'language'));
+  return kind!==null&&
     ((record?record.src():get.call(element,'src'))!==null||data.get.call(element).length>0);
 }
 export function mark_script_connected(element){
@@ -68,15 +68,16 @@ export function capture_script(source){
 }
 
 export function should_load(element) {
-  return loader.site_settings.allow_js && (classic_types.has(element.type.trim().toLowerCase()) || element.type === "module");
+  const kind=script_kind(get.call(element,'type'),get.call(element,'language'));
+  return loader.site_settings.allow_js && (kind==='classic'||kind==='module');
 }
 
 export function rewrite_script(element,{parser=false,signal,run,sourceElement=element}={}) {
   if(is_svg_script(element))return rewrite_svg_script(element,{parser,signal,run});
   remember_attribute_order(element,['src','type']);
   const original_type=get.call(element,'type');
-  const type = element.type.trim().toLowerCase();
-  if (type === "importmap") {
+  const kind=script_kind(original_type,get.call(element,'language'));
+  if (kind === "importmap") {
     records.set(element,{started:false,type:()=>get.call(element,'type')==='application/x-sandstone-importmap'?original_type:get.call(element,'type'),src:()=>get.call(element,'src')});
     element.type = "application/x-sandstone-importmap";
     if (loader.site_settings.allow_js && !element.__sandstone_inert__) {
@@ -85,8 +86,8 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
     }
     return;
   }
-  const is_module = type === "module";
-  if (!classic_types.has(type) && !is_module) return;
+  const is_module = kind === "module";
+  if (kind!=='classic'&&!is_module) return;
   const enabled = loader.site_settings.allow_js && !element.__sandstone_inert__ && (is_module || !element.noModule);
   element.__sandstone_module__ = is_module;
   let script_url = element.getAttribute("src");

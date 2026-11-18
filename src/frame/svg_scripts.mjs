@@ -1,5 +1,6 @@
 import {rewrite_script,prime_inert_script} from './rewrite/script.mjs';
 import * as loader from './loader.mjs';
+import {svg_script_kind} from './script_types.mjs';
 
 const states=new WeakMap(),primed=new WeakSet(),parser_scripts=new WeakSet(),animated=new WeakMap(),maps=new WeakMap();
 const E=globalThis.Element?.prototype,N=globalThis.Node?.prototype,A=globalThis.Attr?.prototype;
@@ -12,7 +13,6 @@ const kind=N&&Object.getOwnPropertyDescriptor(N,'nodeType').get;
 const data=globalThis.CharacterData&&Object.getOwnPropertyDescriptor(CharacterData.prototype,'data').get;
 const attrOwner=A&&Object.getOwnPropertyDescriptor(A,'ownerElement').get;
 const href=globalThis.SVGScriptElement&&Object.getOwnPropertyDescriptor(SVGScriptElement.prototype,'href')?.get;
-const classic=new Set(['','application/javascript','text/javascript','application/ecmascript','text/ecmascript']);
 let inert,hooks=false;
 export const is_svg_script=node=>!!globalThis.SVGScriptElement&&node instanceof SVGScriptElement;
 const source=node=>get.call(node,'href')??getNS.call(node,'http://www.w3.org/1999/xlink','href');
@@ -26,7 +26,7 @@ function prime(node){
   prime_inert_script(node);for(const attr of [...attrs.call(node)])remove.call(node,attr);
   for(const attr of original)set.call(node,attr);primed.add(node);
 }
-export function mark_svg_parser_script(node){if(eligible(node))parser_scripts.add(node);if(node.__rewritten__)primed.add(node);}
+export function mark_svg_parser_script(node){if(eligible(node)&&svg_script_kind(get.call(node,'type'))!==null)parser_scripts.add(node);if(node.__rewritten__)primed.add(node);}
 export function mark_svg_script_connected(node){
   if(!connected.call(node)||!eligible(node))return;
   const state=states.get(node);
@@ -34,7 +34,7 @@ export function mark_svg_script_connected(node){
   else if(!view.call(owner.call(node))||node.__rewritten__){node.__sandstone_inert__=true;primed.add(node);}
 }
 export function capture_svg_script(node){
-  const state=states.get(node),started=parser_scripts.has(node)||node.__sandstone_inert__||state&&(state.prepared||state.copiedStarted||connected.call(node)&&eligible(node));
+  const state=states.get(node),started=parser_scripts.has(node)||node.__sandstone_inert__||state&&(state.started||state.copiedStarted||connected.call(node)&&eligible(node)&&svg_script_kind(get.call(node,'type'))!==null);
   return copy=>{if(started)copy.__sandstone_inert__=true;if(primed.has(node))primed.add(copy);};
 }
 export function notify_svg_script(node,records){
@@ -50,8 +50,8 @@ export function rewrite_svg_script(node,options={}){
   const prepare=()=>{
     if(state.prepared||!connected.call(node)||!eligible(node))return;
     state.prepared=true;
-    const type=(get.call(node,'type')||'').trim().toLowerCase();
-    if(!loader.site_settings.allow_js||node.__sandstone_inert__||!classic.has(type)&&type!=='module')return;
+    if(!loader.site_settings.allow_js||node.__sandstone_inert__||svg_script_kind(get.call(node,'type'))===null)return;
+    state.started=true;
     inert??=document.implementation.createHTMLDocument('');
     const script=inert.createElement('script');
     for(const name of ['type','crossorigin','referrerpolicy','async']){const value=get.call(node,name);if(value!==null)script.setAttribute(name,value);}
