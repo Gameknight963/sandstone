@@ -40,6 +40,17 @@ export function unlisten_runtime(target,type,listener,options){
   if(!entry)return remove(target,type,listener,options);
   forget(target,entry);remove(target,type,entry.callback,entry.capture);
 }
+export function on_document_unload(listener,target=globalThis){
+  const remove=()=>unlisten_runtime(target,'unload',unload);
+  const unload=function(event){
+    // Synthetic lifecycle events still reach page handlers. They must neither
+    // release document resources nor consume the eventual native teardown hook.
+    if(!event.isTrusted)return;
+    remove();return Reflect.apply(listener,this,[event]);
+  };
+  listen_runtime(target,'unload',unload);
+  return remove;
+}
 export function snapshot_runtime_events(nodes){
   return [...nodes].map(target=>({target,entries:[...targets.get(target)||[]]}));
 }

@@ -72,11 +72,11 @@ export function create_document_storage(options,url,window){
     if(!snapshot.opaque)for(const kind of ['local','session'])document[kind].replica.reset(snapshot[kind],snapshot.revisions?.[kind]);
     return snapshot;
   }):Promise.resolve({opaque:new URL(options.url).origin==='null'});
-  listen_runtime(globalThis,'unload',()=>{
+  on_document_unload(()=>{
     if(active===document)active=undefined;
     group.documents.delete(token);
     rpc.call_procedure(rpc.host,'storage_disconnect',[id,token]).catch(()=>{});
-  },{once:true});
+  });
   return {local:document.local.storage,session:document.session.storage,ready};
 }
-import {listen_runtime} from './runtime_events.mjs';
+import {on_document_unload} from './runtime_events.mjs';

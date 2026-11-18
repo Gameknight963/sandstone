@@ -96,6 +96,10 @@ const server=create_relay_server((request,response)=>{
     response.writeHead(302,{Location:'/events?'+url.searchParams,'Set-Cookie':'redirect=visible; Path=/'});response.end();return;
   }
   if(url.pathname==='/pending'){server.emit('pending',response);return;}
+  if(url.pathname==='/lifecycle-stream-child'){
+    response.writeHead(200,{'Content-Type':'text/html','Permissions-Policy':'unload=(self)'});
+    response.end('<!doctype html><script>globalThis.retainedSource=new EventSource('+JSON.stringify('/events?client='+client)+');</script>');return;
+  }
   if(url.pathname==='/events'){
     const count=requests.filter(value=>value.client===client).length+1;
     requests.push({client,count,id:Buffer.from(request.headers['last-event-id']||'','latin1').toString('utf8'),cookie:request.headers.cookie||''});
@@ -161,11 +165,11 @@ const opaqueSocketScript=`new Promise((resolve,reject)=>{
   addEventListener('message',receive);child.srcdoc=${JSON.stringify('<script>'+opaqueSocketChild+'</script>')};document.body.append(child);
 })`;
 let browser;
-const sourceScript=(client,redirect=false)=>`new Promise((resolve,reject)=>{
+const sourceScript=(client,redirect=false,syntheticUnload=false)=>`new Promise((resolve,reject)=>{
   const events=[];
   const source=new EventSource(${JSON.stringify(origin+(redirect?'/redirect':'/events')+'?client='+client)},{withCredentials:true});
   const timeout=setTimeout(()=>{source.close();reject(new Error('SSE timed out: '+JSON.stringify(events)));},15000);
-  source.onopen=()=>{events.push(['open',source.readyState]);fetch(${JSON.stringify(origin+'/release?client='+client)}).catch(reject);};
+  source.onopen=()=>{events.push(['open',source.readyState]);if(${syntheticUnload})for(const type of ['beforeunload','unload'])globalThis.dispatchEvent(new Event(type));fetch(${JSON.stringify(origin+'/release?client='+client)}).catch(reject);};
   source.onerror=()=>events.push(['error',source.readyState]);
   const message=event=>{
     events.push([event.type,event.data,event.lastEventId,event.origin]);
@@ -173,6 +177,20 @@ const sourceScript=(client,redirect=false)=>`new Promise((resolve,reject)=>{
   };
   source.addEventListener('update',message);source.onmessage=message;
 })`;
+const streamLifecycleScript=client=>`(async()=>{
+  const frame=document.createElement('iframe');frame.src=${JSON.stringify(origin+'/lifecycle-stream-child?client='+client)};document.body.append(frame);
+  let source;const end=Date.now()+10000;
+  while(!source||source.readyState!==EventSource.OPEN){
+    source=frame.contentWindow?.retainedSource;
+    if(Date.now()>end){frame.remove();throw new Error('Child event stream did not open');}
+    if(!source||source.readyState!==EventSource.OPEN)await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  try{
+    const before=source.readyState;frame.contentWindow.dispatchEvent(new Event('unload'));const synthetic=source.readyState;
+    frame.remove();await new Promise(resolve=>setTimeout(resolve,20));
+    return JSON.stringify({before,synthetic,removed:source.readyState});
+  }finally{source.close();frame.remove();}
+})()`;
 const websocketScript = `new Promise((resolve,reject)=>{
   const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/echo')},['first','second']);
   const values=[];
@@ -288,6 +306,9 @@ try{
   const nativeContext=await browser.newContext(),nativePage=await nativeContext.newPage();
   await nativePage.goto(origin);
   const baseline=JSON.parse(await nativePage.evaluate(source=>eval(source),sourceScript('native')).catch(error=>{console.error(JSON.stringify({requests,held:[...held.keys()]}));throw error;}));
+  const lifecycleBaseline=JSON.parse(await nativePage.evaluate(source=>eval(source),sourceScript('lifecycle-native',false,true)));
+  const retainedStreamBaseline=JSON.parse(await nativePage.evaluate(source=>eval(source),streamLifecycleScript('retained-native')));
+  assert.deepEqual(retainedStreamBaseline,{before:1,synthetic:1,removed:2});
   const authBaseline=JSON.parse(await nativePage.evaluate(source=>eval(source),authenticatedScript));
   assert.deepEqual(authBaseline,{visible:['auth_login=visible','auth_visible=handshake'],sent:['auth_hidden=secret','auth_login=visible','auth_visible=handshake']});
   const opaqueSocketBaseline=await nativePage.evaluate(source=>eval(source),opaqueSocketScript);
@@ -628,6 +649,10 @@ try{
     console.error(JSON.stringify({requests,errors}));throw error;
   }));
   assert.deepEqual(proxied,baseline,'Relayed EventSource events differ from native EventSource');
+  const lifecycleSource=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),sourceScript('lifecycle-'+storageDenied,false,true)));
+  assert.deepEqual(lifecycleSource,lifecycleBaseline,'Synthetic unload events closed a relayed EventSource');
+  const retainedStream=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),streamLifecycleScript('retained-'+storageDenied)));
+  assert.deepEqual(retainedStream,retainedStreamBaseline,'Native unload failed to close a retained event stream after synthetic unload');
   for(const name of ['native',client]){
     const values=requests.filter(value=>value.client===name);
     assert.deepEqual(values.map(value=>value.id),['','漢字-€','']);
@@ -688,7 +713,7 @@ try{
   assert.deepEqual(direct,[],'A relayed connection made a direct HTTP request');
   assert.deepEqual(errors,[],'A relayed connection produced a browser error');
   assert.ok(closed.some(value=>value.client===client&&value.count===3));
-    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','opaque iframe WebSocket Origin and SameSite cookie parity','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','native request cleanup'],events:proxied,direct}));
+    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','opaque iframe WebSocket Origin and SameSite cookie parity','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','synthetic lifecycle events preserve SSE reconnection','native iframe unload closes retained event streams','native request cleanup'],events:proxied,direct}));
   await context.close();
   }
 }finally{
