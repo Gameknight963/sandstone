@@ -1,9 +1,22 @@
-import { Cookie, CookieJar, domainMatch } from "tough-cookie";
+import { Cookie, CookieJar, domainMatch,canonicalDomain } from "tough-cookie";
 import {http_cache} from './http_cache.mjs';
 import {storage_cookie} from '../cookie.mjs';
 import {apply_storage_change} from '../storage_changes.mjs';
 
 const storage_key = "sandstone_site_data_v1";
+const secureContexts=new Map();
+function secure_cookie_context(source,allowSecureOnLocal){
+  if(source.protocol==='https:'||source.protocol==='wss:')return true;
+  const key=source.origin+':'+allowSecureOnLocal;
+  if(!secureContexts.has(key)){
+    // Ask the jar for its trust decision without touching real cookies or their
+    // access timestamps. This includes loopback and *.localhost exceptions.
+    const probe=new CookieJar(undefined,{allowSecureOnLocal});
+    probe.setCookieSync('probe=1; Secure; Path=/',source.href,{ignoreError:true});
+    secureContexts.set(key,probe.getCookiesSync(source.href).some(cookie=>cookie.secure));
+  }
+  return secureContexts.get(key);
+}
 
 // Browser storage is optional: file: and data: documents may be denied access.
 export class SiteDataStore {
@@ -15,6 +28,7 @@ export class SiteDataStore {
     this.cacheStorage=[];
     this.persistent = false;
     this.localListeners=new Set();
+    this.cookieListeners=new Set();this.cookieSnapshots=new Map();
     this.load();
   }
 
@@ -63,15 +77,23 @@ export class SiteDataStore {
       if(!parsed)return undefined;
       const cookie = this.cookies.setCookieSync(parsed, url, {http, ignoreError: true});
       this.persist();
+      if(cookie)for(const listener of this.cookieListeners)listener(cookie.domain);
       return cookie;
     } catch { return undefined; }
   }
 
   documentCookies(url, {crossSite=false} = {}) {
     const data = this.cookies.serializeSync();
-    const hostname = new URL(url).hostname;
-    data.cookies = data.cookies.filter(cookie => !cookie.httpOnly && (!crossSite||cookie.sameSite==='none'&&cookie.secure) &&
+    const source=new URL(url),hostname=canonicalDomain(source.hostname);
+    data.cookies = data.cookies.filter(cookie => !cookie.httpOnly && (!cookie.secure||secure_cookie_context(source,this.cookies.allowSecureOnLocal)) && (!crossSite||cookie.sameSite==='none'&&cookie.secure) &&
       (cookie.hostOnly ? cookie.domain === hostname : domainMatch(hostname, cookie.domain)));
+    // A document's clock must not reveal changes in unrelated sites or hidden
+    // HttpOnly/Secure cookies. Access timestamps are not script-visible changes.
+    const key=source.origin+':'+crossSite,fingerprint=JSON.stringify(data.cookies.map(({lastAccessed,...cookie})=>cookie));
+    let previous=this.cookieSnapshots.get(key);
+    if(!previous)this.cookieSnapshots.set(key,previous={fingerprint,revision:0});
+    else if(previous.fingerprint!==fingerprint){previous.fingerprint=fingerprint;previous.revision++;}
+    data.sandstone_revision=previous.revision;
     return data;
   }
 
@@ -123,6 +145,7 @@ export class SiteDataStore {
       const data = this.cookies.serializeSync();
       data.cookies = data.cookies.filter(cookie => cookie.domain !== hostname);
       this.cookies = CookieJar.deserializeSync(data);
+      for(const listener of this.cookieListeners)listener(hostname);
     }
     this.persist();
   }

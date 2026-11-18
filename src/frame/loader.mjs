@@ -3,7 +3,7 @@ import * as network from "./network.mjs";
 import * as parser from "./parser.mjs";
 
 import { update_ctx, run_script, ctx } from "./context.mjs";
-import { load_cookies } from "./polyfill/cookie.mjs";
+import { load_cookies,configure_cookies } from "./polyfill/cookie.mjs";
 import {configure_crypto} from './polyfill/crypto.mjs';
 import {set_location} from './polyfill/location.mjs';
 import {default_referrer_policy} from '../referrer.mjs';
@@ -151,8 +151,7 @@ function prepare_html(options) {
   get_frame_html();
   const ready=update_ctx(options);
   configure_window_messages(options);
-  load_cookies(options.cookies);
-  return ready;
+  return Promise.all([ready,configure_cookies(options.cookies)]);
 }
 
 export function initialize_blank(options,onload,onurl){

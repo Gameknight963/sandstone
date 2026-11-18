@@ -9,6 +9,7 @@ import {parse_referrer_policy,default_referrer_policy} from '../referrer.mjs';
 import {is_download} from '../download.mjs';
 import {frame_cross_site} from './frame_context.mjs';
 import './storage.mjs';
+import './cookies.mjs';
 import './navigation_targets.mjs';
 import {navigation_sandbox} from '../navigation_policy.mjs';
 import {RPCSourcePolicy} from './rpc_policy.mjs';
@@ -304,6 +305,7 @@ rpc.rpc_handlers["cookie_set"] = async (frame_id, value, url, token) => {
   const base=context.context.cookie_url||context.context.url,target=new URL(url||base);
   if(target.origin!==new URL(base).origin)throw new DOMException('Cookie origin is unavailable','SecurityError');
   site_data.setCookie(target.href,value,false,{crossSite:context.context.cross_site});
+  return site_data.documentCookies(target.href,{crossSite:context.context.cross_site});
 };
 
 rpc.rpc_handlers.window_name=(id,token,value)=>{

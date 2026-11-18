@@ -79,3 +79,10 @@ test('Document-open URL updates require both the source frame and its current do
   assert.throws(()=>call('document_open',['child','root-document',snapshot],nested),{name:'SecurityError'});
   assert.throws(()=>call('document_open',['child','child-document',snapshot]),{name:'SecurityError'});
 });
+
+test('Cookie snapshots require the calling frame current document capability',()=>{
+  const {call,child,policy,port}=fixture(),nested={};policy.attach(port,nested,'child');child('child');
+  assert.deepEqual(call('cookies_ready',['child','child-document'],nested),['child','child-document']);
+  assert.throws(()=>call('cookies_ready',['root','root-document'],nested),{name:'SecurityError'});
+  assert.throws(()=>call('cookies_ready',['child','root-document'],nested),{name:'SecurityError'});
+});
