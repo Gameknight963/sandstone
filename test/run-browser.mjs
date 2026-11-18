@@ -108,6 +108,8 @@ const windowHandlerTest=await readFile(new URL('window-handlers.playwright.js',i
 const verifyWindowHandlers=runInThisContext(`(${windowHandlerTest})`);
 const lifecycleTest=await readFile(new URL('lifecycle-events.playwright.js',import.meta.url),'utf8');
 const verifyLifecycleEvents=runInThisContext(`(${lifecycleTest})`);
+const storageUnloadTest=await readFile(new URL('storage-unload.playwright.js',import.meta.url),'utf8');
+const verifyStorageUnload=runInThisContext(`(${storageUnloadTest})`);
 const blankFramesTest=await readFile(new URL('blank-frames.playwright.js',import.meta.url),'utf8');
 const verifyBlankFrames=runInThisContext(`(${blankFramesTest})`);
 const rpcSourceTest=await readFile(new URL('rpc-source.playwright.js',import.meta.url),'utf8');
@@ -284,6 +286,7 @@ try {
     result.passed.push(...await timed(verifyFrameEvents(page), 'Same-origin frame event fixture'));
     result.passed.push(...await timed(verifyWindowHandlers(page), 'Window event property fixture'));
     result.passed.push(...await timed(verifyLifecycleEvents(page), 'Synthetic lifecycle event fixture'));
+    result.passed.push(...await timed(verifyStorageUnload(page), 'Unload storage fixture'));
     result.passed.push(...await timed(verifyBlankFrames(page), 'Synchronous blank frame fixture'));
     result.passed.push(...await timed(verifyRPCSource(page), 'RPC source fixture'));
     result.passed.push(...await timed(verifyBootstrap(page), 'Bootstrap message fixture'));

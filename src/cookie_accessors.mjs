@@ -4,6 +4,11 @@
 export function create_cookie_accessors(native){
   const own=new WeakMap(),registries=new Set([own]);
   const lookup=value=>{for(const registry of registries){const record=registry.get(value);if(record)return record;}};
+  function active(record){
+    try{Reflect.apply(record.native.get,record.target,[]);}
+    catch(error){if(error.name!=='SecurityError')throw error;return true;}
+    return false;
+  }
   function invoke(operation,receiver,args){
     const record=lookup(receiver);
     if(!record)return Reflect.apply(native[operation],receiver,args);
@@ -12,14 +17,12 @@ export function create_cookie_accessors(native){
       if(typeof args[0]==='symbol')throw new TypeError('Cannot convert a Symbol to a string');
       text=String(args[0]);
     }
-    let active=false;
-    try{Reflect.apply(record.native.get,record.target,[]);}
-    catch(error){if(error.name!=='SecurityError')throw error;active=true;}
-    if(!active)return operation==='get'?'':undefined;
+    if(!active(record))return operation==='get'?'':undefined;
     try{if(operation==='get')return record.get();record.set(text);return undefined;}
     catch(error){if(error.name==='SecurityError')throw new DOMException(error.message,'SecurityError');throw error;}
   }
   return {
+    is_active(receiver){const record=lookup(receiver);return !!record&&active(record);},
     descriptor:{...native,
       get:new Proxy(native.get,{apply(target,receiver,args){return invoke('get',receiver,args);}}),
       set:new Proxy(native.set,{apply(target,receiver,args){return invoke('set',receiver,args);}})

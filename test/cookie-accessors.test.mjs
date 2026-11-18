@@ -54,3 +54,15 @@ test('Unregistered inert documents retain native behavior and unexpected native 
   const {alias,state}=register(),failure=new Error('Native failure');state.error=failure;
   assert.throws(()=>bridge.descriptor.get.call(alias),error=>error===failure);
 });
+
+test('Document liveness probes use registered native owners without reading virtual cookies or forged properties',()=>{
+  const first=fixture(),second=fixture(),registry=new WeakMap(),document=first.register(registry);second.register(registry);
+  Object.defineProperty(document.state,'value',{get(){throw new Error('Virtual cookies must not be read');}});
+  assert.equal(first.bridge.is_active(document.target),true);assert.equal(second.bridge.is_active(document.alias),true);
+  let reads=0;const fake={get __target__(){reads++;return document.target;}};
+  assert.equal(first.bridge.is_active(fake),false);assert.equal(reads,0);
+  document.state.active=false;
+  assert.equal(first.bridge.is_active(document.alias),false);assert.equal(second.bridge.is_active(document.target),false);
+  const failure=new Error('Native probe failed');document.state.error=failure;
+  assert.throws(()=>first.bridge.is_active(document.alias),error=>error===failure);
+});

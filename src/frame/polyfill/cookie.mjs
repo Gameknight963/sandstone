@@ -7,6 +7,7 @@ import {create_cookie_accessors} from '../../cookie_accessors.mjs';
 const fallback=new CookieReplica();
 const native_cookie=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'cookie');
 const accessors=native_cookie&&create_cookie_accessors(native_cookie);
+export const cookie_document_active=target=>!!accessors?.is_active(target);
 if(accessors)Object.defineProperty(Document.prototype,'cookie',accessors.descriptor);
 let configured_replica,configured_context;
 function replica(){
