@@ -5,6 +5,21 @@ import {fetch_with_cookies} from '../src/host/request.mjs';
 import {SiteDataStore} from '../src/host/site_data.mjs';
 import {serialize_request} from '../src/frame/polyfill/request.mjs';
 
+test('CORS script resources retain Origin on same-origin GETs without changing fetch API or no-CORS requests',async()=>{
+  const seen=[],store=new SiteDataStore(),context={url:'https://site.test/page'};
+  const fetch=options=>fetch_with_cookies(async(url,init)=>{seen.push(init.headers);return new Response('ok')},store,'https://site.test/script.js',options,context);
+  await fetch({mode:'cors',destination:'script'});await fetch({mode:'cors'});await fetch({mode:'no-cors',destination:'script'});
+  assert.equal(seen[0].origin,'https://site.test');assert.equal(seen[1].origin,undefined);assert.equal(seen[2].origin,undefined);
+});
+
+test('Script response metadata retains cross-origin redirects even when they return to the client origin',async()=>{
+  const store=new SiteDataStore(),context={url:'https://site.test/page'};let count=0;
+  const response=await fetch_with_cookies(async()=>++count===1?new Response(null,{status:302,headers:{Location:'https://other.test/intermediate'}}):count===2?new Response(null,{status:302,headers:{Location:'https://site.test/final'}}):new Response('ok'),store,'https://site.test/start',{},context);
+  assert.equal(response.url,'https://site.test/final');assert.equal(response.request_cross_origin,true);
+  const direct=await fetch_with_cookies(async()=>new Response('ok'),store,'https://site.test/direct',{},context);assert.equal(direct.request_cross_origin,false);
+  const opaque=await fetch_with_cookies(async()=>new Response('ok'),store,'https://site.test/direct',{}, {...context,broadcast_origin:'opaque:client'});assert.equal(opaque.request_cross_origin,true);
+});
+
 test('Referrer policies strip credentials/fragments and distinguish origins and downgrades',()=>{
   const source='https://user:password@site.test/path?q=1#private',same='https://site.test/next',cross='https://other.test/',down='http://other.test/';
   const full='https://site.test/path?q=1',origin='https://site.test/';

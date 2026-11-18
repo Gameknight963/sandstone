@@ -19,13 +19,14 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
   const destination = options.destination;
   let policy = parse_referrer_policy(options.referrerPolicy || context.referrerPolicy);
   let referrer = opaque||options.referrer === '' ? '' : options.referrer && options.referrer !== 'about:client' ? options.referrer : context.referrer_url ?? context.url ?? '';
-  let tainted = opaque, crossSiteRedirect = !same_site(top,url), cors = false;
+  let tainted = opaque, crossSiteRedirect = !same_site(top,url), cors = false,crossed_origin=opaque;
   delete options.mode;
   delete options.referrer;
   delete options.referrerPolicy;
   delete options.destination;
   let redirected = false;
   for (let hop = 0; hop <= 20; hop++) {
+    crossed_origin ||= source.origin!==url.origin;
     const headers = new Headers(options.headers);
     headers.delete("cookie");
     headers.delete('origin');headers.delete('referer');
@@ -36,7 +37,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
     const safe_method = /^(GET|HEAD)$/i.test(options.method || "GET");
     const sameSiteContext = !opaque && !context.cross_site && same_site(top, source) && same_site(top, url) && !crossSiteRedirect ? "strict" : context.navigation && !context.nested && safe_method ? "lax" : "none";
     // Font loads send their document Origin even for a same-origin URL.
-    const origin = request_origin(source.href,url.href,{method:options.method,mode,policy,tainted,cors: cors || destination === 'font'});
+    const origin = request_origin(source.href,url.href,{method:options.method,mode,policy,tainted,cors: cors || destination === 'font'||destination==='script'&&mode==='cors'});
     if (origin !== null) headers.set('origin',origin);
     referrer = request_referrer(referrer,url.href,policy);
     if (referrer) headers.set('referer',referrer);
@@ -62,7 +63,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
       Object.defineProperties(output, {
         url: {value: url.href}, redirected: {value: redirected},
         raw_headers: {value: response.raw_headers || [...response.headers]},
-        request_referrer: {value:referrer}
+        request_referrer: {value:referrer},request_cross_origin:{value:crossed_origin}
       });
       return output;
     }

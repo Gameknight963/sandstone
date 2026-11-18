@@ -20,3 +20,18 @@ export function frame_cross_site(frame,frames) {
   }
   return false;
 }
+
+export function worker_script_frame(frames,parent_id,worker_id){
+  const parent=frames[parent_id],worker=frames[worker_id];
+  if(!parent||!worker?.worker||worker.parent_id!==parent_id||worker.parent_context!==parent.document_context)throw new DOMException('Unknown worker owner','SecurityError');
+  const origin=parent.origin||new URL(parent.url).origin;
+  const url=worker_script_url(worker.url,origin);
+  if(worker.origin!==(url.protocol==='data:'?'null':origin))throw new DOMException('Invalid worker origin','SecurityError');
+  return worker;
+}
+
+export function worker_script_url(input,origin){
+  const url=new URL(input);
+  if(!['http:','https:','data:','blob:'].includes(url.protocol)||url.origin!=='null'&&url.origin!==origin)throw new DOMException('Invalid worker origin','SecurityError');
+  return url;
+}

@@ -10,7 +10,7 @@ import { BeaconQueue } from './beacon.mjs';
 import {KeepaliveRequests} from './keepalive.mjs';
 import {http_cache} from './http_cache.mjs';
 import {Downloads} from './download.mjs';
-import {frame_cross_site,navigation_request_context} from './frame_context.mjs';
+import {frame_cross_site,navigation_request_context,worker_script_frame} from './frame_context.mjs';
 import {broadcast_channels} from './broadcast.mjs';
 import {lock_service} from './locks.mjs';
 import {disconnect_storage} from './storage.mjs';
@@ -46,6 +46,12 @@ function get_ws(frame_id, ws_id) {
   return frame_websockets[ws_id];
 }
 
+rpc_handlers.fetch_worker_script=(parent_id,worker_id,request_id,url,options)=>{
+  const worker=worker_script_frame(iframes,parent_id,worker_id);
+  if(!/^https?:$/.test(new URL(url).protocol))throw new TypeError('Invalid worker script URL');
+  return rpc_handlers.fetch(worker_id,request_id,url,{method:'GET',mode:'no-cors',credentials:'include',destination:'script',referrer:worker.url.href,referrerPolicy:options?.referrerPolicy});
+};
+
 //handle fetch api requests
 rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navigation_source) {
   const frame = iframes[frame_id];
@@ -72,6 +78,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
   var keys = ["ok", "redirected", "status", "statusText", "type", "url"];
   var payload = {
     request_referrer: response.request_referrer,
+    request_cross_origin:response.request_cross_origin,
     has_body: !!request.reader,
     headers: [],
     items: {},

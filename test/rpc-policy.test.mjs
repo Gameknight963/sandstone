@@ -14,6 +14,15 @@ function fixture(){
   return {frames,contexts,policy,port,call,child};
 }
 
+test('Only an active parent may prefetch scripts for its own worker while general child fetches remain restricted',()=>{
+  const {frames,call,child,policy,port,contexts}=fixture();child('worker');frames.worker.worker=true;child('iframe');
+  const args=['root','worker','request','https://site.test/script.js',{}];assert.deepEqual(call('fetch_worker_script',args),args);
+  for(const args of [['root','iframe','request','https://site.test/script.js',{}],['other','worker','request','https://site.test/script.js',{}],['root','unknown','request','https://site.test/script.js',{}]])assert.throws(()=>call('fetch_worker_script',args),{name:'SecurityError'});
+  assert.throws(()=>call('fetch',['worker','request','https://site.test/script.js',{mode:'no-cors'}]),{name:'SecurityError'});
+  const sibling={};policy.attach(port,sibling,'iframe');assert.throws(()=>call('fetch_worker_script',['iframe','worker','request','https://site.test/script.js',{}],sibling),{name:'SecurityError'});
+  contexts.set('next-root',{frame:'root'});frames.root.document_context='next-root';policy.bind_root(port,'next-root');assert.throws(()=>call('fetch_worker_script',args),{name:'SecurityError'});
+});
+
 test('RPC ports bind frame IDs and document capabilities independently of supplied arguments',()=>{
   const {call,port,policy,child}=fixture();const source={};
   policy.attach(port,source,'child');child('child');

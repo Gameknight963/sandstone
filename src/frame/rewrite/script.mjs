@@ -108,6 +108,7 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
   const num = script_num++;
   let text = script_text(element);
   let ready = script_url===null;
+  let classic_context;
   let executed = false;
   let started = false;
   let prepared;
@@ -151,7 +152,8 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
 
   function execute_classic(){
     try{
-      loader.eval_script(sourceElement,script_url!==null?text:script_text(element),{run});
+      classic_context??=classic_request_context();
+      loader.eval_script(sourceElement,script_url!==null?text:script_text(element),{run,context:classic_context});
       if(script_url!==null)sourceElement.dispatchEvent(new Event('load'));
     }finally{finish_load();}
   }
@@ -195,20 +197,27 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
     ready = false;
     try {
       if(script_url==='')throw new TypeError('Script source is empty');
+      classic_context=classic_request_context();
       const response = await network.fetch(convert_url(script_url, ctx.document.baseURI), {
-        mode:element.crossOrigin === null ? 'no-cors' : 'cors',
-        credentials:element.crossOrigin === 'anonymous' ? 'same-origin' : 'include',
-        referrerPolicy:element.referrerPolicy,signal
+        mode:classic_context.mode,credentials:classic_context.networkCredentials,
+        referrerPolicy:classic_context.referrerPolicy,destination:'script',signal
       });
       if (!response.ok) throw new TypeError(`Script request failed: ${response.status}`);
       text = await response.text();
       element.__sandstone_url__ = response.url || convert_url(script_url, ctx.document.baseURI);
+      classic_context.url=element.__sandstone_url__;
+      classic_context.muted=classic_context.mode==='no-cors'&&(response.request_cross_origin??response.type==='opaque');
       if(sourceElement!==element)sourceElement.__sandstone_url__=element.__sandstone_url__;
       ready = true;
       if (loader.is_loaded&&!parser) element.__sandstone_execute__();
     } catch (error) {
       report_error(error);
     }
+  }
+
+  function classic_request_context(){
+    const crossOrigin=element.crossOrigin;
+    return {url:script_url===null?ctx.document.baseURI:undefined,credentials:crossOrigin==='use-credentials'?'include':'same-origin',mode:crossOrigin===null?'no-cors':'cors',networkCredentials:crossOrigin==='anonymous'?'same-origin':'include',referrerPolicy:parse_referrer_policy(element.referrerPolicy,document_referrer_policy())};
   }
 
   intercept_property(element, "src", {

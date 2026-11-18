@@ -67,7 +67,8 @@ export function fakeImportScripts(...paths) {
     if (typeof source !== "string") throw new DOMException(`Worker script is unavailable: ${url}`, "NetworkError");
     if (!imported_blobs.has(url)) {
       const scriptURL=worker_options?.source_urls?.[url]||url;
-      const rewritten = parser.rewrite_js(source, {url:scriptURL,sourceURL:scriptURL});
+      const crossed=worker_options?.source_cross_origins?.[url]??new URL(scriptURL).origin!==ctx.origin;
+      const rewritten = parser.rewrite_js(source, {url:scriptURL,sourceURL:scriptURL,importReferrer:{url:crossed?'about:blank':scriptURL,credentials:'same-origin',referrerPolicy:loader.referrer_policy}});
       imported_blobs.set(url, network.create_blob_url(new Blob([rewritten], {type: "text/javascript"}), scriptURL));
     }
     return imported_blobs.get(url);
@@ -162,6 +163,7 @@ export class FakeWorker extends EventTarget {
   #controller = new AbortController();
   #removeUnload;
   #source_urls=new Map();
+  #source_cross_origins=new Map();
   #referrerPolicy;
 
   constructor(url, options = {}) {
@@ -188,7 +190,7 @@ export class FakeWorker extends EventTarget {
 
   #payload(source, url, sources, probe = false) {
     return {
-      source:sources.get(url)===source?undefined:source, url, sources: Object.fromEntries(sources), source_urls:Object.fromEntries(this.#source_urls),probe,
+      source:sources.get(url)===source?undefined:source, url, sources: Object.fromEntries(sources), source_urls:Object.fromEntries(this.#source_urls),source_cross_origins:Object.fromEntries(this.#source_cross_origins),probe,
       frame_id: this.#id, token: this.#token, type: this.#options.type,
       credentials: this.#options.credentials, runtime_src: loader.runtime_src,
       crypto_available: loader.crypto_available,
@@ -229,36 +231,44 @@ export class FakeWorker extends EventTarget {
       if (!missing || sources.has(missing)) break;
       sources.set(missing, false);
       try {
-        const response = await network.fetch(missing, {signal: this.#controller.signal});
+        const response = await this.#fetch_script(missing,url);
         if (!response.ok) continue;
         const script = await response.text();
         sources.set(missing, script);
         const final_url=response.url||missing;
         this.#source_urls.set(missing,final_url);
-        await prefetch_worker_scripts(script, url, resource => network.fetch(resource, {signal: this.#controller.signal}), sources,this.#source_urls,final_url);
+        await prefetch_worker_scripts(script, url, resource => this.#fetch_script(resource,url), sources,this.#source_urls,final_url);
       } catch {}
     }
   }
 
+  async #fetch_script(resource,url){
+    const response=await network.fetch(resource,{signal:this.#controller.signal,mode:'no-cors',credentials:'include',destination:'script',referrer:url,referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(resource)?{sandstone_worker_script:this.#id}:{})});
+    this.#source_cross_origins.set(resource,response.request_cross_origin??response.type==='opaque');
+    return response;
+  }
+
   async #start() {
     const credentials = this.#options.type === "classic" ? "same-origin" : this.#options.credentials;
-    const response = await network.fetch(this.#url, {credentials,referrerPolicy:this.#referrerPolicy, signal: this.#controller.signal});
+    const response = await network.fetch(this.#url, {credentials,referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(this.#url)?{mode:'same-origin'}:{}), signal: this.#controller.signal});
     if (!response.ok) throw new TypeError(`Worker request failed: ${response.status}`);
     const network_script=/^https?:/.test(response.url||this.#url);
     this.#referrerPolicy=parse_referrer_policy(response.headers.get('referrer-policy'),network_script?default_referrer_policy:this.#referrerPolicy);
     const source = await response.text();
     const url = response.url || this.#url;
-    let sources = new Map();
-    if (this.#options.type === "classic") {
-      const prefetched = await prefetch_worker_scripts(source, url, resource => network.fetch(resource, {signal: this.#controller.signal}),sources,this.#source_urls);
-      sources = prefetched.cache;
-      if (prefetched.dynamic) await this.#probe(source, url, sources);
-    }
     if (this.#terminated) return;
     const register = rpc.create_rpc_wrapper(rpc.host, "frame_register");
     const registration = await register(loader.frame_id, this.#id, url, {worker: true});
     this.#registered = true;
     if (this.#terminated) { this.#unregister(); return; }
+    this.#source_cross_origins.set(url,false);
+    let sources = new Map();
+    if (this.#options.type === "classic") {
+      const prefetched = await prefetch_worker_scripts(source, url, resource => this.#fetch_script(resource,url),sources,this.#source_urls);
+      sources = prefetched.cache;
+      if (prefetched.dynamic) await this.#probe(source, url, sources);
+    }
+    if (this.#terminated) return;
     this.#bootstrap = this.#blob({...this.#payload(source, url, sources),beacon_context:registration.beacon_context});
     // A classic bootstrap can import worker-local module blobs even on file:
     // origins, where native module-worker construction rejects parent blobs.

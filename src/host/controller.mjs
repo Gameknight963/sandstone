@@ -7,7 +7,7 @@ import {crypto_service} from './crypto.mjs';
 import { NavigationHistory } from "../history.mjs";
 import {parse_referrer_policy,default_referrer_policy} from '../referrer.mjs';
 import {is_download} from '../download.mjs';
-import {frame_cross_site} from './frame_context.mjs';
+import {frame_cross_site,worker_script_url} from './frame_context.mjs';
 import './storage.mjs';
 import './cookies.mjs';
 import './navigation_targets.mjs';
@@ -330,6 +330,7 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   if(srcdoc&&(new URL(url).protocol!=='about:'||new URL(url).pathname!=='srcdoc'||new URL(url).search))throw new TypeError('Invalid inline frame URL');
   if(blank&&(new URL(url).protocol!=='about:'||new URL(url).pathname!=='blank'||new URL(url).search))throw new TypeError('Invalid blank frame URL');
   const inherited_origin=parent.origin||parent.url.origin;
+  if(options.worker)worker_script_url(url,inherited_origin);
   const opaque=options.opaque||parent_broadcast.startsWith('opaque:')||options.worker&&new URL(url).protocol==='data:';
   const effective_url=()=>parent.request_url||parent.url.href;
   const creator_url=blank&&options.creator_url!==undefined?new URL(options.creator_url).href:effective_url();

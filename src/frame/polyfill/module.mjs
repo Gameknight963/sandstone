@@ -24,7 +24,7 @@ export function flush_import_map() {
 export const modules = new ModuleLoader({
   context:()=>({referrer:ctx.location.href,referrerPolicy:document_referrer_policy()}),
   types:globalThis.CSSStyleSheet?['javascript','json','css']:['javascript','json'],
-  fetch: (url, options) => network.fetch(url, {...options,mode:'cors'}),
+  fetch: (url, options) => network.fetch(url, {...options,mode:'cors',destination:'script'}),
   rewrite: (source, options) => parser.rewrite_js(source, options),
   createURL: (source, type, original) => network.create_blob_url(new Blob([source], {type}), original),
   register(imports) {

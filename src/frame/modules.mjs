@@ -222,10 +222,14 @@ export class ModuleLoader {
     // after specifier conversion and option getters have finished running.
     // Inline modules can share a URL while retaining different fetch options.
     // Rewritten imports carry their record identity, separately from URL labels.
-    const parent=base&&typeof base==='object'?this.records.get(base.key):undefined;
+    const reference=base&&typeof base==='object';
+    const parent=reference&&Object.hasOwn(base,'key')?this.records.get(base.key):undefined;
+    const script=!parent&&reference&&Object.hasOwn(base,'url')&&typeof base.url==='string'?base:undefined;
     if(parent)base=parent.url;
+    else if(script)base=script.url;
     else if(typeof base==='function')base=base();
-    const record = await this.prepare_url(specifier, base, {with:snapshot,credentials:credentials??parent?.credentials,context:parent?{referrer:parent.url,referrerPolicy:parent.policy}:undefined});
+    const context=parent?{referrer:parent.url,referrerPolicy:parent.policy}:script?{referrer:script.url,referrerPolicy:script.referrerPolicy}:undefined;
+    const record = await this.prepare_url(specifier, base, {with:snapshot,credentials:credentials??parent?.credentials??script?.credentials,context});
     return this.execute(record.blob);
   }
 

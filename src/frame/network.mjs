@@ -8,6 +8,7 @@ import {reserve_keepalive} from './keepalive_budget.mjs';
 const native_fetch=globalThis.fetch;
 
 export const rpc_fetch = rpc.create_rpc_wrapper(rpc.host, "fetch");
+const rpc_worker_script=rpc.create_rpc_wrapper(rpc.host,'fetch_worker_script');
 const rpc_fetch_read = rpc.create_rpc_wrapper(rpc.host, "fetch_read");
 const rpc_fetch_abort = rpc.create_rpc_wrapper(rpc.host, "fetch_abort");
 const rpc_keepalive = rpc.create_rpc_wrapper(rpc.host,'fetch_keepalive');
@@ -49,7 +50,9 @@ export async function fetch(url, options) {
   const reserved_release = params.sandstone_keepalive_release;
   delete params.sandstone_keepalive_release;
   if (!params.referrerPolicy) params.referrerPolicy = document_referrer_policy();
-  const frame_id = params.sandstone_frame_id || loader.frame_id;
+  const worker_script=params.sandstone_worker_script;
+  delete params.sandstone_worker_script;
+  const frame_id = worker_script || params.sandstone_frame_id || loader.frame_id;
   delete params.sandstone_frame_id;
   const navigation_source=params.sandstone_navigation_source;
   delete params.sandstone_navigation_source;
@@ -58,8 +61,9 @@ export async function fetch(url, options) {
   signal?.throwIfAborted();
   const request_id = Math.random() + "";
   const keepalive = !!params.keepalive;
+  if(worker_script&&keepalive)throw new TypeError('Worker script prefetch cannot be keepalive');
   const owner = keepalive ? loader.beacon_context : frame_id;
-  const open = keepalive ? rpc_keepalive : rpc_fetch;
+  const open = worker_script ? (...args)=>rpc_worker_script(loader.frame_id,...args) : keepalive ? rpc_keepalive : rpc_fetch;
   const read = keepalive ? rpc_keepalive_read : rpc_fetch_read;
   const cancel = keepalive ? rpc_keepalive_abort : rpc_fetch_abort;
   const bytes = keepalive && params.body != null ? new Blob([params.body]).size : 0;
@@ -108,6 +112,7 @@ function restore_response(data) {
     Object.defineProperty(response, key, {value});
   }
   if (data.request_referrer !== undefined) Object.defineProperty(response,'request_referrer',{value:data.request_referrer});
+  if(data.request_cross_origin!==undefined)Object.defineProperty(response,'request_cross_origin',{value:data.request_cross_origin});
   const clone = response.clone.bind(response);
   Object.defineProperty(response, "clone", {value: () => {
     const copy = clone();

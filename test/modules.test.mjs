@@ -78,6 +78,33 @@ function environment(sources,options={}) {
   return {loader, requests, blobs, mappings};
 }
 
+test('Classic import contexts freeze base URLs, policies and credentials without reading document state',async()=>{
+  const env=environment({'https://cdn.test/scripts/one.js':'export default 1;','https://cdn.test/scripts/two.js':'export default 2;'}, {context:()=>{throw new Error('Current document context was read')}});
+  await env.loader.import('./one.js',{url:'https://cdn.test/scripts/classic.js',credentials:'include',referrerPolicy:'origin'});
+  await env.loader.import('./two.js',{url:'https://cdn.test/scripts/classic.js',credentials:'same-origin',referrerPolicy:'no-referrer'});
+  assert.deepEqual(env.requests,[
+    {url:'https://cdn.test/scripts/one.js',credentials:'include',referrer:'https://cdn.test/scripts/classic.js',referrerPolicy:'origin'},
+    {url:'https://cdn.test/scripts/two.js',credentials:'same-origin',referrer:'https://cdn.test/scripts/classic.js',referrerPolicy:'no-referrer'}
+  ]);
+});
+
+test('Muted classic scripts reject relative imports and retain an opaque referrer for absolute imports',async()=>{
+  const env=environment({'https://cdn.test/late.js':'export default 1;'}),context={url:'about:blank',credentials:'same-origin',referrerPolicy:'unsafe-url'};
+  await assert.rejects(env.loader.import('./late.js',context),TypeError);assert.equal(env.requests.length,0);
+  await env.loader.import('https://cdn.test/late.js',context);
+  assert.equal(env.requests[0].referrer,'about:blank');assert.equal(env.requests[0].credentials,'same-origin');
+});
+
+test('Classic and module import references ignore inherited metadata properties',async()=>{
+  const env=environment({'https://example.com/entry.js':'export default 1;','https://example.com/module.js':'export default 2;','https://cdn.test/classic.js':'export default 3;'});
+  const entry=await env.loader.prepare_url('./entry.js','https://example.com/');
+  const module=Object.assign(Object.create({get url(){throw new Error('Inherited URL was read')}}),{key:entry.key});
+  await env.loader.import('./module.js',module);
+  const classic=Object.assign(Object.create({get key(){throw new Error('Inherited key was read')}}),{url:'https://cdn.test/entry.js',credentials:'include',referrerPolicy:'origin'});
+  await env.loader.import('./classic.js',classic);
+  assert.equal(env.requests[1].url,'https://example.com/module.js');assert.equal(env.requests[2].credentials,'include');
+});
+
 test('Module dependencies inherit response policies and final parent URLs, separately from the entry referrer',async()=>{
   const env=environment({
     'https://example.com/start.js':{url:'https://cdn.test/modules/root.js',source:'import "./child.js";',headers:{'Referrer-Policy':'unsafe-url'}},

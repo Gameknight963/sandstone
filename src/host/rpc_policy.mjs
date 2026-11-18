@@ -50,6 +50,9 @@ export class RPCSourcePolicy {
       if(this.frames()[args[0]]&&!this.owns(scope,args[0]))denied();return args;
     }
     this.active(scope);
+    if(procedure==='fetch_worker_script'){
+      if(args[0]!==scope.id||!this.owns(scope,args[1])||!this.frames()[args[1]]?.worker)denied();return args;
+    }
     if(procedure==='frame_register'){
       const pending=this.pending.get(args[1]);
       if(args[0]!==scope.id||typeof args[1]!=='string'||args[1]===scope.id||pending&&(pending.parent!==scope.id||pending.creator!==scope.context))denied();return args;
