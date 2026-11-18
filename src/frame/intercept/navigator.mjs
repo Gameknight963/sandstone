@@ -11,7 +11,8 @@ if (typeof Navigator !== 'undefined') {
     budget:keepalive_budget,
     base: () => ctx.document.baseURI,
     dispatch(url, body) {
-      return rpc.call_procedure(rpc.host, 'beacon', [loader.beacon_context, url, body,{referrerPolicy:document_referrer_policy()}]).then(result => load_cookies(result?.cookies));
+      const referrer=/^about:blank(?:#|$)/.test(ctx.location.href)?'':undefined;
+      return rpc.call_procedure(rpc.host, 'beacon', [loader.beacon_context, url, body,{referrer,referrerPolicy:document_referrer_policy()}]).then(result => load_cookies(result?.cookies));
     }
   });
   Navigator.prototype.sendBeacon = function sendBeacon(url, body) {

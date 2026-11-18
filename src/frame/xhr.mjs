@@ -21,7 +21,7 @@ function charset(mime) {
 
 // The transport is injected so lifecycle and streaming behavior can be tested
 // independently of the iframe runtime. Remote requests always use the relay.
-export function create_xhr_class({fetch, base, isWorker = false}) {
+export function create_xhr_class({fetch, base, isWorker = false, client_referrer = () => undefined}) {
   class XMLHttpRequestEventTarget extends EventTarget {}
   handlers(XMLHttpRequestEventTarget.prototype, progress_types);
   class XMLHttpRequestUpload extends XMLHttpRequestEventTarget {
@@ -182,7 +182,7 @@ export function create_xhr_class({fetch, base, isWorker = false}) {
         const request = await serialize_request(this.#url, {
           method: this.#method, headers, body: body === null ? undefined : body,
           credentials: this.#credentials ? 'include' : 'same-origin', signal
-        }, base());
+        }, base(), undefined, undefined, client_referrer());
         if (!this.#alive(generation)) return;
         const response = await fetch(request.url, {...request.options, signal});
         if (!this.#alive(generation)) { await response.body?.cancel(); return; }

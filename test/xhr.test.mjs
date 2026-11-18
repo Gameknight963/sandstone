@@ -6,6 +6,17 @@ const create = fetch => create_xhr_class({fetch,base:()=> 'https://site.test/bas
 const ended = xhr => new Promise(resolve=>xhr.addEventListener('loadend',resolve,{once:true}));
 const delay = milliseconds => new Promise(resolve=>setTimeout(resolve,milliseconds));
 
+test('XHR snapshots a blank document referrer before body serialization completes', async () => {
+  let referrer='',received;
+  const XHR=create_xhr_class({base:()=> 'https://site.test/base/',client_referrer:()=>referrer,fetch:async(url,options)=>{
+    received=options.referrer;return new Response('done');
+  }});
+  const xhr=new XHR();xhr.open('POST','echo');const done=ended(xhr);
+  xhr.send(new Blob(['body']));referrer=undefined;
+  await done;
+  assert.equal(xhr.status,200);assert.equal(received,'');
+});
+
 test('XHR JSON responses, headers and event handler ordering preserve identity', async () => {
   let request;
   const XHR=create(async (url,options)=>{

@@ -4,6 +4,7 @@ import * as rpc from "../../rpc.mjs";
 import {storage_cookie} from '../../cookie.mjs';
 
 let cookies = new CookieJar();
+export const cookie_snapshot=()=>cookies.serializeSync();
 const cookie_set = rpc.create_rpc_wrapper(rpc.host, "cookie_set");
 export function load_cookies(snapshot) {
   if (snapshot) cookies = CookieJar.deserializeSync(snapshot);

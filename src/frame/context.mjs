@@ -202,6 +202,7 @@ export function update_ctx(options = {}) {
   internal.history = is_worker ? undefined : new polyfill.FakeHistory(options.history);
   if (is_worker) { internal.localStorage = undefined; internal.sessionStorage = undefined; }
   if (!is_worker) {
+    internal.storage_unavailable=ctx.origin==='null';
     const stores=create_document_storage(options,()=>ctx.location.href,()=>ctx.window);
     internal.localStorage=stores.local;internal.sessionStorage=stores.session;
     storageReady=stores.ready.then(snapshot=>{internal.storage_unavailable=!!snapshot.opaque;});

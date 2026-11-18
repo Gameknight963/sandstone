@@ -7,6 +7,13 @@ import { fetch_with_cookies } from "../src/host/request.mjs";
 import { data_to_array } from "../src/util.mjs";
 import { rewrite_source } from "../src/frame/rewrite/javascript.mjs";
 
+test('Blank document default referrers are snapshotted without discarding explicit virtual referrers',async()=>{
+  const defaults=await serialize_request('/api',{method:'POST',body:'body'},'https://site.test/assets/','https://site.test/',undefined,'');
+  assert.equal(defaults.options.referrer,'');
+  const explicit=await serialize_request('/api',{referrer:'https://site.test/explicit'},'https://site.test/assets/','https://site.test/',undefined,'');
+  assert.equal(explicit.options.referrer,'https://site.test/explicit');
+});
+
 function memory_storage() {
   const values = new Map();
   return {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key)};

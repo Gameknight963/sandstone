@@ -13,6 +13,7 @@ function context_value(target,key){
 }
 if(document_descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentDocument',{...document_descriptor,get(){
   const value=document_descriptor.get.call(this),state=frames.get(this);if(!value||!state)return value;
+  state.prepare?.(descriptor.get.call(this));
   if(!state.url()||state.opaque()||state.origin()!==ctx.origin)return null;
   try{if(!descriptor.get.call(this).__ctx__)return null;}catch{return null;}
   return context_value(descriptor.get.call(this),'document');
@@ -67,6 +68,7 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
   get(){
     const target=descriptor.get.call(this),state=frames.get(this);
     if(!target||!state)return target;
+    state.prepare?.(target);
     if(state.target===target)return state.window;
     state.target=target;
     const nativeLocation=()=>target.location;
@@ -139,6 +141,6 @@ if(source)Object.defineProperty(MessageEvent.prototype,'source',{
   ...source,get(){const target=source.get.call(this);return windows.get(target)||target;}
 });
 
-export function intercept_iframe_window(element,url,navigate,token,{id,name=()=>'',opaque=()=>false,origin=()=>new URL(url()).origin}={}){
-  frames.set(element,{id,url,navigate,token,name,origin,opaque:()=>opaque()||!url()&&element.hasAttribute('sandbox')&&!sandbox_tokens(element.getAttribute('sandbox')).has('allow-same-origin')});
+export function intercept_iframe_window(element,url,navigate,token,{id,name=()=>'',opaque=()=>false,origin=()=>new URL(url()).origin,prepare}={}){
+  frames.set(element,{id,url,navigate,token,name,origin,prepare,opaque:()=>opaque()||!url()&&element.hasAttribute('sandbox')&&!sandbox_tokens(element.getAttribute('sandbox')).has('allow-same-origin')});
 }

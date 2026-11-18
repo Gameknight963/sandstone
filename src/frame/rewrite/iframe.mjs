@@ -3,19 +3,20 @@ import * as network from "../network.mjs";
 import * as loader from "../loader.mjs";
 import * as util from "../../util.mjs";
 import * as rpc from "../../rpc.mjs";
-import {parse_referrer_policy} from '../../referrer.mjs';
+import {parse_referrer_policy,request_referrer} from '../../referrer.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {is_download} from '../../download.mjs';
 import {save_response} from '../downloads.mjs';
 import {intercept_iframe_window,native_frame_window} from '../iframe_window.mjs';
 import {child_message_parent} from '../window_messages.mjs';
-import {track_iframe} from '../iframe_lifecycle.mjs';
+import {track_iframe,reconcile_iframes} from '../iframe_lifecycle.mjs';
 import {sandbox_tokens} from '../../navigation_policy.mjs';
 import {resource_attribute} from '../resource_attributes.mjs';
 import {register_media_attributes,render_media_attribute,media_attribute_mirror,raw_media_attribute} from '../media_attributes.mjs';
 import {delay_script_load} from '../script_lifetime.mjs';
 import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../../bootstrap.mjs';
 import {on_shadow_root} from '../shadow_roots.mjs';
+import {cookie_snapshot} from '../polyfill/cookie.mjs';
 
 const inline_frames=new WeakMap(),sandbox_lists=new WeakMap();
 const runtime_loads=new WeakMap();
@@ -59,9 +60,16 @@ export function rewrite_iframe(iframe_element) {
   let iframe_src = iframe_element.src;
   let authored_src = iframe_element.getAttribute('src');
   const authored=new Map(['src','srcdoc','sandbox'].map(key=>[key,iframe_element.getAttribute(key)]));
+  const blank_url=()=>{
+    if(authored.get('srcdoc')!==null)return;
+    if(!authored_src)return 'about:blank';
+    try{const url=new URL(authored_src,ctx.document.baseURI);if(url.protocol==='about:'&&url.pathname==='blank'&&!url.search)return url.href;}catch{}
+  };
   let physical_inline='',finish_load,active_target,native_runtime_load,set_src;
-  let runtime_sandbox=authored.get('srcdoc')!==null;
+  let runtime_sandbox=authored.get('srcdoc')!==null||!!blank_url();
+  let ensure_blank=()=>false,initializing_blank=false,blank_ready=false,blank_runtime,blank_load_pending=true;
   runtime_loads.set(iframe_element,event=>{
+    if(blank_load_pending&&blank_url()&&!initializing_blank&&ensure_blank(native_frame_window(iframe_element))&&blank_runtime?.loader.pristine_blank){blank_load_pending=false;return;}
     if(event.isTrusted&&(runtime_sandbox||iframe_url||native_runtime_load)){event.stopImmediatePropagation();native_runtime_load?.(event);}
   });
   const release_load=()=>{finish_load?.();finish_load=undefined;};
@@ -94,14 +102,66 @@ export function rewrite_iframe(iframe_element) {
   let iframe_url = "";
   let generation=0,active_request,commit=Promise.resolve();
   const retire=()=>{
-    generation++;active_request?.abort();iframe_url='';active_target=undefined;release_load();
+    generation++;active_request?.abort();iframe_url='';active_target=undefined;blank_ready=false;blank_load_pending=true;release_load();
+    const closing=generation;
     const release=commit.then(async()=>{
       if(registered){await unregister(frame_id);registered=false;}
-      loader.child_navigators.delete(frame_id);
-      loader.child_names.delete(frame_id);
-      loader.child_urls.delete(frame_id);
+      if(generation===closing){loader.child_navigators.delete(frame_id);loader.child_names.delete(frame_id);loader.child_urls.delete(frame_id);}
     });
     commit=release.catch(console.error);
+  };
+
+  ensure_blank=target=>{
+    if(!initializing_blank)reconcile_iframes(iframe_element);
+    if(blank_ready){try{if(target.sandstone_frame===blank_runtime)return true;}catch{}blank_ready=false;}
+    const url=blank_url();
+    if(initializing_blank||!url||!iframe_element.isConnected)return false;
+    let doc;try{doc=target.document;if(target.sandstone_frame)return false;}catch{return false;}
+    if(!doc||!doc.URL.startsWith('about:blank'))return false;
+    if(iframe_url)retire();
+    const revision=++generation,nonce=create_bootstrap_nonce(),token=create_bootstrap_nonce(),channel=new MessageChannel();
+    const current=()=>generation===revision&&iframe_element.isConnected;
+    initializing_blank=true;runtime_sandbox=true;iframe_url=url;opaque_origin=ctx.origin==='null';
+    try{
+      if(!doc.doctype)doc.insertBefore(doc.implementation.createDocumentType('html','',''),doc.documentElement);
+      doc.documentElement.innerHTML=bootstrap_html(loader.frame_html,nonce,1);
+      const old=doc.querySelector('script'),script=doc.createElement('script');
+      script.setAttribute('data-sandstone-bootstrap',old.getAttribute('data-sandstone-bootstrap'));script.textContent=old.textContent;old.replaceWith(script);
+      const runtime=target.sandstone_frame;
+      blank_runtime=runtime;
+      const document_current=()=>{try{return iframe_element.isConnected&&native_frame_window(iframe_element).sandstone_frame===runtime;}catch{return false;}};
+      // The child is usable now. Leave the host end unstarted until registration
+      // succeeds so early requests queue behind their document's capability.
+      runtime.rpc.connect_frame_host(channel.port2,nonce);
+      const creator_url=loader.cookie_url||loader.url,policy=document_referrer_policy();
+      let local=[],session=[];try{local=ctx.localStorage._get_entries();session=ctx.sessionStorage._get_entries();}catch{}
+      const ready=runtime.loader.initialize_blank({url,frame_id,beacon_context:token,document_origin:ctx.origin,cookie_url:creator_url,
+        inherited_base_url:ctx.document.baseURI,document_referrer:request_referrer(creator_url,creator_url,policy),referrer_policy:policy,
+        message_origin:ctx.origin,message_parent:child_message_parent(message_token),is_iframe:true,window_name:window_name,
+        crypto_available:loader.crypto_available,local_storage:local,session_storage:session,cookies:cookie_snapshot(),
+        cookie_cross_site:loader.cookie_cross_site,settings:{allow_js:loader.site_settings.allow_js!==false&&(authored.get('sandbox')===null||sandbox_tokens(authored.get('sandbox')).has('allow-scripts'))},
+        default_settings:loader.default_settings,version:loader.version},()=>{if(document_current())iframe_element.dispatchEvent(new Event('load'));},value=>{
+          if(!document_current())return;
+          if(active_request&&!active_request.signal.aborted){active_request.abort();generation++;}
+          iframe_url=value;
+        });
+      ready.catch(error=>{if(current())console.error(error);});
+      blank_ready=true;
+      loader.child_names.set(frame_id,value=>{window_name=value;});
+      loader.child_urls.set(frame_id,(value,context)=>{if(!context||context===token)iframe_url=value;});
+      loader.child_navigators.set(frame_id,fetch_src);
+      const registration=commit.then(async()=>{
+        if(registered){await unregister(frame_id);registered=false;}
+        const sandbox=authored.get('sandbox');
+        await register(loader.frame_id,frame_id,url,{blank:true,creator_url,beacon_context:token,sandbox,opaque:opaque_origin,window_name});
+        // A removed document can still have accepted unload requests queued.
+        // Attach before the serialized unregister retires its context.
+        registered=true;rpc.attach_host(channel.port1,frame_id);
+      });
+      commit=registration.catch(error=>{channel.port1.close();channel.port2.close();if(current())console.error(error);});
+      return true;
+    }catch(error){channel.port1.close();channel.port2.close();iframe_url='';throw error;}
+    finally{initializing_blank=false;}
   };
 
   let fetch_src = async (value, form_data = null, navigation = {}) => {
@@ -233,7 +293,7 @@ export function rewrite_iframe(iframe_element) {
       registered = true;
       window_name=state.window_name;opaque_origin=state.message_origin==='null';
       loader.child_names.set(frame_id,value=>{window_name=value;});
-      loader.child_urls.set(frame_id,value=>{iframe_url=value;});
+      loader.child_urls.set(frame_id,(value,context)=>{if(!context||context===state.beacon_context)iframe_url=value;});
       if(!current())return;
       loader.child_navigators.set(frame_id, fetch_src);
       try {
@@ -281,8 +341,12 @@ export function rewrite_iframe(iframe_element) {
       let remote=false;
       try{remote=util.url_is_http(value);}catch{}
       if (!remote || !value){
+        if(blank_url()){
+          active_request?.abort();generation++;blank_load_pending=true;
+          runtime_sandbox=true;render_sandbox();render_media_attribute(iframe_element,'src',value??'');return;
+        }
         retire();
-        runtime_sandbox=false;render_sandbox();
+        runtime_sandbox=!!blank_url();render_sandbox();
         render_media_attribute(iframe_element,'src',value??'');
       }
       else {
@@ -297,7 +361,7 @@ export function rewrite_iframe(iframe_element) {
   intercept_property(iframe_element,'src',{get:source_url,set(value){set_src(`${value}`);}});
   intercept_iframe_window(iframe_element,()=>iframe_url,(url,history_mode,form_data,navigation)=>{
     return fetch_src(url,form_data,{...navigation,history_mode});
-  },message_token,{id:frame_id,name:()=>window_name,opaque:()=>opaque_origin,origin:()=>iframe_url.startsWith('about:srcdoc')?ctx.origin:new URL(iframe_url).origin});
+  },message_token,{id:frame_id,name:()=>window_name,opaque:()=>opaque_origin,prepare:ensure_blank,origin:()=>/^about:(?:srcdoc|blank)(?:#|$)/.test(iframe_url)?ctx.origin:new URL(iframe_url).origin});
   let lifecycle_ready=false;
   track_iframe(iframe_element,{
     disconnect(){
@@ -312,12 +376,13 @@ export function rewrite_iframe(iframe_element) {
       initial_name=window_name=iframe_element.name;opaque_origin=false;
       if(!lifecycle_ready)return;
       if(authored.get('srcdoc')!==null){fetch_src('about:srcdoc',null,{srcdoc:true}).catch(console.error);return;}
-      if(!authored_src)return;
+      if(blank_url()){ensure_blank(native_frame_window(iframe_element));return;}
       let remote=false;try{remote=util.url_is_http(authored_src);}catch{}
       if(remote)fetch_src(authored_src).catch(console.error);
     }
   });
   lifecycle_ready=true;
+  if(blank_url()){if(iframe_element.isConnected)ensure_blank(native_frame_window(iframe_element));return;}
   if(authored.get('srcdoc')!==null){fetch_src('about:srcdoc',null,{srcdoc:true}).catch(console.error);return;}
   if (!iframe_src || iframe_src.startsWith("data:") || iframe_src.startsWith("blob:")) {
     return;

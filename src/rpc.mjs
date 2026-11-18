@@ -302,6 +302,12 @@ function host_set_handler(event) {
 export function set_role(value) {
   role = value;
 }
+
+export function connect_frame_host(port,nonce){
+  if(!host||!nonce||nonce!==bootstrap_nonce||bootstrap_connections>=bootstrap_channels)throw new DOMException('Invalid bootstrap connection','SecurityError');
+  Reflect.apply(MessagePort.prototype.start,port,[]);bootstrap_connections++;
+  if(!host.target){host.set_target(port);on_attach();}else host.add_extra_target(port);
+}
 export function set_on_attach(callback) {
   on_attach = callback;
 }

@@ -10,8 +10,8 @@ export class BeaconQueue {
     this.pending = new Set();
   }
 
-  register(frame, context) {
-    const id = Math.random() + ':' + Math.random();
+  register(frame, context, id = Math.random() + ':' + Math.random()) {
+    if(typeof id!=='string'||!id||this.contexts.has(id))throw new TypeError('Invalid document context');
     this.contexts.set(id, {frame, context: {...context}, queued: 0});
     return id;
   }
@@ -51,6 +51,7 @@ export class BeaconQueue {
         headers: {Origin: new URL(entry.context.url).origin, ...(body.type ? {'Content-Type': body.type} : {})},
         mode:!body.type || /^(text\/plain|application\/x-www-form-urlencoded|multipart\/form-data)(?:;|$)/i.test(body.type) ? 'no-cors' : 'cors',
         referrerPolicy:options.referrerPolicy,
+        referrer:options.referrer,
         credentials: 'include', redirect: 'follow', signal: controller.signal
       }, entry.context);
       await response.body?.cancel();

@@ -1,7 +1,7 @@
 // Normalize with the browser's Request implementation, retaining generated body headers.
 import {beacon_body} from '../beacon.mjs';
 
-export function prepare_request(resource, init, base, source_url = base, reserve) {
+export function prepare_request(resource, init, base, source_url = base, reserve,client_referrer) {
   const input = resource instanceof Request ? resource : new URL(resource, base).href;
   const options = {...init};
   const keepalive = options.keepalive ?? (resource instanceof Request && resource.keepalive);
@@ -25,6 +25,7 @@ export function prepare_request(resource, init, base, source_url = base, reserve
     const source = new URL(source_url || input.url || input), requested = new URL(referrer,base || source);
     referrer = source.origin !== 'null' && requested.origin === source.origin ? requested.href : 'about:client';
   }
+  if(referrer==='about:client'&&client_referrer!==undefined)referrer=client_referrer;
   if (options.body instanceof ReadableStream) options.duplex = "half";
   const request = new Request(input, options);
   request.signal.throwIfAborted();

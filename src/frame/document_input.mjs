@@ -15,6 +15,15 @@ import {script_kind,svg_script_kind} from './script_types.mjs';
 import {pending_script_loads,wait_script_loads} from './script_lifetime.mjs';
 
 let session,writer,writerOwner,ignoreWrites=0,validation;
+const completion_observers=new Set();
+export function on_document_complete(callback){completion_observers.add(callback);return ()=>completion_observers.delete(callback);}
+export function initialize_blank_document(){
+  while(document.firstChild)dom.remove.call(document,document.firstChild);
+  const html=dom.create.call(document,'http://www.w3.org/1999/xhtml','html');
+  dom.append.call(html,dom.create.call(document,'http://www.w3.org/1999/xhtml','head'));
+  dom.append.call(html,dom.create.call(document,'http://www.w3.org/1999/xhtml','body'));
+  dom.append.call(document,html);loader.set_ready_state('complete');
+}
 const type=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'contentType').get;
 const state=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'readyState').get;
 const link_href=globalThis.HTMLLinkElement&&Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype,'href').get;
@@ -87,7 +96,8 @@ export async function load_document_html(source,{scriptingEnabled=true}={}){
 }
 function begin({source=false,scriptingEnabled=loader.site_settings.allow_js!==false}={}){
   const previous=session,targets=nodes(),saved=snapshot_runtime_events(targets);
-  dom.open.call(document);restore_runtime_events(saved);forget_document_listeners(targets);
+  const previous_url=document.URL,sources=loader.document_sources();
+  dom.open.call(document);loader.document_opened(previous_url,document.URL,sources);restore_runtime_events(saved);forget_document_listeners(targets);
   previous?.controller.abort(new DOMException('The document was replaced','AbortError'));
   const current={controller:new AbortController(),source,phase:'loading',async:[],deferred:[],finished:null};session=current;
   loader.set_ready_state('loading');
@@ -111,6 +121,7 @@ function close(current){
     if(!live())return;
     const loaded=new Event('load');Object.defineProperty(loaded,'target',{value:wrap_document(document)});globalThis.dispatchEvent(loaded);
     if(live())globalThis.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:false}));
+    if(live())for(const callback of completion_observers)callback();
   };
   if(current.stream.closed)interactive();
   if(!live()){current.finished=Promise.resolve();return;}

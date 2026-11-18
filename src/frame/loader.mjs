@@ -5,10 +5,11 @@ import * as parser from "./parser.mjs";
 import { update_ctx, run_script, ctx } from "./context.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
 import {configure_crypto} from './polyfill/crypto.mjs';
+import {set_location} from './polyfill/location.mjs';
 import {default_referrer_policy} from '../referrer.mjs';
 import {document_referrer_policy,reset_document_referrer_policy,set_current_script,get_current_script} from './intercept/document.mjs';
 import {configure_window_messages} from './window_messages.mjs';
-import {load_document_html,run_document_script} from './document_input.mjs';
+import {load_document_html,run_document_script,initialize_blank_document,on_document_complete} from './document_input.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -32,6 +33,7 @@ export let document_referrer = '';
 export let frame_html; //the html for the frame runtime
 export let version; //the sandstone version
 export let is_loaded = false;
+export let pristine_blank = false;
 export let ready_state = "loading";
 export function set_ready_state(value){ready_state=value;}
 export let base_url;
@@ -47,7 +49,33 @@ export const child_names = new Map();
 export const child_urls = new Map();
 rpc.rpc_handlers["child_navigate"] = (id, url, form_data, navigation) => child_navigators.get(id)?.(url, form_data, navigation);
 rpc.rpc_handlers.child_window_name=(id,value)=>child_names.get(id)?.(value);
-rpc.rpc_handlers.child_url=(id,value)=>child_urls.get(id)?.(value);
+rpc.rpc_handlers.child_url=(id,value,token)=>child_urls.get(id)?.(value,token);
+let opened_url;
+export function document_sources(){
+  let root=globalThis;
+  try{while(root.parent!==root){root.parent.document;root=root.parent;}}catch{}
+  const sources=new Map(),seen=new Set(),visit=window=>{
+    if(seen.has(window))return;seen.add(window);
+    try{
+      if(window!==globalThis&&window.sandstone_frame?.context.ctx.origin===ctx.origin){
+        const source=window.sandstone_frame.loader;
+        if(!sources.has(window.location.href))sources.set(window.location.href,{url:source.url,cookie_url:source.cookie_url,inherited_base_url:source.inherited_base_url});
+      }
+      for(let index=0;index<window.length;index++)visit(window[index]);
+    }catch{}
+  };
+  visit(root);return sources;
+}
+export function document_opened(before,after,sources){
+  pristine_blank=false;
+  if(before===after){opened_url?.(ctx.location.href);return;}
+  const source=sources.get(after);if(!source){opened_url?.(ctx.location.href);return;}
+  document_origin=ctx.origin;
+  inherited_base_url=source.inherited_base_url;cookie_url=new URL(source.url).protocol==='about:'?source.cookie_url||source.url:undefined;base_url=inherited_base_url||source.url;
+  network.known_urls[after]=source.url;
+  set_location(source.url);opened_url?.(source.url);
+  rpc.call_procedure(rpc.host,'document_open',[frame_id,beacon_context,{url:source.url,cookie_url,inherited_base_url}]).catch(()=>{});
+}
 
 export function eval_script(script_element, script_text,{run=callback=>run_document_script(script_element,callback)}={}) {
   const previous_script=get_current_script();
@@ -98,7 +126,7 @@ function get_frame_html() {
   frame_html = doctype + html;
 }
 
-async function load_html(options) {
+function prepare_html(options) {
   referrer_policy = options.referrer_policy || default_referrer_policy;
   reset_document_referrer_policy(referrer_policy);
   document_referrer = options.document_referrer || '';
@@ -121,9 +149,19 @@ async function load_html(options) {
   set_frame_id(options.frame_id);
   if(options.window_name!==undefined)globalThis.name=options.window_name;
   get_frame_html();
-  await update_ctx(options);
+  const ready=update_ctx(options);
   configure_window_messages(options);
   load_cookies(options.cookies);
+  return ready;
+}
+
+export function initialize_blank(options,onload,onurl){
+  const ready=prepare_html(options);is_loaded=true;initialize_blank_document();pristine_blank=true;
+  opened_url=onurl;on_document_complete(onload);return ready;
+}
+
+async function load_html(options) {
+  await prepare_html(options);
 
   if (options.error) {
     document.getElementById("loading_text").style.display = "none";

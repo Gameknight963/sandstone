@@ -4,6 +4,14 @@ import {beacon_body, create_beacon_sender} from '../src/frame/beacon.mjs';
 import {BeaconQueue} from '../src/host/beacon.mjs';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+test('Preselected document tokens cannot overwrite another document or its quota leases',()=>{
+  const queue=new BeaconQueue({fetch:()=>{},cookies:()=>({})}),token='0123456789abcdef0123456789abcdef';
+  assert.equal(queue.register('first',{url:'https://first.test/'},token),token);
+  const lease=queue.reserve(token,5);
+  assert.throws(()=>queue.register('second',{url:'https://second.test/'},token),TypeError);
+  for(const value of ['',{},42])assert.throws(()=>queue.register('second',{},value),TypeError);
+  assert.equal(queue.contexts.get(token).frame,'first');assert.equal(queue.contexts.get(token).queued,5);lease.release();assert.equal(queue.contexts.get(token).queued,0);
+});
 test('Beacon bodies snapshot strings, binary subviews, blobs and URLSearchParams', async () => {
   const bytes = new Uint8Array([0, 2, 3, 0]), body = beacon_body(new DataView(bytes.buffer, 1, 2));
   bytes.fill(9);
@@ -72,6 +80,16 @@ test('Host beacon queue retains original document context and survives retiremen
   assert.equal(received.options.signal.aborted, false);
   finish(); assert.deepEqual(await request, {cookies:{url:'https://old.test/page'}});
   assert.equal(queue.pending.size, 0);
+});
+
+test('Host beacons retain an explicit empty referrer when a blank document changes URL', async () => {
+  let received;
+  const queue=new BeaconQueue({cookies:()=>null,fetch:async(url,options)=>{received=options;return new Response('done');}});
+  const id=queue.register('frame',{url:'https://site.test/parent',referrer_url:'about:blank'});
+  const pending=queue.send(id,'https://site.test/beacon',beacon_body('saved'),{referrer:''});
+  queue.contexts.get(id).context.referrer_url=undefined;
+  await pending;
+  assert.equal(received.referrer,'');
 });
 
 test('Host queue releases quota after failures and rejects unknown/oversized requests', async () => {

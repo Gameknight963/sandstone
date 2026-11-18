@@ -70,3 +70,12 @@ test('Lock RPCs cannot query or acquire locks using another document capability'
     assert.throws(()=>call(procedure,['root-document'],nested),{name:'SecurityError'});
   }
 });
+
+test('Document-open URL updates require both the source frame and its current document token',()=>{
+  const {call,child,policy,port}=fixture(),nested={};policy.attach(port,nested,'child');child('child');
+  const snapshot={url:'https://site.test/written',cookie_url:'https://site.test/written'};
+  assert.deepEqual(call('document_open',['child','child-document',snapshot],nested),['child','child-document',snapshot]);
+  assert.throws(()=>call('document_open',['root','root-document',snapshot],nested),{name:'SecurityError'});
+  assert.throws(()=>call('document_open',['child','root-document',snapshot],nested),{name:'SecurityError'});
+  assert.throws(()=>call('document_open',['child','child-document',snapshot]),{name:'SecurityError'});
+});

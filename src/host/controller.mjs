@@ -73,7 +73,8 @@ function get_frame_bundle(nonce) {
 }
 
 export class ProxyFrame {
-  get origin() { return this.url?.origin; }
+  get origin() { return this.document_origin??this.url?.origin; }
+  get request_url(){return this.document_origin!==undefined&&this.url?.protocol==='about:'?this.cookie_url:undefined;}
   constructor() {
     this.url = null;
     this.is_navigating = false;
@@ -168,6 +169,7 @@ export class ProxyFrame {
       finally{if(navigation_id===this.navigation_id)this.is_navigating=false;}
     }
     this.url = new URL(url);
+    this.document_origin=undefined;this.cookie_url=undefined;
     this.broadcast_origin=this.url.origin==='null'?'opaque:'+this.id+':'+navigation_id:this.url.origin;
     this.iframe.style.backgroundColor = "#222222";
     this.history.save_scroll(navigation.scroll);
@@ -315,26 +317,31 @@ rpc.rpc_handlers.window_name=(id,token,value)=>{
 rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) => {
   const parent = iframes[parent_id];
   if (!parent || iframes[child_id]) throw new TypeError("Invalid child frame");
+  if(options.beacon_context!==undefined&&(typeof options.beacon_context!=='string'||!/^[a-f0-9]{32}$/.test(options.beacon_context)||network.beacons.contexts.has(options.beacon_context)))throw new TypeError('Invalid document context');
   const root = iframes[parent.root_id];
   const saved = saved_child_histories.get(child_id);
   saved_child_histories.delete(child_id);
   const parent_broadcast=parent.broadcast_origin||parent.origin||parent.url.origin;
   const opaque_broadcast='opaque:'+child_id+':'+Math.random();
   const srcdoc=!!options.srcdoc;
+  const blank=!!options.blank,inherited=srcdoc||blank;
   if(srcdoc&&(new URL(url).protocol!=='about:'||new URL(url).pathname!=='srcdoc'||new URL(url).search))throw new TypeError('Invalid inline frame URL');
+  if(blank&&(new URL(url).protocol!=='about:'||new URL(url).pathname!=='blank'||new URL(url).search))throw new TypeError('Invalid blank frame URL');
   const inherited_origin=parent.origin||parent.url.origin;
   const opaque=options.opaque||parent_broadcast.startsWith('opaque:')||options.worker&&new URL(url).protocol==='data:';
   const effective_url=()=>parent.request_url||parent.url.href;
+  const creator_url=blank&&options.creator_url!==undefined?new URL(options.creator_url).href:effective_url();
+  if(blank&&new URL(creator_url).origin!==inherited_origin)throw new TypeError('Invalid blank creator URL');
   const child = {
     id: child_id, parent_id, root_id: root.id, url: new URL(url),worker:!!options.worker,
     parent_context:parent.document_context,
     navigation_sandbox:navigation_sandbox(parent.navigation_sandbox,options.sandbox??null),
     window_name:saved?.window_name??options.window_name??'',
-    origin: opaque?'null':srcdoc||options.worker?inherited_origin:new URL(url).origin,
-    broadcast_origin:options.worker ? new URL(url).protocol==='data:'?opaque_broadcast:parent_broadcast : options.opaque||parent_broadcast.startsWith('opaque:')?opaque_broadcast:srcdoc?parent_broadcast:new URL(url).origin,
-    cookie_url:srcdoc ? parent.cookie_url||effective_url() : undefined,
-    referrer_url:options.worker&&new URL(url).protocol==='blob:'?url:undefined,
-    get request_url(){return srcdoc?effective_url():undefined;},
+    origin: opaque?'null':inherited||options.worker?inherited_origin:new URL(url).origin,
+    broadcast_origin:options.worker ? new URL(url).protocol==='data:'?opaque_broadcast:parent_broadcast : options.opaque||parent_broadcast.startsWith('opaque:')?opaque_broadcast:inherited?parent_broadcast:new URL(url).origin,
+    cookie_url:inherited ? blank?creator_url:parent.cookie_url||effective_url() : undefined,
+    referrer_url:blank?'about:blank':options.worker&&new URL(url).protocol==='blob:'?url:undefined,
+    get request_url(){return inherited&&this.url.protocol==='about:'?this.inherited_url|| (blank?creator_url:effective_url()):undefined;},
     session_storage: parent.session_storage,
     history: saved?.history || new NavigationHistory(),
     async navigate_to(url, form_data, navigation = {}) {
@@ -350,26 +357,41 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
     },
     on_url_change() {
       const port=parent_id===root.id?root.rpc_target.target:root.rpc_target.extra_frame_targets.get(parent_id);
-      if(port)rpc.notify(port,'child_url',[child_id,child.url.href]);
+      if(port)rpc.notify(port,'child_url',[child_id,child.url.href,child.document_context]);
     }
   };
   iframes[child_id] = child;
   child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push"});
-  child.document_context=network.beacons.register(child_id, {url:child.request_url||(child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href),cookie_url:child.cookie_url,referrer_url:child.referrer_url,top_url:root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id});
+  child.document_context=network.beacons.register(child_id, {url:child.request_url||(child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href),cookie_url:child.cookie_url,referrer_url:child.referrer_url,top_url:root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id},options.beacon_context);
   root.rpc_policy.document(child_id,child.document_context,parent.document_context);
   return {
     window_name:child.window_name,
     beacon_context: child.document_context,
     cookie_cross_site:frame_cross_site(child,iframes),
-    message_origin:child.broadcast_origin.startsWith('opaque:')?'null':srcdoc?child.origin:undefined,
+    message_origin:child.broadcast_origin.startsWith('opaque:')?'null':inherited?child.origin:undefined,
     document_origin:child.origin,
-    ...(srcdoc?{cookie_url:child.cookie_url}:{}),
+    ...(inherited?{cookie_url:child.cookie_url}:{}),
     crypto_available: crypto_service.methods,
     local_storage: site_data.local[child.origin],
     session_storage: child.session_storage[child.origin],
     cookies: site_data.documentCookies(child.cookie_url||(child.origin === "null" ? child.url.href : child.origin + "/"),{crossSite:frame_cross_site(child,iframes)}),
     history: {...child.history.snapshot(), traversed: !!saved?.navigation?.traversed, restored: saved?.navigation?.history_mode === "reload"}
   };
+};
+
+rpc.rpc_handlers.document_open=(id,token,snapshot)=>{
+  const frame=iframes[id],context=network.beacons.contexts.get(token);
+  if(!frame||frame.document_context!==token||!context||context.retired)throw new DOMException('Document is unavailable','InvalidStateError');
+  const url=new URL(snapshot.url),cookie=new URL(snapshot.cookie_url||snapshot.url);
+  const inherited=url.protocol==='about:'&&['blank','srcdoc'].includes(url.pathname)&&!url.search;
+  if((url.origin!==frame.origin&&!inherited)||cookie.origin!==frame.origin)throw new DOMException('Document URL must retain its origin','SecurityError');
+  frame.document_origin=frame.origin;frame.url=url;frame.cookie_url=inherited?cookie.href:undefined;frame.inherited_url=inherited?cookie.href:undefined;
+  frame.referrer_url=url.protocol==='about:'&&url.pathname==='blank'?'about:blank':undefined;
+  if(frame.history.current)frame.history.current.url=url.href;
+  context.context.url=frame.request_url||url.href;context.context.cookie_url=frame.cookie_url;
+  context.context.referrer_url=frame.referrer_url;
+  if(context.storage)context.storage.url=url.href;
+  frame.on_url_change();
 };
 
 rpc.rpc_handlers["frame_unregister"] = (child_id, options = {}) => {

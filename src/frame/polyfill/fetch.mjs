@@ -12,8 +12,10 @@ export const FakeRequest=create_request_class(()=>ctx.document?.baseURI||ctx.loc
 export async function fetch(resource, params = {}) {
   let release;
   try {
+    // Body reads can finish after document.open() adopts the caller's URL.
+    const blank=ctx.document&&/^about:blank(?:#|$)/.test(ctx.location.href);
     const prepared = prepare_request(resource, params, ctx.document?.baseURI || ctx.location.href, source_url(),
-      size=>{release=reserve_keepalive(size);});
+      size=>{release=reserve_keepalive(size);},blank?'':undefined);
     // Unload can destroy this realm before another promise job runs. Snapshot
     // bodies must reach the host synchronously, before the handler returns.
     const request = typeof prepared.then === 'function' ? await prepared : prepared;
