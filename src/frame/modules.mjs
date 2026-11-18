@@ -103,26 +103,20 @@ export class ModuleLoader {
     return operation;
   }
 
-  prepare_url(specifier, base, options = {}) {
-    return this.serialize(() => this.prepare_graph(this.record(this.map.resolve(specifier, base), options.with?.type || options.assert?.type || "javascript", options.credentials || this.records.get(base)?.credentials)));
+  async prepare_url(specifier, base, options = {}) {
+    return this.prepare_graph(this.record(this.map.resolve(specifier, base), options.with?.type || options.assert?.type || "javascript", options.credentials || this.records.get(base)?.credentials));
   }
 
   prepare_inline(source, base, credentials) {
     const record = this.record(`sandstone:inline-module:${++this.inline_id}`, "javascript", credentials);
     record.url = base;
     record.source = source;
-    return this.serialize(() => this.prepare_graph(record));
+    return this.prepare_graph(record);
   }
 
-  async prepare_graph(entry) {
-    const queue = [entry];
-    const graph = new Set();
-    while (queue.length) {
-      const record = queue.shift();
-      if (graph.has(record) || record.blob) continue;
-      graph.add(record);
-      if (record.error) throw record.error;
-      try {
+  load_record(record){
+    return record.loading??=Promise.resolve().then(async()=>{
+      try{
         if (record.source === undefined) {
           const response = await this.fetch(record.key, {credentials: record.credentials});
           if (!response.ok) throw new TypeError(`Module request failed (${response.status}): ${record.key}`);
@@ -130,16 +124,33 @@ export class ModuleLoader {
           record.source = await response.text();
           if (!this.records.has(record.url)) this.records.set(record.url, record);
         }
-        if (record.type === "json") { JSON.parse(record.source); continue; }
+        if (record.type === "json") { JSON.parse(record.source); return; }
         record.dependencies = [];
         for (const dependency of module_dependencies(record.source)) {
           const key = this.map.resolve(dependency.specifier, record.url);
           const target = this.record(key, dependency.type, record.credentials);
           record.dependencies.push(target);
-          queue.push(target);
         }
       } catch (error) { record.error = error; throw error; }
+    });
+  }
+
+  async prepare_graph(entry) {
+    let queue = [entry];
+    const graph = new Set();
+    while(queue.length){
+      const next=[];
+      await Promise.all(queue.map(async record=>{
+        if(graph.has(record)||record.blob)return;
+        graph.add(record);await this.load_record(record);
+        next.push(...record.dependencies);
+      }));
+      queue=next;
     }
+    return this.serialize(()=>this.compile_graph(entry,graph));
+  }
+
+  compile_graph(entry,graph){
     const compile = record => {
       let source = record.type === "json" ? `export default __ctx__.__json_module__(${JSON.stringify(record.source)});` : this.rewrite(record.source, {
         module: true, url: record.url, sourceURL:record.url, stripAttributes: true, resolve: specifier => {
@@ -155,7 +166,7 @@ export class ModuleLoader {
     };
     // DAGs need no import map at all. This also supports dynamic chunk loading in
     // browsers that only accept one import map per document.
-    const remaining = new Set(graph);
+    const remaining = new Set([...graph].filter(record=>!record.blob));
     let progress = true;
     while (remaining.size && progress) {
       progress = false;

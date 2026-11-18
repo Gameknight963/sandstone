@@ -3,6 +3,7 @@ export * as network from "./network.mjs";
 export * as context from "./context.mjs";
 export * as parser from "./parser.mjs";
 export * as html_stream from './html_dom_stream.mjs';
+export * as script_schedule from './script_schedule.mjs';
 export * as worker from "./polyfill/worker.mjs";
 
 export * as rpc from "../rpc.mjs";

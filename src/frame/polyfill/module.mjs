@@ -30,11 +30,12 @@ export const modules = new ModuleLoader({
   execute: native_import
 });
 
-export function execute_module(record) {
+export function execute_module(record,{ordered=false}={}) {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.__rewritten__ = true;
     script.type = "module";
+    if(ordered)script.async=false;
     script.src = record.blob;
     script.onload = () => { script.remove(); resolve(); };
     script.onerror = () => { script.remove(); reject(new TypeError(`Module failed to load: ${record.url}`)); };

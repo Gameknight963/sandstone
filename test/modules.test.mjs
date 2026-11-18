@@ -134,3 +134,22 @@ test("Acyclic graphs use direct blob imports and need no native import-map suppo
   assert.match(env.blobs.get(record.blob).source, /from "blob:test\/0"/);
   assert.doesNotMatch(env.blobs.get(record.blob).source, /from "https?:/);
 });
+
+test('Independent module graphs finish while an earlier module download is stalled', {timeout:3000}, async()=>{
+  const env=environment({'https://example.com/slow.js':'export const slow=1;','https://example.com/fast.js':'export const fast=2;'});
+  const fetch=env.loader.fetch;let release;
+  const held=new Promise(resolve=>release=resolve);
+  env.loader.fetch=async(url,options)=>{if(url.endsWith('/slow.js'))await held;return fetch(url,options);};
+  let slowFinished=false;
+  const slow=env.loader.prepare_url('./slow.js','https://example.com/').then(record=>{slowFinished=true;return record;});
+  try{const fast=await env.loader.prepare_url('./fast.js','https://example.com/');assert.ok(fast.blob);assert.equal(slowFinished,false);}
+  finally{release();await slow;}
+});
+
+test('Concurrent cyclic graph preparation shares fetches, blobs and import-map identity',async()=>{
+  const env=environment({'https://example.com/a.js':"export {b} from './b.js'; export const a=1;",'https://example.com/b.js':"export {a} from './a.js'; export const b=2;"});
+  const [a,b,again]=await Promise.all([env.loader.prepare_url('./a.js','https://example.com/'),env.loader.prepare_url('./b.js','https://example.com/'),env.loader.prepare_url('./a.js','https://example.com/')]);
+  assert.equal(a,again);assert.equal(a.blob,again.blob);assert.notEqual(a.blob,b.blob);
+  assert.equal(env.requests.length,2);assert.equal(env.blobs.size,2);assert.equal(env.mappings.size,2);
+  assert.equal((await env.loader.prepare_url('./b.js','https://example.com/')).blob,b.blob);
+});
