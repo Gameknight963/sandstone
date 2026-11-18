@@ -3,7 +3,7 @@ import * as loader from "../loader.mjs";
 import * as rpc from "../../rpc.mjs";
 import {bootstrap_worker,create_bootstrap_nonce} from '../../bootstrap.mjs';
 import * as parser from "../parser.mjs";
-import { ctx, update_ctx, run_script, convert_url } from "../context.mjs";
+import { ctx, update_ctx, convert_url } from "../context.mjs";
 import { modules } from "./module.mjs";
 import { prefetch_worker_scripts } from "../worker_scripts.mjs";
 import {on_document_unload} from '../runtime_events.mjs';
@@ -12,6 +12,9 @@ const NativeWorker = globalThis.Worker;
 const native_import_scripts = globalThis.importScripts?.bind(globalThis);
 const native_post = globalThis.postMessage?.bind(globalThis);
 const NativeXHR = globalThis.XMLHttpRequest;
+const NativeMessageEvent=globalThis.MessageEvent,NativeErrorEvent=globalThis.ErrorEvent;
+const native_timeout=globalThis.setTimeout.bind(globalThis),native_clear_timeout=globalThis.clearTimeout.bind(globalThis);
+const native_dispatch=globalThis.dispatchEvent?.bind(globalThis);
 const imported_blobs = new Map();
 let worker_options;
 let worker_ready = false;
@@ -21,17 +24,17 @@ let pumping = false;
 function pump() {
   if (!worker_ready || pumping || !message_queue.length) return;
   pumping = true;
-  setTimeout(() => {
+  native_timeout(() => {
     pumping = false;
     const event = message_queue.shift();
-    if (event) globalThis.dispatchEvent(new MessageEvent(event.type, {data: event.data, ports: [...event.ports]}));
+    if (event) native_dispatch(new NativeMessageEvent(event.type, {data: event.data, ports: [...event.ports]}));
     pump();
   }, 0);
 }
 
 export function mark_worker_started() {
   if (worker_ready) return;
-  setTimeout(() => { worker_ready = true; pump(); }, 0);
+  native_timeout(() => { worker_ready = true; pump(); }, 0);
 }
 
 export function fakeImportScripts(...paths) {
@@ -69,6 +72,7 @@ export function initialize_worker(options) {
   update_ctx();
   globalThis.importScripts = fakeImportScripts;
   for (const [url, source] of Object.entries(options.sources || {})) network.cache_put(url, source);
+  if(typeof options.source==='string')network.cache_put(options.url,options.source);
   if (options.probe) {
     network.enable_network(false);
     const blocked = () => { throw new DOMException("Network disabled during worker discovery", "NetworkError"); };
@@ -77,8 +81,8 @@ export function initialize_worker(options) {
     }
     globalThis.postMessage = () => {};
     for (const key of ["log", "warn", "error", "info"]) console[key] = () => {};
-    try { run_script(options.source,{sourceURL:options.url}); } catch {}
-    setTimeout(() => native_post({sandstone_worker: options.token, type: "probe-done"}), 500);
+    try { fakeImportScripts(options.url); } catch {}
+    native_timeout(() => native_post({sandstone_worker: options.token, type: "probe-done"}), 500);
     return;
   }
 
@@ -95,7 +99,11 @@ export function initialize_worker(options) {
         const record = modules.record(options.url, "javascript", options.credentials);
         record.source = options.source;
         await modules.import(options.url, options.url);
-      } else run_script(options.source,{sourceURL:options.url});
+      } else {
+        // Native classic-script evaluation preserves strict globals and lexical
+        // bindings across imported files; indirect eval gives them another scope.
+        fakeImportScripts(options.url);
+      }
       mark_worker_started();
     } catch (error) {
       native_post({sandstone_worker: options.token, type: "error", message: error.message, name: error.name, stack: error.stack});
@@ -161,7 +169,7 @@ export class FakeWorker extends EventTarget {
   }
 
   #error(error) {
-    const event = new ErrorEvent("error", {message: error.message, filename: this.#url, error, cancelable: true});
+    const event = new NativeErrorEvent("error", {message: error.message, filename: this.#url, error, cancelable: true});
     if (this.dispatchEvent(event)) console.error(error);
   }
 
@@ -193,7 +201,7 @@ export class FakeWorker extends EventTarget {
       const missing = await new Promise(resolve => {
         abort = () => resolve(null);
         this.#controller.signal.addEventListener("abort", abort, {once: true});
-        timer = setTimeout(() => resolve(null), 1500);
+        timer = native_timeout(() => resolve(null), 1500);
         probe.onmessage = event => {
           if (event.data?.sandstone_worker !== this.#token) return;
           if (event.data.type === "need-script") resolve(event.data.url);
@@ -201,7 +209,7 @@ export class FakeWorker extends EventTarget {
         };
         probe.onerror = event => { event.preventDefault(); resolve(null); };
       });
-      clearTimeout(timer);
+      native_clear_timeout(timer);
       this.#controller.signal.removeEventListener("abort", abort);
       probe.terminate();
       URL.revokeObjectURL(blob);
@@ -249,9 +257,9 @@ export class FakeWorker extends EventTarget {
         }
         return;
       }
-      this.dispatchEvent(new MessageEvent("message", {data: event.data, ports: [...event.ports]}));
+      this.dispatchEvent(new NativeMessageEvent("message", {data: event.data, ports: [...event.ports]}));
     };
-    this.#worker.onmessageerror = event => this.dispatchEvent(new MessageEvent("messageerror", {data: event.data}));
+    this.#worker.onmessageerror = event => this.dispatchEvent(new NativeMessageEvent("messageerror", {data: event.data}));
     this.#worker.onerror = event => { event.preventDefault(); this.#error(event.error || new Error(event.message)); };
     const channel = new MessageChannel();
     rpc.attach_host(channel.port1, this.#id);

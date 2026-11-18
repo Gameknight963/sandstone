@@ -7,7 +7,9 @@ const rpc=await import('../src/rpc.mjs');
 delete globalThis.self;delete globalThis.parent;
 
 test('Retired frame ports drain only allowed unload calls and expire independently of replacements',async t=>{
-  t.mock.timers.enable({apis:['setTimeout']});
+  const schedule=globalThis.setTimeout;
+  t.mock.method(globalThis,'setTimeout',()=>{throw new Error('Public timer used for RPC retirement');});
+  t.mock.method(globalThis,'clearTimeout',()=>{throw new Error('Public timer used for RPC cleanup');});
   class Port extends EventTarget{
     closed=false;
     close(){this.closed=true;}
@@ -23,7 +25,7 @@ test('Retired frame ports drain only allowed unload calls and expire independent
   old.emit({type:'notification',procedure:'beacon'});old.emit(null);old.emit({type:'reply',id:'pending'});
   assert.deepEqual(messages,[outgoing[0],{type:'reply',id:'pending'}]);
   controller.abort();await Promise.all(pending);
-  t.mock.timers.tick(100);
+  await new Promise(resolve=>schedule(resolve,110));
   assert.equal(old.closed,true);assert.equal(target.retired_targets.size,0);assert.equal(replacement.closed,false);
   old.emit(outgoing[0]);replacement.emit(outgoing[1]);
   assert.equal(messages.length,3);assert.equal(messages[2].procedure,'fetch');

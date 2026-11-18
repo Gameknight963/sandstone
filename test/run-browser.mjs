@@ -18,6 +18,8 @@ const resourceTest = await readFile(new URL("resources.playwright.js", import.me
 const verifyResources = runInThisContext(`(${resourceTest})`);
 const workerTest = await readFile(new URL("workers.playwright.js", import.meta.url), "utf8");
 const verifyWorkers = runInThisContext(`(${workerTest})`);
+const workerScopeTest=await readFile(new URL('worker-scopes.playwright.js',import.meta.url),'utf8');
+const verifyWorkerScopes=runInThisContext(`(${workerScopeTest})`);
 const historyTest = await readFile(new URL("history.playwright.js", import.meta.url), "utf8");
 const verifyHistory = runInThisContext(`(${historyTest})`);
 const javascriptASITest=await readFile(new URL('javascript-asi.playwright.js',import.meta.url),'utf8');
@@ -293,6 +295,7 @@ try {
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
+    result.passed.push(...await timed(verifyWorkerScopes(page), 'Worker script scope fixture'));
     result.passed.push(...await timed(verifyNetworkAPIs(page), 'Native network API exposure fixture'));
     result.passed.push(...await timed(verifyGlobalDescriptors(page), 'Global descriptor fixture'));
     result.passed.push(...await timed(verifyWorkerBundles(page), 'Worker bundle fixture'));

@@ -2,6 +2,8 @@ import {unwrap_global_target} from './frame/global_functions.mjs';
 import {listen_runtime,unlisten_runtime,runtime_message,stop_runtime_message,post_bootstrap_message} from './frame/runtime_events.mjs';
 import {bootstrap_attribute,bootstrap_global} from './bootstrap.mjs';
 
+const native_timeout=globalThis.setTimeout.bind(globalThis),native_clear_timeout=globalThis.clearTimeout.bind(globalThis);
+
 export let role = null;
 export const rpc_handlers = Object.create(null);
 export const rpc_requests = Object.create(null);
@@ -80,11 +82,11 @@ export class RPCTarget {
       if(message?.type==='reply'||message?.type==='procedure'&&allowed.has(message.procedure))this.msg_callback(event);
     };
     const close=()=>{
-      clearTimeout(timer);target.removeEventListener('message',receive);target.close?.();this.retired_targets.delete(target);
+      native_clear_timeout(timer);target.removeEventListener('message',receive);target.close?.();this.retired_targets.delete(target);
     };
     // Unload tasks from another frame can arrive after its parent's teardown
     // message. Only context-bound operations retain this short delivery window.
-    const timer=setTimeout(close,timeout);timer.unref?.();
+    const timer=native_timeout(close,timeout);timer.unref?.();
     this.retired_targets.set(target,close);target.addEventListener('message',receive);
   }
 
@@ -246,7 +248,7 @@ export function wait_on_frame(frame,{signal,url=frame.src,nonce}={}) {
   const id=Math.random()+':'+Math.random();
   return new Promise((resolve,reject)=>{
     let timer,finished=false;
-    const cleanup=()=>{finished=true;clearTimeout(timer);bootstrap_waiters.delete(receive);release_bootstrap();signal?.removeEventListener('abort',abort);};
+    const cleanup=()=>{finished=true;native_clear_timeout(timer);bootstrap_waiters.delete(receive);release_bootstrap();signal?.removeEventListener('abort',abort);};
     const abort=()=>{cleanup();reject(signal.reason||new DOMException('The operation was aborted','AbortError'));};
     const receive=(message,source)=>{
       if(message.type!=='pong'||message.id!==id||message.url!==url||nonce!==undefined&&message.nonce!==nonce||unwrap_global_target(source)!==unwrap_global_target(frame.contentWindow))return;
@@ -257,7 +259,7 @@ export function wait_on_frame(frame,{signal,url=frame.src,nonce}={}) {
       // disclose the intended URL to the previous document during readiness.
       try{const target=unwrap_global_target(frame.contentWindow);if(target)post_bootstrap_message(target,{type:'ping',sandstone_bootstrap:1,id,...(nonce===undefined?{url}:{})});}
       catch(error){cleanup();reject(error);return;}
-      if(!finished)timer=setTimeout(ping,50);
+      if(!finished)timer=native_timeout(ping,50);
     };
     if(signal?.aborted){abort();return;}
     bootstrap_waiters.add(receive);listen_bootstrap();
