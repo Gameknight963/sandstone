@@ -73,6 +73,19 @@ test('Virtual global getters run once and preserve virtual overrides', () => {
   assert.equal(target.custom, undefined);
 });
 
+test('Assigned callback values retain identity through properties, getters and reflection',()=>{
+  const target={},virtual=create_obj_proxy({},[],target),callback=()=>42;
+  Object.defineProperty(target,'forwarded',{configurable:true,get(){return target.callback;}});
+  virtual.callback=callback;
+  assert.equal(virtual.callback,callback);
+  assert.equal(virtual.forwarded,callback);
+  assert.equal(Object.getOwnPropertyDescriptor(virtual,'callback').value,callback);
+  virtual.onmessage=callback;
+  assert.equal(virtual.onmessage,callback);
+  const replacement=()=>17;virtual.callback=replacement;
+  assert.equal(virtual.callback,replacement);assert.equal(virtual.forwarded,replacement);
+});
+
 test('Explicit undefined overrides hide native features without reading their getters',()=>{
   let reads=0;
   const target={method(){}};

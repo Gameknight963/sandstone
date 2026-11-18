@@ -129,7 +129,8 @@ async function interact(page,proxy,site){
   }
   if(site.id==='github'){
     await surface.locator('a[href="/octocat/Hello-World/blob/master/README"]:visible').first().click();
-    await wait(page,proxy,'location.pathname==="/octocat/Hello-World/blob/master/README"&&Array.from(document.querySelectorAll("a")).some(link=>link.textContent.trim()==="Raw")');
+    // GitHub can render its file toolbar before the streamed file contents.
+    await wait(page,proxy,'location.pathname==="/octocat/Hello-World/blob/master/README"&&Array.from(document.querySelectorAll("a")).some(link=>link.textContent.trim()==="Raw")&&document.body.innerText.includes("Hello World!")');
     return read(page,proxy,'({path:location.pathname,title:document.title,file:document.body.innerText.includes("Hello World!")})');
   }
   if(site.id==='hn'){

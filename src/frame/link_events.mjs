@@ -195,7 +195,7 @@ export function install_link_events({enabled,activate,submit}) {
         set(handler){
           prepare(this);
           if(typeof handler!=='function')return property.set.call(this,handler);
-          const wrapper=function(...args){return with_event_scope(args[0],true,()=>{try{const result=handler.apply(event_target(this,args[0]),args);if(result===false)args[0]?.preventDefault();return result;}finally{finish_event_listener(args[0]);}});};
+          const wrapper=function(...args){return with_event_scope(args[0],true,()=>{try{const result=Reflect.apply(handler,event_target(this,args[0]),args);if(result===false)args[0]?.preventDefault();return result;}finally{finish_event_listener(args[0]);}});};
           handlers.set(wrapper,handler);const result=property.set.call(this,wrapper);
           if(name==='onsubmit'){prepare_tail(this,true);prepare_tail(this,false);}
           return result;

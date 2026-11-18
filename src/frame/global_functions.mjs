@@ -24,7 +24,7 @@ export function bind_global_function(target, method, virtual_target) {
   });
 }
 
-export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native) {
+export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,write_native) {
   const methods = new WeakMap(),overrides=new Map(),deleted=new Set(),accessors=new Map();
   const originalOwn=new Set(Reflect.ownKeys(target));
   const descriptor=(object,key)=>{while(object){const found=Reflect.getOwnPropertyDescriptor(object,key);if(found)return found;object=Reflect.getPrototypeOf(object);}};
@@ -43,6 +43,9 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native) {
       }
       const native_value = read_native?read_native(key):target[key];
       const value = map_value ? map_value(native_value,key) : native_value;
+      // Event-handler getters expose the assigned callback, even for arrows
+      // and native functions. They are callback values, not global methods.
+      if(typeof value==='function'&&typeof key==='string'&&key.startsWith('on'))return value;
       if (typeof value === 'function' && methods.has(value))return methods.get(value);
       if (typeof value === 'function' && !value.prototype) {
         // Sites patch globals after first use. Cache by function identity so a
@@ -137,7 +140,9 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native) {
         if(virtual&&'value'in virtual&&virtual.writable)Reflect.set(obj,key,value,obj);
         return define(key,Reflect.has(target,key)&&Reflect.getOwnPropertyDescriptor(target,key)?{value}:{value,writable:true,enumerable:true,configurable:true});
       }
-      return Reflect.set(target,key,value,target);
+      const assigned=write_native?write_native(key,value,proxy):Reflect.set(target,key,value,target);
+      if(assigned)remember(value);
+      return assigned;
     },
     preventExtensions:()=>{
       for(const key of overrides.keys())if(!Reflect.getOwnPropertyDescriptor(target,key)&&!Reflect.defineProperty(target,key,own(key)))return false;

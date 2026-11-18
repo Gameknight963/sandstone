@@ -2,6 +2,7 @@ import {ctx} from './context.mjs';
 import {create_obj_proxy} from './global_functions.mjs';
 import {register_message_peer,window_post_message} from './window_messages.mjs';
 import {sandbox_tokens} from '../navigation_policy.mjs';
+import {set_window_event_handler,register_window_event_alias} from './event_identity.mjs';
 
 const frames=new WeakMap();
 const windows=new WeakMap();
@@ -69,7 +70,10 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
     const target=descriptor.get.call(this),state=frames.get(this);
     if(!target||!state)return target;
     state.prepare?.(target);
-    if(state.target===target)return state.window;
+    if(state.target===target){
+      if(!state.opaque()&&(!state.url()||state.origin()===ctx.origin))register_window_event_alias(state.window,target);
+      return state.window;
+    }
     state.target=target;
     const nativeLocation=()=>target.location;
     const readable=()=>{
@@ -128,7 +132,11 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
       window:{get:()=>state.window},self:{get:()=>state.window},frames:{get:()=>state.window},
       parent:{get:()=>ctx.window},top:{get:()=>ctx.top}
     });
-    state.window=create_obj_proxy(replacements,['location'],target,undefined,key=>context_value(target,key));
+    state.window=create_obj_proxy(replacements,['location'],target,undefined,key=>context_value(target,key),(key,value,alias)=>{
+      if(typeof key==='string'&&key.startsWith('on')){readable();return set_window_event_handler(target,key,value,alias);}
+      return Reflect.set(target,key,value,target);
+    });
+    if(!state.opaque()&&(!state.url()||state.origin()===ctx.origin))register_window_event_alias(state.window,target);
     windows.set(target,state.window);
     register_message_peer(target,state.token,()=>state.window);
     return state.window;
