@@ -9,6 +9,9 @@ import {is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
 import * as ranges from './ranges.mjs';
 import {input_ready_state} from '../document_input.mjs';
 import {is_svg_script,rewrite_svg_script} from '../svg_scripts.mjs';
+// Workers may create an authored global named document. It is never the
+// environment's document and must not supply referrer metadata to requests.
+const native_document=globalThis.document;
 
 configure_document_base(()=>loader.inherited_base_url||ctx.location?.href||loader.url,()=>loader.is_loaded?undefined:loader.base_url);
 
@@ -45,7 +48,7 @@ export function reset_document_referrer_policy(policy) {
   active_referrer_policy = policy;
   seen_referrer_meta = new WeakMap();
 }
-export function document_referrer_policy(root = globalThis.document) {
+export function document_referrer_policy(root = native_document) {
   if (!active_referrer_policy) active_referrer_policy = loader.referrer_policy;
   for (const meta of root?.querySelectorAll('meta[name]') || []) {
     const name = meta.name.toLowerCase(), value = meta.content.trim().toLowerCase(), signature = name+'\0'+value;

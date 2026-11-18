@@ -20,6 +20,8 @@ const workerTest = await readFile(new URL("workers.playwright.js", import.meta.u
 const verifyWorkers = runInThisContext(`(${workerTest})`);
 const workerScopeTest=await readFile(new URL('worker-scopes.playwright.js',import.meta.url),'utf8');
 const verifyWorkerScopes=runInThisContext(`(${workerScopeTest})`);
+const workerSettingsTest=await readFile(new URL('worker-settings.playwright.js',import.meta.url),'utf8');
+const verifyWorkerSettings=runInThisContext(`(${workerSettingsTest})`);
 const historyTest = await readFile(new URL("history.playwright.js", import.meta.url), "utf8");
 const verifyHistory = runInThisContext(`(${historyTest})`);
 const javascriptASITest=await readFile(new URL('javascript-asi.playwright.js',import.meta.url),'utf8');
@@ -314,6 +316,7 @@ try {
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
     result.passed.push(...await timed(verifyWorkerScopes(page), 'Worker script scope fixture'));
+    result.passed.push(...await timed(verifyWorkerSettings(page), 'Worker environment settings fixture'));
     result.passed.push(...await timed(verifyNetworkAPIs(page), 'Native network API exposure fixture'));
     result.passed.push(...await timed(verifyGlobalDescriptors(page), 'Global descriptor fixture'));
     result.passed.push(...await timed(verifyWorkerBundles(page), 'Worker bundle fixture'));
