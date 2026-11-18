@@ -1,6 +1,7 @@
 import {create_crypto_client} from '../../crypto/client.mjs';
 import * as rpc from '../../rpc.mjs';
 import * as loader from '../loader.mjs';
+import {configure_clone} from '../clone.mjs';
 
 let client;
 export function encode_message(value){return client?client.encode(value):value;}
@@ -14,6 +15,7 @@ export function configure_crypto(available) {
 
   const clone = globalThis.structuredClone;
   globalThis.structuredClone = new Proxy(clone,{apply(target,receiver,args){return client.decode(Reflect.apply(target,receiver,args));}});
+  configure_clone(globalThis.structuredClone);
   const data = Object.getOwnPropertyDescriptor(MessageEvent.prototype,'data');
   const decoded = new WeakMap();
   Object.defineProperty(MessageEvent.prototype,'data',{...data,get() {

@@ -19,9 +19,9 @@ async page=>{
   });
   const root=page.frames().find(frame=>frame.parentFrame()===page.mainFrame());
   await root.evaluate(()=>{
-    const encode=encodeURIComponent,rpc=sandstone_frame.rpc,post=rpc.host.postMessage;
-    globalThis.childGate={enabled:false,held:[],registered:[],restore(){globalThis.encodeURIComponent=encode;rpc.host.postMessage=post;}};
-    globalThis.encodeURIComponent=function(html){
+    const encoder=sandstone_frame.seed_encoder,encode=encoder.encode,rpc=sandstone_frame.rpc,post=rpc.host.postMessage;
+    globalThis.childGate={enabled:false,held:[],registered:[],restore(){encoder.encode=encode;rpc.host.postMessage=post;}};
+    encoder.encode=function(html){
       if(!childGate.enabled||typeof html!=='string'||!html.includes('data-sandstone-seed="'))return encode(html);
       // A physical document may load before its runtime is ready. Gate the
       // runtime itself, independently of how the iframe source is installed.

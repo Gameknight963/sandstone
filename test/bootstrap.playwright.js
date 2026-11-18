@@ -10,8 +10,8 @@ async page=>{
   },{url,child});
   const runtime=page.frames().find(frame=>frame.parentFrame()===page.mainFrame());
   await runtime.evaluate(()=>{
-    globalThis.bootstrapEncode=encodeURIComponent;
-    globalThis.encodeURIComponent=function(value){
+    globalThis.bootstrapEncode=sandstone_frame.seed_encoder.encode;
+    sandstone_frame.seed_encoder.encode=function(value){
       if(typeof value==='string'){const seed=value.match(/data-sandstone-seed="([^"]+)"/);if(seed)globalThis.bootstrapSeedNonce=seed[1];}
       return bootstrapEncode(value);
     };
@@ -57,5 +57,5 @@ async page=>{
     await page.waitForTimeout(30);
     if(await nested.evaluate(()=>sandstone_frame.rpc.host.extra_targets.length)!==before)throw new Error('A live document accepted an additional bootstrap channel');
     return ['Application window and worker messages retain bootstrap-like payloads and transferred ports','Bootstrap probes stay private despite page event instrumentation','Bootstrap ports reject wrong document nonces and additional channels'];
-  }finally{await evaluate('Event.prototype.stopImmediatePropagation=restoreBootstrapStop;true');await runtime.evaluate(()=>{globalThis.encodeURIComponent=bootstrapEncode;});}
+  }finally{await evaluate('Event.prototype.stopImmediatePropagation=restoreBootstrapStop;true');await runtime.evaluate(()=>{sandstone_frame.seed_encoder.encode=bootstrapEncode;});}
 }

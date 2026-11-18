@@ -34,6 +34,8 @@ const globalVarTest=await readFile(new URL('javascript-global-vars.playwright.js
 const verifyGlobalVars=runInThisContext(`(${globalVarTest})`);
 const workerVarTest=await readFile(new URL('javascript-worker-vars.playwright.js',import.meta.url),'utf8');
 const verifyWorkerVars=runInThisContext(`(${workerVarTest})`);
+const runtimeGlobalTest=await readFile(new URL('runtime-globals.playwright.js',import.meta.url),'utf8');
+const verifyRuntimeGlobals=runInThisContext(`(${runtimeGlobalTest})`);
 const environmentIdentityTest=await readFile(new URL('environment-identity.playwright.js',import.meta.url),'utf8');
 const verifyEnvironmentIdentity=runInThisContext(`(${environmentIdentityTest})`);
 const urlTest=await readFile(new URL('url.playwright.js',import.meta.url),'utf8');
@@ -282,6 +284,7 @@ try {
     result.passed.push(...await timed(verifyGlobalFunctions(page,globalFunctionCases), 'Global function declaration fixture'));
     result.passed.push(...await timed(verifyGlobalVars(page), 'Global var declaration fixture'));
     result.passed.push(...await timed(verifyWorkerVars(page), 'Worker var declaration fixture'));
+    for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyRuntimeGlobals(page,batch), 'Runtime global replacement fixture '+(batch+1)));
     result.passed.push(...await timed(verifyEnvironmentIdentity(page), 'Environment identity fixture'));
     result.passed.push(...await timed(verifyURL(page), 'URL API fixture'));
     result.passed.push(...await timed(verifyIntersectionObserver(page), 'Intersection observer fixture'));

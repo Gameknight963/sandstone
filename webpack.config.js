@@ -1,5 +1,6 @@
 const webpack = require("webpack");
 const TerserPlugin = require('terser-webpack-plugin');
+const frame_realm = require('./build/frame-realm.cjs');
 
 const pkg = require("./package.json");
 const { execSync } = require("child_process");
@@ -40,6 +41,10 @@ const bundles = [
         type: "var"
       }
     },
+    plugins: [
+      new webpack.BannerPlugin({banner:frame_realm.header,raw:true,entryOnly:true}),
+      new webpack.BannerPlugin({banner:frame_realm.footer,raw:true,entryOnly:true,footer:true})
+    ],
     mode: "development"
   },
   {

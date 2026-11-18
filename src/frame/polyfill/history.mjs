@@ -1,6 +1,7 @@
 import * as loader from "../loader.mjs";
 import * as rpc from "../../rpc.mjs";
 import { ctx } from "../context.mjs";
+import {clone_value as structuredClone} from '../clone.mjs';
 import { set_location } from "./location.mjs";
 import { history_url } from "../../history.mjs";
 import {document_states} from '../document_identity.mjs';
