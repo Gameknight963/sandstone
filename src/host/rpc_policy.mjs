@@ -1,5 +1,5 @@
 const self_calls=new Set(['navigate','navigate_target','history_mutate','history_go','window_name','storage_ready','idb_command','idb_poll','idb_databases','cache_command','crypto','ws_new','ws_event','ws_send','ws_close']);
-const context_calls=new Set(['beacon','fetch_keepalive','fetch_keepalive_read','fetch_keepalive_abort','fetch_keepalive_done','download_request','download_blob','broadcast_open','broadcast_command']);
+const context_calls=new Set(['beacon','fetch_keepalive','fetch_keepalive_read','fetch_keepalive_abort','fetch_keepalive_done','download_request','download_blob','broadcast_open','broadcast_command','lock_open','lock_query']);
 const denied=()=>{throw new DOMException('RPC source is not authorized','SecurityError');};
 
 // Source identity belongs to the receiving MessagePort, not a frame ID supplied

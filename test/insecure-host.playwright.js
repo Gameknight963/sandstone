@@ -20,7 +20,9 @@ async(page,artifact)=>{
       finally{worker.terminate();URL.revokeObjectURL(url);}
     })()`));
     if(worker!=='worker-ready')throw new Error('An insecure host could not bootstrap a worker');
+    const lock=await host.evaluate(()=>main_frame.eval_js('navigator.locks.request("insecure-host",lock=>lock.name)'));
+    if(lock!=='insecure-host')throw new Error('An insecure host could not coordinate virtual-origin locks');
     if(errors.length)throw new Error('Insecure bootstrap errors: '+JSON.stringify(errors));
-    return ['Insecure HTTP hosts bootstrap pages, inline frames and workers without randomUUID'];
+    return ['Insecure HTTP hosts bootstrap pages, inline frames, workers and locks without randomUUID'];
   }finally{await host.close();}
 }

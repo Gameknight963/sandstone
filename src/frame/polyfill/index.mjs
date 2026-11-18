@@ -10,3 +10,4 @@ export { FakeEventSource } from "./event_source.mjs";
 export * as idb from "./indexeddb.mjs";
 export * as cache from './cache.mjs';
 export {BroadcastChannel} from './broadcast.mjs';
+export * as locks from './locks.mjs';

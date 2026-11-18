@@ -110,6 +110,8 @@ const ancestorWindowsTest=await readFile(new URL('ancestor-windows.playwright.js
 const verifyAncestorWindows=runInThisContext(`(${ancestorWindowsTest})`);
 const broadcastTest=await readFile(new URL('broadcast.playwright.js',import.meta.url),'utf8');
 const verifyBroadcast=runInThisContext(`(${broadcastTest})`);
+const locksTest=await readFile(new URL('locks.playwright.js',import.meta.url),'utf8');
+const verifyLocks=runInThisContext(`(${locksTest})`);
 const storageWritesTest=await readFile(new URL('storage-writes.playwright.js',import.meta.url),'utf8');
 const verifyStorageWrites=runInThisContext(`(${storageWritesTest})`);
 const storageEventsTest=await readFile(new URL('storage-events.playwright.js',import.meta.url),'utf8');
@@ -257,6 +259,7 @@ try {
     result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
     result.passed.push(...await timed(verifyAncestorWindows(page), 'Ancestor windows fixture'));
     result.passed.push(...await timed(verifyBroadcast(page), 'Broadcast channel fixture'));
+    result.passed.push(...await timed(verifyLocks(page), 'Web Locks fixture'));
     result.passed.push(...await timed(verifyIframeRaces(page), 'Iframe race fixture'));
     result.passed.push(...await timed(verifyIframeLifecycle(page), 'Iframe lifecycle fixture'));
     result.passed.push(...await timed(verifyNavigationTargets(page), 'Navigation targets fixture'));

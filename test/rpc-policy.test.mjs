@@ -61,3 +61,12 @@ test('Parent renderers may prepare owned child navigations without impersonating
   assert.throws(()=>call('fetch',['child','request','https://site.test',{mode:'cors'}]),{name:'SecurityError'});
   assert.throws(()=>call('fetch',['root','request','https://site.test',{mode:'navigate'}],nested),{name:'SecurityError'});
 });
+
+test('Lock RPCs cannot query or acquire locks using another document capability',()=>{
+  const {call,child,policy,port}=fixture(),nested={};policy.attach(port,nested,'child');child('child');
+  for(const procedure of ['lock_open','lock_query']){
+    assert.deepEqual(call(procedure,['root-document']),['root-document']);
+    assert.throws(()=>call(procedure,['child-document']),{name:'SecurityError'});
+    assert.throws(()=>call(procedure,['root-document'],nested),{name:'SecurityError'});
+  }
+});
