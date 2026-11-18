@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {bind_global_function, create_obj_proxy, global_method_names} from '../src/frame/global_functions.mjs';
+import {bind_global_function, create_obj_proxy, global_method_names,bind_native_property} from '../src/frame/global_functions.mjs';
 
 test('Virtual objects expose native constructors without leaking inherited adapter constructors',()=>{
   class Target{}class Adapter{get api(){return 'virtual';}}
@@ -16,6 +16,34 @@ test('Virtual objects expose native constructors without leaking inherited adapt
   function Explicit(){}
   assert.equal(create_obj_proxy({constructor:Explicit},[],new Target()).constructor,Explicit);
   assert.equal(create_obj_proxy(adapter,['constructor'],new Target()).constructor,Adapter);assert.equal(reads,1);
+});
+
+test('Explicit descriptor replacement does not observe an obsolete virtual getter',()=>{
+  const target={api:'native'},virtual=create_obj_proxy({},['api'],target);let reads=0;
+  Object.defineProperty(virtual,'api',{configurable:true,enumerable:true,get(){reads++;return 'old';}});
+  function replacement(){}
+  Object.defineProperty(target,'api',{value:replacement,writable:true,enumerable:true,configurable:false});
+  Object.defineProperty(virtual,'api',Object.getOwnPropertyDescriptor(target,'api'));
+  assert.equal(reads,0);assert.equal(virtual.api,replacement);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(virtual,'api'),Object.getOwnPropertyDescriptor(target,'api'));
+});
+
+test('Published native slots retain shared writes, accessor definitions and deletion',()=>{
+  const target={api:()=> 'initial'},virtual=create_obj_proxy({api:()=> 'virtual'},['api'],target);
+  Object.defineProperty(virtual,'api',Object.getOwnPropertyDescriptor(target,'api'));
+  bind_native_property(virtual,'api');
+  const assigned=()=> 'assigned';target.api=assigned;
+  assert.equal(virtual.api,assigned);
+  const replaced=()=> 'replaced';virtual.api=replaced;
+  assert.equal(target.api,replaced);
+  const descriptor={configurable:true,enumerable:true,get(){return assigned;}};
+  Object.defineProperty(virtual,'api',descriptor);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(target,'api'),Object.getOwnPropertyDescriptor(virtual,'api'));
+  assert.equal(target.api,virtual.api);
+  delete target.api;
+  assert.equal(virtual.api,undefined);assert.equal('api'in virtual,false);
+  assert.equal(Object.getOwnPropertyDescriptor(virtual,'api'),undefined);
+  assert.equal(Reflect.ownKeys(virtual).includes('api'),false);
 });
 
 test('Native method discovery includes inherited methods without invoking global getters or constructors',()=>{

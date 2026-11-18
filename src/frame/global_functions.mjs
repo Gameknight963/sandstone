@@ -1,6 +1,8 @@
 // Binding a global method must not write .call/.apply onto the original function:
 // window.addEventListener can share that function with EventTarget.prototype.
 const native_targets=new WeakMap();
+const native_bindings=new WeakMap();
+export function bind_native_property(proxy,key){native_bindings.get(proxy)?.(key);}
 const scope_targets=new WeakMap();
 // Keep template-engine locals and intrinsic direct eval in native lexical
 // scopes, with virtual globals as their outer fallback environment.
@@ -40,7 +42,7 @@ export function bind_global_function(target, method, virtual_target) {
 }
 
 export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,write_native) {
-  const methods = new WeakMap(),overrides=new Map(),deleted=new Set(),accessors=new Map();
+  const methods = new WeakMap(),overrides=new Map(),deleted=new Set(),accessors=new Map(),live=new Set();
   const originalOwn=new Set(Reflect.ownKeys(target));
   const descriptor=(object,key)=>{while(object){const found=Reflect.getOwnPropertyDescriptor(object,key);if(found)return found;object=Reflect.getPrototypeOf(object);}};
   const remember=value=>{if(typeof value==='function'&&!methods.has(value))methods.set(value,value);return value;};
@@ -52,6 +54,10 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
       if(fixed&&!fixed.configurable){
         if('value'in fixed&&!fixed.writable)return fixed.value;
         if(!('value'in fixed)&&!fixed.get)return undefined;
+      }
+      if(live.has(key)){
+        const value=read_native?read_native(key):target[key];
+        return remember(map_value?map_value(value,key):value);
       }
       const override=overrides.get(key);
       if(override)return remember('value'in override?override.value:override.get?.call(receiver));
@@ -79,6 +85,7 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
   };
   const own=key=>{
     const native=Reflect.getOwnPropertyDescriptor(target,key),override=overrides.get(key);
+    if(live.has(key))return native&&'value'in native?{...native,value:read(key)}:native;
     if(native&&!native.configurable)return 'value'in native&&native.writable?{...native,value:read(key)}:native;
     if(!native&&!Reflect.isExtensible(target))return;
     if(override)return {...override};
@@ -112,7 +119,11 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
     return [...indices.sort((a,b)=>Number(a)-Number(b)),...strings,...symbols];
   };
   const define=(key,input)=>{
-    const current=own(key),scratch=Object.create(null);
+    const physical=Reflect.getOwnPropertyDescriptor(target,key);
+    // A native declaration can replace an old configurable virtual accessor
+    // with fixed writable data. Installing an explicit value never needs to
+    // observe that accessor while checking the new descriptor.
+    const current=physical&&!physical.configurable&&Object.hasOwn(input,'value')?physical:own(key),scratch=Object.create(null);
     if(current)Reflect.defineProperty(scratch,key,current);
     if(!Reflect.defineProperty(scratch,key,input))return false;
     const complete=Reflect.getOwnPropertyDescriptor(scratch,key);
@@ -120,9 +131,10 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
     // Fixed descriptors must agree with the real Proxy target. Configurable
     // virtual slots can stay separate from native APIs used by the runtime.
     const fixed=Reflect.getOwnPropertyDescriptor(target,key);
-    if(!virtual||!complete.configurable){
+    if(live.has(key)||!virtual||!complete.configurable){
       if(!Reflect.defineProperty(target,key,complete))return false;
     }else if(!Reflect.getOwnPropertyDescriptor(target,key)&&!Reflect.isExtensible(target))return false;
+    if(live.has(key)){overrides.delete(key);deleted.delete(key);return true;}
     if(virtual){if(!fixed||fixed.configurable||'value'in fixed)overrides.set(key,complete);deleted.delete(key);}
     return true;
   };
@@ -144,6 +156,10 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
         const fixed=Reflect.getOwnPropertyDescriptor(target,key),current=fixed&&!fixed.configurable?fixed:overrides.get(key)||descriptor(target,key),scratch=Object.create(null);
         if(current)Reflect.defineProperty(scratch,key,current);
         return Reflect.set(scratch,key,value,receiver);
+      }
+      if(live.has(key)){
+        const assigned=write_native?write_native(key,value,proxy):Reflect.set(target,key,value,target);
+        if(assigned){remember(value);deleted.delete(key);}return assigned;
       }
       const override=overrides.get(key);
       if(override){
@@ -170,5 +186,8 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
     }
   });
   native_targets.set(proxy,target);
+  // A published global declaration remains a native variable binding. Raw
+  // identifier writes, property writes and later descriptors share that slot.
+  native_bindings.set(proxy,key=>{live.add(key);overrides.delete(key);deleted.delete(key);accessors.delete(key);});
   return proxy;
 }

@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {createHmac} from 'node:crypto';
 import {verifyHTMLInputStream} from './html-input-native.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
+import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
 const testSource = await readFile(new URL("browser.playwright.js", import.meta.url), "utf8");
 const dexieSource = await readFile(new URL("../node_modules/dexie/dist/dexie.js", import.meta.url), "utf8");
@@ -25,6 +26,8 @@ const functionConstructorTest=await readFile(new URL('function-constructor.playw
 const verifyFunctionConstructor=runInThisContext(`(${functionConstructorTest})`);
 const blockFunctionTest=await readFile(new URL('javascript-block-functions.playwright.js',import.meta.url),'utf8');
 const verifyBlockFunctions=runInThisContext(`(${blockFunctionTest})`);
+const globalFunctionTest=await readFile(new URL('javascript-global-functions.playwright.js',import.meta.url),'utf8');
+const verifyGlobalFunctions=runInThisContext(`(${globalFunctionTest})`);
 const environmentIdentityTest=await readFile(new URL('environment-identity.playwright.js',import.meta.url),'utf8');
 const verifyEnvironmentIdentity=runInThisContext(`(${environmentIdentityTest})`);
 const intersectionObserverTest=await readFile(new URL('intersection-observer.playwright.js',import.meta.url),'utf8');
@@ -268,6 +271,7 @@ try {
     result.passed.push(...await timed(verifyJavascriptASI(page), 'JavaScript ASI fixture'));
     result.passed.push(...await timed(verifyFunctionConstructor(page), 'Function constructor fixture'));
     result.passed.push(...await timed(verifyBlockFunctions(page,blockFunctionCases,globalBlockFunctionCases), 'Block function scope fixture'));
+    result.passed.push(...await timed(verifyGlobalFunctions(page,globalFunctionCases), 'Global function declaration fixture'));
     result.passed.push(...await timed(verifyEnvironmentIdentity(page), 'Environment identity fixture'));
     result.passed.push(...await timed(verifyIntersectionObserver(page), 'Intersection observer fixture'));
     result.passed.push(...moduleResults);

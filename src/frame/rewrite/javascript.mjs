@@ -16,7 +16,7 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false, url, resolve, stripAttributes = false, sourceURL, contextName='__ctx__',thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false} = {}) {
+export function rewrite_source(source, globals, {module = false, url, resolve, stripAttributes = false, sourceURL, contextName='__ctx__',thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false} = {}) {
   let named=false;
   const onComment=sourceURL?(type,text)=>{
     if(type==='SingleLine'&&/^[#@]\s+sourceURL=\s*\S+\s*$/.test(text))named=true;
@@ -26,7 +26,7 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
   const bindings = new WeakSet();
   const names = new Set(globals);
   const edits = [];
-  const functionBodies=new WeakSet(),legacyFunctions=[];
+  const functionBodies=new WeakSet(),legacyFunctions=[],globalFunctions=new Set();
   const strictBody=node=>Array.isArray(node?.body)&&node.body.some(statement=>statement.directive==='use strict');
 
   function bind(pattern, scope, lexical=false) {
@@ -47,6 +47,7 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
       if(parent?.type==='IfStatement')scope=new Scope(scope,"block");
       const block=scope.kind!=="function"&&!scope.body;
       bind(node.id,block?scope:scope.variable(),block&&(node.async||node.generator));
+      if(!module&&!block&&node.id&&scope.variable()===root&&names.has(node.id.name))globalFunctions.add(node.id.name);
       if(block&&!scope.strict&&!node.async&&!node.generator&&names.has(node.id.name))legacyFunctions.push({node,scope,implicit:parent?.type==='IfStatement'});
     }
     if (["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(node.type)) {
@@ -94,6 +95,14 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
   }
   const root=new Scope(null,"function");root.strict=module||strictBody(ast);
   build(ast,root);
+  if(!module&&!(evalMode&&root.strict)&&globalFunctions.size){
+    // Global declaration instantiation has already selected and initialized the
+    // final function for each name. Mirror its descriptor before authored code,
+    // while leaving directive prologues, local eval bindings and modules intact.
+    const offset=ast.body.find(statement=>statement.directive===undefined)?.start??source.length;
+    const publish=[...globalFunctions].map(name=>`var {}=${contextName}.__publish_global_function__(${JSON.stringify(name)},${name});`).join('');
+    edits.push([offset,offset,publish]);
+  }
   // Add only the outer var bindings a browser actually instantiates. Keep the
   // authored declarations intact so native execution handles assignment order.
   for(const {node,scope,implicit} of legacyFunctions){

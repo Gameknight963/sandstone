@@ -4,13 +4,14 @@ import * as intercept from "./intercept/index.mjs";
 import * as parser from "./parser.mjs";
 import * as loader from "./loader.mjs";
 import { modules } from "./polyfill/module.mjs";
-import { create_obj_proxy, global_method_names,scope_global } from "./global_functions.mjs";
+import { create_obj_proxy, global_method_names,scope_global,bind_native_property } from "./global_functions.mjs";
 import {html_constructor_names,virtual_html_constructor,notify_dom_access} from './dom_operations.mjs';
 import {parent_message_window,top_message_window,self_post_message} from './window_messages.mjs';
 import {create_document_storage} from './storage_sync.mjs';
 import {virtual_frame_window} from './iframe_window.mjs';
 import * as rpc from '../rpc.mjs';
 const parse_json = JSON.parse;
+const realm_global=globalThis,evaluate_global=globalThis.eval,describe_global=Reflect.getOwnPropertyDescriptor,define_global=Reflect.defineProperty;
 
 export const is_worker = typeof importScripts === "function";
 export const ctx_vars = [];
@@ -132,6 +133,13 @@ export class CustomCTX {
   __json_module__(source) { return parse_json(source); }
   __worker_module_started__() { polyfill.mark_worker_started(); }
 
+  __publish_global_function__(name,value){
+    const descriptor=describe_global(realm_global,name);
+    if(!descriptor||!define_global(ctx.__proxy__,name,{...descriptor,value}))throw new TypeError('Cannot define global function '+name);
+    bind_native_property(ctx.__proxy__,name);
+    return value;
+  }
+
   __get_this__(this_obj,strict=false) {
     const scoped=scope_global(this_obj);if(scoped)return strict?undefined:scoped;
     if (this_obj === globalThis)
@@ -249,8 +257,8 @@ export function run_script_safe(js) {
 
 export function run_script(js, options={}) {
   //indirect eval preserves global variables
-  let rewritten_js = parser.rewrite_js(js, {url: loader.url,...options});
-  return eval?.(rewritten_js);
+  let rewritten_js = parser.rewrite_js(js, {url: loader.url,...options,evalMode:true});
+  return evaluate_global?.(rewritten_js);
 }
 
 export function intercept_property(target, key, handler) {
