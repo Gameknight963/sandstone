@@ -12,6 +12,7 @@ export class SiteDataStore {
     this.local = Object.create(null);
     this.cookies = new CookieJar();
     this.indexed = [];
+    this.cacheStorage=[];
     this.persistent = false;
     this.localListeners=new Set();
     this.load();
@@ -96,6 +97,12 @@ export class SiteDataStore {
       const site = sites.get(hostname);
       if (!site.origins.includes(database.origin)) site.origins.push(database.origin);
       site.indexedDB++;
+    }
+    for(const cache of this.cacheStorage){
+      const hostname=new URL(cache.origin).hostname;
+      if(!sites.has(hostname))sites.set(hostname,{hostname,origins:[],cookies:0,localStorage:0,indexedDB:0});
+      const site=sites.get(hostname);if(!site.origins.includes(cache.origin))site.origins.push(cache.origin);
+      site.cacheStorage=(site.cacheStorage||0)+1;
     }
     return [...sites.values()].sort((a, b) => a.hostname.localeCompare(b.hostname));
   }

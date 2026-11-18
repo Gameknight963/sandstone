@@ -401,6 +401,7 @@ try{
   if(storageDenied)await context.addInitScript(()=>{
     Object.defineProperty(window,'localStorage',{get(){throw new DOMException('Storage denied','SecurityError');}});
     Object.defineProperty(window,'indexedDB',{get(){throw new DOMException('Storage denied','SecurityError');}});
+    Object.defineProperty(window,'caches',{configurable:true,get(){throw new DOMException('Storage denied','SecurityError');}});
   });
   const page=await context.newPage();
   const direct=[],errors=[];

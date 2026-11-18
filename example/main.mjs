@@ -18,6 +18,7 @@ const eval_js_button = from_id("eval_js_button");
 const theme_select = from_id("theme_select");
 const site_data = sandstone.controller.site_data;
 const indexed_db = sandstone.controller.indexed_db;
+const cache_storage=sandstone.controller.cache_storage;
 let favicon_blob_url;
 let data_render_id = 0;
 
@@ -37,13 +38,14 @@ function set_ui_hidden(hidden) {
 
 async function render_site_data() {
   const render_id = ++data_render_id;
-  await indexed_db.catalog();
+  await Promise.all([indexed_db.catalog(),cache_storage.catalog()]);
   if (render_id !== data_render_id) return;
   const list = from_id("site_data_list");
   list.replaceChildren();
   from_id("storage_status").textContent =
     (site_data.persistent ? "Cookies and local storage are saved. " : "Cookies and local storage last until this file is closed. ") +
     (indexed_db.persistent ? "Databases are saved in this browser. " : "Databases last until this file is closed. ") +
+    (cache_storage.persistent ? 'Caches are saved in this browser. ' : 'Caches last until this file is closed. ') +
     "Session cookies expire when this file is closed.";
   const sites = site_data.list();
   if (!sites.length) list.textContent = "No stored site data.";
@@ -51,13 +53,14 @@ async function render_site_data() {
     const row = document.createElement("div");
     row.className = "site_data_row";
     const label = document.createElement("span");
-    label.textContent = `${site.hostname}: ${site.cookies} cookies, ${site.localStorage} local storage entries, ${site.indexedDB} databases`;
+    label.textContent = `${site.hostname}: ${site.cookies} cookies, ${site.localStorage} local storage entries, ${site.indexedDB} databases, ${site.cacheStorage||0} caches`;
     row.append(label);
     for (const [text, selection] of [
       ["Clear cookies", {cookies: true, localStorage: false, indexedDB: false}],
       ["Clear local storage", {cookies: false, localStorage: true, indexedDB: false}],
       ["Clear IndexedDB", {cookies: false, localStorage: false, indexedDB: true}],
-      ["Clear all", {cookies: true, localStorage: true, indexedDB: true}]
+      ['Clear caches',{cookies:false,localStorage:false,indexedDB:false,cacheStorage:true}],
+      ["Clear all", {cookies: true, localStorage: true, indexedDB: true,cacheStorage:true}]
     ]) {
       const button = document.createElement("button");
       button.textContent = text;
@@ -67,6 +70,7 @@ async function render_site_data() {
         const affects_current = current && (current.hostname === site.hostname || current.hostname.endsWith("." + site.hostname));
         if (affects_current) main_frame.iframe.src = "about:blank";
         if (selection.indexedDB) await indexed_db.clear(site.hostname);
+        if(selection.cacheStorage)await cache_storage.clear(site.hostname);
         site_data.clear(site.hostname, selection);
         await render_site_data();
         if (affects_current) await main_frame.navigate_to(current.href, null, {history_mode: "reload"});

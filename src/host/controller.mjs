@@ -13,6 +13,7 @@ import './navigation_targets.mjs';
 import {navigation_sandbox} from '../navigation_policy.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
+export {cache_storage} from './cache.mjs';
 
 import { version } from "./index.mjs";
 

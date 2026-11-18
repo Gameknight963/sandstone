@@ -156,6 +156,7 @@ async function context(denyStorage=storageDenied){
   if(denyStorage)await value.addInitScript(()=>{
     Object.defineProperty(window,'localStorage',{get(){throw new DOMException('Storage denied','SecurityError');}});
     Object.defineProperty(window,'indexedDB',{get(){throw new DOMException('Storage denied','SecurityError');}});
+    Object.defineProperty(window,'caches',{configurable:true,get(){throw new DOMException('Storage denied','SecurityError');}});
   });
   return value;
 }

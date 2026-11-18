@@ -146,6 +146,8 @@ const scriptLoadTest=await readFile(new URL('script-load.playwright.js',import.m
 const verifyScriptLoad=runInThisContext(`(${scriptLoadTest})`);
 const scriptBodiesTest=await readFile(new URL('script-bodies.playwright.js',import.meta.url),'utf8');
 const verifyScriptBodies=runInThisContext(`(${scriptBodiesTest})`);
+const cacheStorageTest=await readFile(new URL('cache-storage.playwright.js',import.meta.url),'utf8');
+const verifyCacheStorage=runInThisContext(`(${cacheStorageTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 let activeStorageMode;
@@ -167,6 +169,7 @@ try {
     if (storageDenied) await context.addInitScript(() => {
       Object.defineProperty(window, "localStorage", {get() { throw new DOMException("Storage denied", "SecurityError"); }});
       Object.defineProperty(window, "indexedDB", {get() { throw new DOMException("Storage denied", "SecurityError"); }});
+      Object.defineProperty(window,'caches',{configurable:true,get(){throw new DOMException('Storage denied','SecurityError');}});
     });
     const page = await context.newPage();
     const browserErrors = [];
@@ -224,6 +227,7 @@ try {
     try{result.passed.push(...await timed(verifyScriptLoad(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Dynamic script load fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyScriptBodies(page), 'Script body fixture'));
+    result.passed.push(...await timed(verifyCacheStorage(page), 'CacheStorage fixture'));
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
@@ -341,6 +345,10 @@ try {
       return JSON.stringify({existed,typed:stored?stored.key instanceof CryptoKey:false,extractable:stored?.key.extractable??null,signature:signature?Array.from(new Uint8Array(signature),byte=>byte.toString(16).padStart(2,'0')).join(''):null});
     })()`)));
     assert.deepEqual(cryptoReload,storageDenied?{existed:false,typed:false,extractable:null,signature:null}:{existed:true,typed:true,extractable:false,signature:createHmac('sha256','secret').update('message').digest('hex')},'Cryptographic key persistence did not match the storage capability');
+    await page.evaluate(async()=>{main_frame.special_pages['https://cache-storage.test/reload']='<!doctype html><body>Cache persistence fixture';await main_frame.navigate_to('https://cache-storage.test/reload');});
+    const cacheReload=await page.evaluate(()=>main_frame.eval_js('(async()=>{const response=await caches.match("/persisted");return response?response.text():null;})()'));
+    assert.equal(cacheReload,storageDenied?null:'saved cache','CacheStorage persistence did not match the storage capability');
+    result.passed.push('CacheStorage survives standalone-file reloads when storage is available');
     // Chrome can replay invalid-base diagnostics when another frame is loaded.
     // Exercise those native diagnostics last, with no subsequent navigation.
     try{result.passed.push(...await timed(verifyBase(page,warnings=>warnings.forEach(message=>expectedDiagnostics.add(message))), 'Document base fixture'));}

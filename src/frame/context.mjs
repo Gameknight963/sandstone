@@ -99,6 +99,9 @@ export class CustomCTX {
   get StaticRange(){return Object.hasOwn(internal,'StaticRange')?internal.StaticRange:intercept.ranges.StaticRange;}
   set StaticRange(value){internal.StaticRange=value;}
   get indexedDB() {return polyfill.idb.indexedDB}
+  get caches(){if(internal.storage_unavailable||this.location?.origin==='null')throw new DOMException('Cache origin is unavailable','SecurityError');return polyfill.cache.caches}
+  get Cache(){return polyfill.cache.Cache}
+  get CacheStorage(){return polyfill.cache.CacheStorage}
   get IDBFactory() {return polyfill.idb.IDBFactory}
   get IDBDatabase() {return polyfill.idb.IDBDatabase}
   get IDBTransaction() {return polyfill.idb.IDBTransaction}
@@ -201,7 +204,6 @@ export function update_ctx(options = {}) {
     internal.localStorage=stores.local;internal.sessionStorage=stores.session;
     storageReady=stores.ready.then(snapshot=>{internal.storage_unavailable=!!snapshot.opaque;});
   }
-  delete globalThis.caches;
   // Native Navigation targets the physical sandbox document. Hide its feature
   // flags until it can use virtual history, so routers use their History fallback.
   // Native network APIs without relay adapters must not connect directly.
