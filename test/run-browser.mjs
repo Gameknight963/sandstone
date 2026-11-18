@@ -18,6 +18,12 @@ const workerTest = await readFile(new URL("workers.playwright.js", import.meta.u
 const verifyWorkers = runInThisContext(`(${workerTest})`);
 const historyTest = await readFile(new URL("history.playwright.js", import.meta.url), "utf8");
 const verifyHistory = runInThisContext(`(${historyTest})`);
+const javascriptASITest=await readFile(new URL('javascript-asi.playwright.js',import.meta.url),'utf8');
+const verifyJavascriptASI=runInThisContext(`(${javascriptASITest})`);
+const environmentIdentityTest=await readFile(new URL('environment-identity.playwright.js',import.meta.url),'utf8');
+const verifyEnvironmentIdentity=runInThisContext(`(${environmentIdentityTest})`);
+const intersectionObserverTest=await readFile(new URL('intersection-observer.playwright.js',import.meta.url),'utf8');
+const verifyIntersectionObserver=runInThisContext(`(${intersectionObserverTest})`);
 const historyInterfaceTest=await readFile(new URL('history-interface.playwright.js',import.meta.url),'utf8');
 const verifyHistoryInterface=runInThisContext(`(${historyInterfaceTest})`);
 const linkTest=await readFile(new URL('links.playwright.js',import.meta.url),'utf8');
@@ -254,6 +260,9 @@ try {
     result.passed.push('Bare native schedulers bind to virtual window, self and globalThis');
     assert.equal(await page.evaluate(()=>main_frame.eval_js('typeof navigation==="undefined"&&typeof window.navigation==="undefined"&&typeof NavigationPrecommitController==="undefined"')),true,'Native Navigation must not target the physical sandbox document');
     const moduleResults = await timed(verifyModules(page), "Module fixture");
+    result.passed.push(...await timed(verifyJavascriptASI(page), 'JavaScript ASI fixture'));
+    result.passed.push(...await timed(verifyEnvironmentIdentity(page), 'Environment identity fixture'));
+    result.passed.push(...await timed(verifyIntersectionObserver(page), 'Intersection observer fixture'));
     result.passed.push(...moduleResults);
     result.passed.push(...await timed(verifyResources(page), "Resource fixture"));
     result.passed.push(...await timed(verifyStylesheetRel(page), 'Stylesheet relation fixture'));

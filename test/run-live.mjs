@@ -10,6 +10,7 @@ import {server as wisp,logging} from '../example/node_modules/@mercuryworkshop/w
 import {track_client_sockets} from './client-sockets.mjs';
 
 const sites=[
+  {id:'discourse',url:'https://discuss.python.org/latest'},
   {id:'hn',url:'https://news.ycombinator.com/'},
   {id:'mdn',url:'https://developer.mozilla.org/en-US/docs/Web/JavaScript'},
   {id:'wikipedia',url:'https://en.wikipedia.org/wiki/Main_Page'},
@@ -60,6 +61,17 @@ async function wait(page,proxy,expression){
 const summary=(page,proxy)=>read(page,proxy,'({title:document.title,heading:document.querySelector("h1")?.textContent.trim()||"",links:document.links.length})');
 async function interact(page,proxy,site){
   const surface=proxy?page.frameLocator('iframe[frame-id]'):page;
+  if(site.id==='discourse'){
+    await wait(page,proxy,'document.querySelectorAll(".topic-list-item a.title").length>0');
+    await (proxy?page.evaluate(()=>main_frame.eval_js('window.liveNavigationMarker="persisted"')):page.evaluate(()=>window.liveNavigationMarker='persisted'));
+    await surface.locator('.topic-list-item a.title').first().click();
+    await wait(page,proxy,'location.pathname.startsWith("/t/")&&document.querySelectorAll(".topic-post").length>0');
+    const clientNavigation=await read(page,proxy,'window.liveNavigationMarker==="persisted"');
+    assert.equal(clientNavigation,true,'Discourse topic navigation reloaded the document');
+    await (proxy?page.evaluate(()=>main_frame.eval_js('history.back();true')):page.evaluate(()=>history.back()));
+    await wait(page,proxy,'location.pathname==="/latest"&&document.querySelectorAll(".topic-list-item a.title").length>0');
+    return {topic:true,returned:true,clientNavigation};
+  }
   if(site.id==='angular'){
     const theme=surface.getByRole('button',{name:/^Change theme\. Current theme:/});
     await theme.click();

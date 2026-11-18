@@ -2,6 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {bind_global_function, create_obj_proxy, global_method_names} from '../src/frame/global_functions.mjs';
 
+test('Virtual objects expose native constructors without leaking inherited adapter constructors',()=>{
+  class Target{}class Adapter{get api(){return 'virtual';}}
+  let reads=0;Object.defineProperty(Adapter.prototype,'constructor',{configurable:true,get(){reads++;return Adapter;}});
+  const target=new Target(),adapter=new Adapter(),virtual=create_obj_proxy(adapter,['api'],target);
+  assert.equal(virtual.constructor,Target);assert.equal(reads,0);assert.equal(virtual.api,'virtual');
+  const patch=()=>{};virtual.constructor=patch;
+  assert.equal(virtual.constructor,patch);assert.equal(target.constructor,patch);
+  assert.equal(Object.getOwnPropertyDescriptor(virtual,'constructor').value,patch);
+  delete virtual.constructor;assert.equal(virtual.constructor,Target);assert.equal(reads,0);
+  Object.defineProperty(target,'constructor',{configurable:true,get(){return Target;}});
+  assert.equal(Object.getOwnPropertyDescriptor(virtual,'constructor').get.call(virtual),Target);assert.equal(reads,0);
+  function Explicit(){}
+  assert.equal(create_obj_proxy({constructor:Explicit},[],new Target()).constructor,Explicit);
+  assert.equal(create_obj_proxy(adapter,['constructor'],new Target()).constructor,Adapter);assert.equal(reads,1);
+});
+
 test('Native method discovery includes inherited methods without invoking global getters or constructors',()=>{
   let reads=0;
   class Constructor {}

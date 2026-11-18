@@ -29,6 +29,9 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
   const originalOwn=new Set(Reflect.ownKeys(target));
   const descriptor=(object,key)=>{while(object){const found=Reflect.getOwnPropertyDescriptor(object,key);if(found)return found;object=Reflect.getPrototypeOf(object);}};
   const remember=value=>{if(typeof value==='function'&&!methods.has(value))methods.set(value,value);return value;};
+  // Overlay class constructors describe the adapter, not the native object.
+  // Explicit constructor overrides remain supported like other virtual slots.
+  const replacement_allowed=key=>key!=='constructor'||ctx_vars.includes(key)||Object.hasOwn(obj,key);
   const read=(key,receiver=proxy)=>{
       const fixed=Reflect.getOwnPropertyDescriptor(target,key);
       if(fixed&&!fixed.configurable){
@@ -37,7 +40,7 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
       }
       const override=overrides.get(key);
       if(override)return remember('value'in override?override.value:override.get?.call(receiver));
-      if(!deleted.has(key)){
+      if(!deleted.has(key)&&replacement_allowed(key)){
         const replacement = obj[key];
         if (replacement !== undefined || key in obj) return remember(replacement);
       }
@@ -66,7 +69,7 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
     if(override)return {...override};
     if(!native)return;
     if('value'in native)return {...native,value:read(key)};
-    if(deleted.has(key)||!(key in obj))return native;
+    if(deleted.has(key)||!replacement_allowed(key)||!(key in obj))return native;
     const implementation=descriptor(obj,key);
     if(!implementation)return native;
     let cached=accessors.get(key);
@@ -98,7 +101,7 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
     if(current)Reflect.defineProperty(scratch,key,current);
     if(!Reflect.defineProperty(scratch,key,input))return false;
     const complete=Reflect.getOwnPropertyDescriptor(scratch,key);
-    const virtual=overrides.has(key)||ctx_vars.includes(key)||!deleted.has(key)&&key in obj;
+    const virtual=overrides.has(key)||ctx_vars.includes(key)||!deleted.has(key)&&replacement_allowed(key)&&key in obj;
     // Fixed descriptors must agree with the real Proxy target. Configurable
     // virtual slots can stay separate from native APIs used by the runtime.
     const fixed=Reflect.getOwnPropertyDescriptor(target,key);

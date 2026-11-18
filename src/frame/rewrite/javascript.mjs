@@ -1,4 +1,5 @@
 import { parse } from "meriyah";
+const terminated_nodes=new Set(['ExpressionStatement','VariableDeclaration','ReturnStatement','ThrowStatement','BreakStatement','ContinueStatement','DebuggerStatement','DoWhileStatement','PropertyDefinition','FieldDefinition']);
 
 class Scope {
   constructor(parent, kind) { this.parent = parent; this.kind = kind; this.names = new Set(); }
@@ -62,6 +63,12 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
 
   function visit(node, parent, key) {
     if (node.type === "BlockStatement" && node.body[0]?.directive === "use asm") return;
+    const for_binding=node.type==='VariableDeclaration'&&(parent?.type==='ForStatement'&&key==='init'||['ForInStatement','ForOfStatement'].includes(parent?.type)&&key==='left');
+    const default_expression=node.type==='ExportDefaultDeclaration'&&!['FunctionDeclaration','ClassDeclaration'].includes(node.declaration.type);
+    // Mapping this introduces a leading parenthesis. Preserve the parser's
+    // original ASI boundaries so it cannot turn the next statement into a call
+    // on a preceding initializer, return value or field expression.
+    if(!for_binding&&(terminated_nodes.has(node.type)||default_expression)&&source[node.end-1]!==';')edits.push([node.end,node.end,';']);
     if (resolve && ["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type) && node.source) {
       edits.push([node.source.start, node.source.end, JSON.stringify(resolve(node.source.value))]);
       if (stripAttributes && node.attributes?.length) edits.push([node.source.end, node.end, ";"]);
