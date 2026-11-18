@@ -7,12 +7,12 @@ export function bind_declared_property(proxy,key){native_bindings.get(proxy)?.(k
 const scope_targets=new WeakMap();
 // Keep template-engine locals and intrinsic direct eval in native lexical
 // scopes, with virtual globals as their outer fallback environment.
-export function create_global_scope(context,names){
+export function create_global_scope(context,names,globals=context){
   const keys=new Set(names.filter(name=>name!=='eval'));
   const scope=new Proxy(Object.create(null),{
     has:(_,key)=>keys.has(key),
-    get:(_,key)=>key===Symbol.unscopables?undefined:Reflect.get(context,key,context),
-    set:(_,key,value)=>Reflect.set(context,key,value,context)
+    get:(_,key)=>key===Symbol.unscopables?undefined:Reflect.get(globals,key,globals),
+    set:(_,key,value)=>Reflect.set(globals,key,value,globals)
   });
   native_targets.set(scope,unwrap_global_target(context));
   scope_targets.set(scope,context);

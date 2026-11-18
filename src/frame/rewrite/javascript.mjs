@@ -17,7 +17,7 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false, url, resolve, stripAttributes = false, sourceURL, contextName='__ctx__',thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false} = {}) {
+export function rewrite_source(source, globals, {module = false, url, resolve, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false} = {}) {
   let named=false;
   const onComment=sourceURL?(type,text)=>{
     if(type==='SingleLine'&&/^[#@]\s+sourceURL=\s*\S+\s*$/.test(text))named=true;
@@ -100,6 +100,12 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
   build(ast,root);
   const targets=new WeakSet(),defaultShorthands=new WeakSet(),hoisted=new Set(),movedInitializers=[];
   const globalScript=!module&&!(evalMode&&root.strict);
+  const lexicals=!module&&!evalMode?[...root.lexical].filter(name=>names.has(name)):[];
+  if(lexicals.length){
+    const offset=ast.body.find(statement=>statement.directive===undefined)?.start??source.length;
+    const definitions=lexicals.map(name=>`get [${JSON.stringify(name)}](){return ${name}},set [${JSON.stringify(name)}](value){${name}=value}`).join(',');
+    edits.push([offset,offset,`var {}=(${contextName}.__declare_global_lexicals__?.({${definitions}}),0);`]);
+  }
   function pattern_ids(pattern,callback){
     if(pattern.type==='Identifier')callback(pattern);
     else if(pattern.type==='AssignmentPattern')pattern_ids(pattern.left,callback);
@@ -183,7 +189,7 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
       if(implicit)edits.push([node.start,node.start,'{']);
       // An empty binding pattern adds no names and retains the declaration's
       // empty completion, including eval's last preceding expression value.
-      const publication=[node.end,node.end,`;var {}=(${contextName}.${name}=${name});${implicit?'}':''}`];
+      const publication=[node.end,node.end,`;var {}=(${globalName===contextName?contextName+'.'+name+'='+name:contextName+'.__publish_legacy_function__('+JSON.stringify(name)+','+name+')'});${implicit?'}':''}`];
       edits.push(publication);legacy_publications.set(node,{publication,name,implicit});
     }else target.names.add(name);
   }
@@ -193,14 +199,14 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
   function visit(node, parent, key, inWith=false,withToken=null) {
     if (node.type === "BlockStatement" && node.body[0]?.directive === "use asm") return;
     const legacy=legacy_publications.get(node);
-    if(legacy&&withToken)legacy.publication[2]=`;var {}=(${withToken}.context.${legacy.name}=${legacy.name});${legacy.implicit?'}':''}`;
+    if(legacy&&withToken)legacy.publication[2]=`;var {}=(${globalName===contextName?withToken+'.context.'+legacy.name+'='+legacy.name:withToken+'.context.__publish_legacy_function__('+JSON.stringify(legacy.name)+','+legacy.name+')'});${legacy.implicit?'}':''}`;
     if(node.type==='WithStatement'&&!preserveWith){
       const token=with_name(),runtime='(function(){return this})().__ctx__';
       edits.push([node.object.start,node.object.start,runtime+'.__enter_with__((']);
       edits.push([node.object.end,node.object.end,'),'+(withToken||'null')+')']);
       const block=node.body.type==='BlockStatement',offset=block?node.body.start+1:node.body.start;
       edits.push([offset,offset,(block?'':'{')+'const '+token+'='+runtime+'.__take_with__();']);
-      if(!block)edits.push([node.body.end,node.body.end,'}']);
+      if(!block)edits.push([node.body.end,node.body.end,'}',2]);
       visit(node.object,node,'object',inWith,withToken);visit(node.body,node,'body',true,token);return;
     }
     const for_binding=node.type==='VariableDeclaration'&&(parent?.type==='ForStatement'&&key==='init'||['ForInStatement','ForOfStatement'].includes(parent?.type)&&key==='left');
@@ -208,7 +214,7 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
     // Mapping this introduces a leading parenthesis. Preserve the parser's
     // original ASI boundaries so it cannot turn the next statement into a call
     // on a preceding initializer, return value or field expression.
-    if(!for_binding&&(terminated_nodes.has(node.type)||default_expression)&&source[node.end-1]!==';')edits.push([node.end,node.end,';']);
+    if(!for_binding&&(terminated_nodes.has(node.type)||default_expression)&&source[node.end-1]!==';')edits.push([node.end,node.end,';',1]);
     if (resolve && ["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type) && node.source) {
       edits.push([node.source.start, node.source.end, JSON.stringify(resolve(node.source.value))]);
       if (stripAttributes && node.attributes?.length) edits.push([node.source.end, node.end, ";"]);
@@ -237,7 +243,7 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
       if(preserveDirectEval&&node.name==='eval'&&parent?.type==='CallExpression'&&key==='callee'&&!parent.optional)reference=false;
       if (reference) {
         const shorthand = parent?.type === "Property" && parent.shorthand && key === "value";
-        const value=withToken?`${withToken}.reference(${JSON.stringify(node.name)},${scopes.get(node).strict}).${node.name}`:`${contextName}.${node.name}`;
+        const value=withToken?`${withToken}.reference(${JSON.stringify(node.name)},${scopes.get(node).strict}).${node.name}`:`${globalName}.${node.name}`;
         // An identifier call has no property receiver. Native global methods
         // already bind their required Window; authored strict functions must
         // receive undefined here, including optional calls and template tags.
@@ -251,7 +257,7 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
   visit(ast);
   for(const {declaration,parent} of movedInitializers){
     const init=declaration.init,parts=[];let offset=init.start;
-    for(const [start,end,text] of edits.filter(([start,end])=>start>=init.start&&end<=init.end).sort((a,b)=>a[0]-b[0]||a[1]-b[1])){
+    for(const [start,end,text] of edits.filter(([start,end])=>start>=init.start&&end<=init.end).sort((a,b)=>a[0]-b[0]||a[1]-b[1]||(a[3]||0)-(b[3]||0))){
       if(start<offset)continue;parts.push(source.slice(offset,start),text);offset=end;
     }
     parts.push(source.slice(offset,init.end));
@@ -259,7 +265,7 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
     edits.push([parent.right.start,parent.right.start,'('+target+'=({['+JSON.stringify(name)+']:('+parts.join('')+')})['+JSON.stringify(name)+'],']);
     edits.push([parent.right.end,parent.right.end,')']);
   }
-  edits.sort((a, b) => a[0] - b[0]||a[1]-b[1]);
+  edits.sort((a, b) => a[0] - b[0]||a[1]-b[1]||(a[3]||0)-(b[3]||0));
   let output = "";
   let offset = 0;
   for (const [start, end, replacement] of edits) {
@@ -295,5 +301,5 @@ export function rewrite_dynamic_function(source,globals,options={}){
   if(id)expression=expression.slice(0,id.start)+expression.slice(id.end);
   // Sloppy direct eval can introduce bindings that no static scope pass sees.
   // Let the native environment resolve those names before its global fallback.
-  return {source:rewrite_source(expression,globals,{...options,contextName,thisName,dynamicImport:true,preserveWith:true,preserveDirectEval:true,preserveGlobalScope:hasDirectEval}),contextName,thisName,scopeName,needsScope};
+  return {source:rewrite_source(expression,globals,{...options,contextName,globalName:options.lexicalGlobals?contextName+'.__globals__':contextName,thisName,dynamicImport:true,preserveWith:true,preserveDirectEval:true,preserveGlobalScope:hasDirectEval}),contextName,thisName,scopeName,needsScope};
 }

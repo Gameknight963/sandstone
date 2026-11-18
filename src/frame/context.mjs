@@ -11,6 +11,7 @@ import {create_document_storage} from './storage_sync.mjs';
 import {virtual_frame_window} from './iframe_window.mjs';
 import * as rpc from '../rpc.mjs';
 import {create_with_scope} from './with_scope.mjs';
+import {create_global_bindings} from './global_bindings.mjs';
 const parse_json = JSON.parse;
 const realm_global=globalThis,evaluate_global=globalThis.eval,describe_global=Reflect.getOwnPropertyDescriptor,define_global=Reflect.defineProperty;
 const with_entries=[];
@@ -125,7 +126,7 @@ export class CustomCTX {
   get IDBVersionChangeEvent() {return polyfill.idb.IDBVersionChangeEvent}
 
   eval(js) {
-    return run_script(String(js));
+    return typeof js==='string'?run_script(js):js;
   }
 
   __import__(referrer, specifier, options) {
@@ -135,7 +136,10 @@ export class CustomCTX {
   __module_meta__(url) { return modules.meta(url); }
   __json_module__(source) { return parse_json(source); }
   __worker_module_started__() { polyfill.mark_worker_started(); }
-  __enter_with__(value,parent){const token=create_with_scope(value,parent,ctx.__proxy__);with_entries.push(token);return token.object;}
+  get __globals__(){return global_bindings.globals;}
+  __declare_global_lexicals__(definitions){global_bindings.declare(definitions);}
+  __publish_legacy_function__(name,value){if(!global_bindings.has(name))Reflect.set(ctx.__proxy__,name,value,ctx.__proxy__);return value;}
+  __enter_with__(value,parent){const token=create_with_scope(value,parent,ctx.__proxy__,global_bindings.globals);with_entries.push(token);return token.object;}
   __take_with__(){return with_entries.pop();}
   __declare_global_vars__(names){for(const name of names)bind_declared_property(ctx.__proxy__,name);}
 
@@ -164,6 +168,7 @@ export class CustomCTX {
 }
 
 export const ctx = new CustomCTX();
+const global_bindings=create_global_bindings(ctx.__proxy__);
 
 export function proxy_function(target, key, apply_callback) {
   if (!target) return;

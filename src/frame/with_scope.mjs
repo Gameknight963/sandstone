@@ -6,7 +6,7 @@ const NativeProxy=Proxy,NativeTypeError=TypeError;
 // Resolve an identifier through captured with objects before the virtual global.
 // Calls retain the selected object while arguments run. Reads and writes
 // resolve independently, including compound updates and a changing object.
-export function create_with_scope(value,parent,context){
+export function create_with_scope(value,parent,context,globals=context){
   if(value===null||value===undefined)throw new NativeTypeError('Cannot convert undefined or null to object');
   const object=box(value),state={object,parent:states.get(parent),context};
   const target_for=(name,callee=false)=>{
@@ -16,7 +16,7 @@ export function create_with_scope(value,parent,context){
       if(hidden!==null&&(typeof hidden==='object'||typeof hidden==='function')&&hidden[name])continue;
       return callee?{object,receiver:object}:object;
     }
-    return callee?{object:context,receiver:undefined}:context;
+    return callee?{object:globals,receiver:undefined}:globals;
   };
   const read=(target,name)=>get(target,name,target);
   const token={object,context,

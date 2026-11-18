@@ -10,10 +10,10 @@ const nativeConstructors=[Native,Object.getPrototypeOf(async function(){}).const
 const getPrototype=Object.getPrototypeOf,setPrototype=Object.setPrototypeOf,descriptor=Object.getOwnPropertyDescriptor,define=Object.defineProperty;
 function compile(original){
   const source=Reflect.apply(stringify,original,[]),url=loader.url;
-  const rewritten=rewrite_dynamic_function(source,ctx_vars,{url,sourceURL:url});
+  const rewritten=rewrite_dynamic_function(source,ctx_vars,{url,sourceURL:url,lexicalGlobals:true});
   const body=rewritten.needsScope?'with('+rewritten.scopeName+'){return '+rewritten.source+'\n}':'return '+rewritten.source;
   const factory=Reflect.apply(Native,undefined,[rewritten.contextName,rewritten.thisName,rewritten.scopeName,body]);
-  const fn=Reflect.apply(factory,undefined,[ctx.__proxy__,(value,strict)=>ctx.__get_this__(value,strict),rewritten.needsScope?create_global_scope(ctx.__proxy__,ctx_vars):undefined]);
+  const fn=Reflect.apply(factory,undefined,[ctx.__proxy__,(value,strict)=>ctx.__get_this__(value,strict),rewritten.needsScope?create_global_scope(ctx.__proxy__,ctx_vars,ctx.__globals__):undefined]);
   setPrototype(fn,getPrototype(original));define(fn,'name',descriptor(original,'name'));
   sources.set(fn,source);return fn;
 }

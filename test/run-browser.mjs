@@ -32,6 +32,10 @@ const globalFunctionTest=await readFile(new URL('javascript-global-functions.pla
 const verifyGlobalFunctions=runInThisContext(`(${globalFunctionTest})`);
 const globalVarTest=await readFile(new URL('javascript-global-vars.playwright.js',import.meta.url),'utf8');
 const verifyGlobalVars=runInThisContext(`(${globalVarTest})`);
+const globalLexicalTest=await readFile(new URL('global-lexicals.playwright.js',import.meta.url),'utf8');
+const verifyGlobalLexicals=runInThisContext(`(${globalLexicalTest})`);
+const workerLexicalTest=await readFile(new URL('worker-global-lexicals.playwright.js',import.meta.url),'utf8');
+const verifyWorkerLexicals=runInThisContext(`(${workerLexicalTest})`);
 const workerVarTest=await readFile(new URL('javascript-worker-vars.playwright.js',import.meta.url),'utf8');
 const verifyWorkerVars=runInThisContext(`(${workerVarTest})`);
 const runtimeGlobalTest=await readFile(new URL('runtime-globals.playwright.js',import.meta.url),'utf8');
@@ -283,6 +287,8 @@ try {
     result.passed.push(...await timed(verifyBlockFunctions(page,blockFunctionCases,globalBlockFunctionCases), 'Block function scope fixture'));
     result.passed.push(...await timed(verifyGlobalFunctions(page,globalFunctionCases), 'Global function declaration fixture'));
     result.passed.push(...await timed(verifyGlobalVars(page), 'Global var declaration fixture'));
+    result.passed.push(...await timed(verifyGlobalLexicals(page), 'Global lexical declaration fixture'));
+    result.passed.push(...await timed(verifyWorkerLexicals(page), 'Worker lexical declaration fixture'));
     result.passed.push(...await timed(verifyWorkerVars(page), 'Worker var declaration fixture'));
     for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyRuntimeGlobals(page,batch), 'Runtime global replacement fixture '+(batch+1)));
     result.passed.push(...await timed(verifyEnvironmentIdentity(page), 'Environment identity fixture'));
