@@ -20,6 +20,7 @@
     "dev:all": "concurrently 'npm run dev' 'cd example; npm run dev'"
   },
   "dependencies": {
+    "acorn": "8.14.0",
     "astray": "^1.1.1",
     "fake-indexeddb": "^6.2.8",
     "libcurl.js": "^0.7.0",

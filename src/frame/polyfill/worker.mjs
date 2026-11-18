@@ -16,6 +16,15 @@ const NativeMessageEvent=globalThis.MessageEvent,NativeErrorEvent=globalThis.Err
 const native_timeout=globalThis.setTimeout.bind(globalThis),native_clear_timeout=globalThis.clearTimeout.bind(globalThis);
 const native_dispatch=globalThis.dispatchEvent?.bind(globalThis);
 const imported_blobs = new Map();
+function replace_worker_method(name,value){
+  let owner=globalThis;
+  while(owner&&!Object.hasOwn(owner,name))owner=Object.getPrototypeOf(owner);
+  const descriptor=owner&&Object.getOwnPropertyDescriptor(owner,name);
+  // Preserve inherited API placement: a later classic var declaration must
+  // still be able to create its own undefined binding over this method.
+  if(descriptor&&'value'in descriptor)Object.defineProperty(owner,name,{...descriptor,value});
+  else globalThis[name]=value;
+}
 let worker_options;
 let worker_ready = false;
 let message_queue = [];
@@ -70,7 +79,7 @@ export function initialize_worker(options) {
   worker_options = options;
   loader.set_worker_context(options);
   update_ctx();
-  globalThis.importScripts = fakeImportScripts;
+  replace_worker_method('importScripts',fakeImportScripts);
   for (const [url, source] of Object.entries(options.sources || {})) network.cache_put(url, source);
   if(typeof options.source==='string')network.cache_put(options.url,options.source);
   if (options.probe) {
@@ -122,10 +131,10 @@ export function initialize_worker(options) {
   };
   globalThis.addEventListener("message", connect);
   const native_close = globalThis.close.bind(globalThis);
-  globalThis.close = () => {
+  replace_worker_method('close',() => {
     native_post({sandstone_worker: options.token, type: "closed"});
     native_close();
-  };
+  });
 }
 
 function handler(target, type) {

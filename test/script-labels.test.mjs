@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {rewrite_source} from '../src/frame/rewrite/javascript.mjs';
 
+test('Parser fallback preserves authored labels and still rejects invalid strict legacy syntax',()=>{
+  const source='for(var callback=()=>1 in {}){}\n//# sourceURL=https://authored.test/legacy.js';
+  const output=rewrite_source(source,[],{sourceURL:'https://relocated.test/worker.js'});
+  assert.ok(output.endsWith('//# sourceURL=https://authored.test/legacy.js'));
+  assert.doesNotThrow(()=>new Function(output));
+  assert.throws(()=>rewrite_source('"use strict";'+source,[]),SyntaxError);
+});
+
 test('Virtual script labels preserve authored directives and ignore directive-like strings',()=>{
   const url='https://fixture.test/assets/main.js';
   for(const directive of ['//# sourceURL=https://authored.test/app.js','//@ sourceURL=legacy.js','//# sourceURL= https://authored.test/spaced.js  ']){

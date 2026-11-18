@@ -3,6 +3,7 @@
 const native_targets=new WeakMap();
 const native_bindings=new WeakMap();
 export function bind_native_property(proxy,key){native_bindings.get(proxy)?.(key);}
+export function bind_declared_property(proxy,key){native_bindings.get(proxy)?.(key,true);}
 const scope_targets=new WeakMap();
 // Keep template-engine locals and intrinsic direct eval in native lexical
 // scopes, with virtual globals as their outer fallback environment.
@@ -131,7 +132,7 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
     // Fixed descriptors must agree with the real Proxy target. Configurable
     // virtual slots can stay separate from native APIs used by the runtime.
     const fixed=Reflect.getOwnPropertyDescriptor(target,key);
-    if(live.has(key)||!virtual||!complete.configurable){
+    if(live.has(key)||!virtual||!complete.configurable||!physical&&Reflect.has(target,key)){
       if(!Reflect.defineProperty(target,key,complete))return false;
     }else if(!Reflect.getOwnPropertyDescriptor(target,key)&&!Reflect.isExtensible(target))return false;
     if(live.has(key)){overrides.delete(key);deleted.delete(key);return true;}
@@ -188,6 +189,9 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
   native_targets.set(proxy,target);
   // A published global declaration remains a native variable binding. Raw
   // identifier writes, property writes and later descriptors share that slot.
-  native_bindings.set(proxy,key=>{live.add(key);overrides.delete(key);deleted.delete(key);accessors.delete(key);});
+  native_bindings.set(proxy,(key,declared=false)=>{
+    if(declared&&(originalOwn.has(key)||!Reflect.getOwnPropertyDescriptor(target,key)))return;
+    live.add(key);overrides.delete(key);deleted.delete(key);accessors.delete(key);
+  });
   return proxy;
 }

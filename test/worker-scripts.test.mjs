@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { worker_imports, prefetch_worker_scripts } from "../src/frame/worker_scripts.mjs";
 
+test('Worker discovery parses native legacy arrow initializers without executing the worker',()=>{
+  assert.deepEqual(worker_imports('for(var callback=()=>1 in {}){};importScripts("./chunk.js");throw new Error("must not execute");','https://site.test/worker.js'),{urls:['https://site.test/chunk.js'],dynamic:false});
+});
+
 test("Classic worker discovery finds literal and constant imports without executing source", () => {
   const source = `
     const root = './lib/';

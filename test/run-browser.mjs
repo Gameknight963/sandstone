@@ -30,6 +30,10 @@ const blockFunctionTest=await readFile(new URL('javascript-block-functions.playw
 const verifyBlockFunctions=runInThisContext(`(${blockFunctionTest})`);
 const globalFunctionTest=await readFile(new URL('javascript-global-functions.playwright.js',import.meta.url),'utf8');
 const verifyGlobalFunctions=runInThisContext(`(${globalFunctionTest})`);
+const globalVarTest=await readFile(new URL('javascript-global-vars.playwright.js',import.meta.url),'utf8');
+const verifyGlobalVars=runInThisContext(`(${globalVarTest})`);
+const workerVarTest=await readFile(new URL('javascript-worker-vars.playwright.js',import.meta.url),'utf8');
+const verifyWorkerVars=runInThisContext(`(${workerVarTest})`);
 const environmentIdentityTest=await readFile(new URL('environment-identity.playwright.js',import.meta.url),'utf8');
 const verifyEnvironmentIdentity=runInThisContext(`(${environmentIdentityTest})`);
 const urlTest=await readFile(new URL('url.playwright.js',import.meta.url),'utf8');
@@ -276,6 +280,8 @@ try {
     result.passed.push(...await timed(verifyFunctionConstructor(page), 'Function constructor fixture'));
     result.passed.push(...await timed(verifyBlockFunctions(page,blockFunctionCases,globalBlockFunctionCases), 'Block function scope fixture'));
     result.passed.push(...await timed(verifyGlobalFunctions(page,globalFunctionCases), 'Global function declaration fixture'));
+    result.passed.push(...await timed(verifyGlobalVars(page), 'Global var declaration fixture'));
+    result.passed.push(...await timed(verifyWorkerVars(page), 'Worker var declaration fixture'));
     result.passed.push(...await timed(verifyEnvironmentIdentity(page), 'Environment identity fixture'));
     result.passed.push(...await timed(verifyURL(page), 'URL API fixture'));
     result.passed.push(...await timed(verifyIntersectionObserver(page), 'Intersection observer fixture'));

@@ -1,6 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {bind_global_function, create_obj_proxy, global_method_names,bind_native_property} from '../src/frame/global_functions.mjs';
+import {bind_global_function, create_obj_proxy, global_method_names,bind_native_property,bind_declared_property} from '../src/frame/global_functions.mjs';
+
+test('Declared own bindings shadow inherited APIs and retain native property attributes',()=>{
+  const prototype={api:()=> 'native'},target=Object.create(prototype),virtual=create_obj_proxy({api:()=> 'virtual'},['api'],target);
+  Object.defineProperty(target,'api',{value:undefined,writable:true,enumerable:true,configurable:false});
+  bind_declared_property(virtual,'api');assert.equal(virtual.api,undefined);
+  const value=()=> 'assigned';virtual.api=value;
+  assert.equal(target.api,value);assert.equal(virtual.api,value);assert.equal(prototype.api(),'native');
+  assert.deepEqual(Object.getOwnPropertyDescriptor(virtual,'api'),Object.getOwnPropertyDescriptor(target,'api'));
+});
+
+test('An explicit inherited API override creates an own slot before a later var declaration',()=>{
+  const target=Object.create({api:()=> 'native'}),virtual=create_obj_proxy({api:()=> 'virtual'},['api'],target),value=()=> 'assigned';
+  virtual.api=value;assert.equal(Object.hasOwn(target,'api'),true);assert.equal(target.api,value);
+  bind_declared_property(virtual,'api');assert.equal(virtual.api,value);
+  assert.equal(Object.getOwnPropertyDescriptor(virtual,'api').configurable,true);
+});
 
 test('Virtual objects expose native constructors without leaking inherited adapter constructors',()=>{
   class Target{}class Adapter{get api(){return 'virtual';}}

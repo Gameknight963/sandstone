@@ -1,4 +1,4 @@
-import { parse } from "meriyah";
+import { parse } from "./javascript_parser.mjs";
 
 // Discover literal imports and declared lazy bundle assets without running code.
 // Unresolved calls are handled by an isolated, network-disabled discovery worker.

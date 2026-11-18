@@ -4,14 +4,17 @@ import * as intercept from "./intercept/index.mjs";
 import * as parser from "./parser.mjs";
 import * as loader from "./loader.mjs";
 import { modules } from "./polyfill/module.mjs";
-import { create_obj_proxy, global_method_names,scope_global,bind_native_property } from "./global_functions.mjs";
+import { create_obj_proxy, global_method_names,scope_global,bind_native_property,bind_declared_property } from "./global_functions.mjs";
 import {html_constructor_names,virtual_html_constructor,notify_dom_access} from './dom_operations.mjs';
 import {parent_message_window,top_message_window,self_post_message} from './window_messages.mjs';
 import {create_document_storage} from './storage_sync.mjs';
 import {virtual_frame_window} from './iframe_window.mjs';
 import * as rpc from '../rpc.mjs';
+import {create_with_scope} from './with_scope.mjs';
 const parse_json = JSON.parse;
 const realm_global=globalThis,evaluate_global=globalThis.eval,describe_global=Reflect.getOwnPropertyDescriptor,define_global=Reflect.defineProperty;
+const with_entries=[];
+const native_worker_post=realm_global.postMessage?.bind(realm_global);
 
 export const is_worker = typeof importScripts === "function";
 export const ctx_vars = [];
@@ -77,7 +80,7 @@ export class CustomCTX {
   }
 
   fetch() {return polyfill.fetch(...arguments)}
-  postMessage(){return is_worker?globalThis.postMessage(...arguments):self_post_message(...arguments)}
+  postMessage(){return is_worker?native_worker_post(...arguments):self_post_message(...arguments)}
   get Request() {return polyfill.FakeRequest}
   get Function(){return Object.hasOwn(internal,'Function')?internal.Function:polyfill.Function;}
   set Function(value){internal.Function=value;}
@@ -132,6 +135,9 @@ export class CustomCTX {
   __module_meta__(url) { return modules.meta(url); }
   __json_module__(source) { return parse_json(source); }
   __worker_module_started__() { polyfill.mark_worker_started(); }
+  __enter_with__(value,parent){const token=create_with_scope(value,parent,ctx.__proxy__);with_entries.push(token);return token.object;}
+  __take_with__(){return with_entries.pop();}
+  __declare_global_vars__(names){for(const name of names)bind_declared_property(ctx.__proxy__,name);}
 
   __publish_global_function__(name,value){
     const descriptor=describe_global(realm_global,name);

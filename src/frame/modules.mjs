@@ -1,4 +1,4 @@
-import { parse } from "meriyah";
+import { parse } from "./javascript_parser.mjs";
 const import_string=String;
 
 function url_like(value, base) {
