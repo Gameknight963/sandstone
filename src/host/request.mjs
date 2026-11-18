@@ -18,7 +18,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
   const mode = options.mode || (context.navigation ? 'navigate' : 'no-cors');
   const destination = options.destination;
   let policy = parse_referrer_policy(options.referrerPolicy || context.referrerPolicy);
-  let referrer = opaque||options.referrer === '' ? '' : options.referrer && options.referrer !== 'about:client' ? options.referrer : context.url || '';
+  let referrer = opaque||options.referrer === '' ? '' : options.referrer && options.referrer !== 'about:client' ? options.referrer : context.referrer_url ?? context.url ?? '';
   let tainted = opaque, crossSiteRedirect = !same_site(top,url), cors = false;
   delete options.mode;
   delete options.referrer;

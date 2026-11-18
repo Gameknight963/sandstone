@@ -53,6 +53,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
   const source_context=navigation_source?navigation_request_context(beacons.contexts,navigation_source,frame.root_id):{
     url: options?.mode === 'navigate' && frame.pending_navigation?.source_url || frame.request_url || (frame.url.origin === "null" && frame.origin && frame.origin !== "null" ? frame.origin + "/" : frame.url.href),
     top_url: iframes[frame.root_id]?.url?.href || frame.url.href,
+    referrer_url:frame.referrer_url,
     broadcast_origin:frame.broadcast_origin,
     navigation: options?.mode === 'navigate',nested:true,cross_site:frame_cross_site(frame,iframes)
   };
@@ -116,7 +117,7 @@ rpc_handlers["ws_new"] = function (frame_id, url, protocols) {
   if (!frame) throw new TypeError('Unknown frame');
   const source = frame.request_url || (frame.url.origin === 'null' && frame.origin && frame.origin !== 'null' ? frame.origin + '/' : frame.url.href);
   const options = websocket_options(site_data, url, {
-    url: source, top_url: iframes[frame.root_id]?.url.href || source, userAgent: navigator.userAgent,cross_site:frame_cross_site(frame,iframes)
+    url: source, top_url: iframes[frame.root_id]?.url.href || source, userAgent: navigator.userAgent,cross_site:frame_cross_site(frame,iframes),broadcast_origin:frame.broadcast_origin
   });
   const RelayWebSocket = relay_websocket_class(libcurl.CurlWebSocket);
   let ws = new RelayWebSocket(url, protocols, options);

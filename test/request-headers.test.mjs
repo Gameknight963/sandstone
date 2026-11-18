@@ -103,3 +103,17 @@ test('Request serialization retains mode, explicit virtual referrers and privacy
   const based=await serialize_request('api',{referrer:'https://site.test/chosen'},'https://cdn.test/assets/','https://site.test/page');
   assert.equal(based.url,'https://cdn.test/assets/api');assert.equal(based.options.referrer,'https://site.test/chosen');
 });
+
+test('Blob worker requests retain inherited credentials without sending a blob referrer',async()=>{
+  const store=new SiteDataStore(),seen=[];
+  store.setCookie('https://site.test/','session=secret; HttpOnly; SameSite=Strict; Secure; Path=/');
+  const transport=async(url,options)=>{seen.push(options.headers);return new Response('ok');};
+  const context={url:'https://site.test/',top_url:'https://site.test/page',referrer_url:'blob:null/worker'};
+  const response=await fetch_with_cookies(transport,store,'https://site.test/api',{method:'POST',mode:'cors',credentials:'same-origin'},context);
+  assert.equal(response.request_referrer,'');
+  assert.equal(seen[0].origin,'https://site.test');
+  assert.equal(seen[0].cookie,'session=secret');
+  assert.equal(seen[0].referer,undefined);
+  await fetch_with_cookies(transport,store,'https://site.test/api',{method:'POST',mode:'cors',referrer:'https://user:pass@site.test/chosen#private'},context);
+  assert.equal(seen[1].referer,'https://site.test/chosen');
+});

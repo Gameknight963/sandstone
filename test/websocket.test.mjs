@@ -109,6 +109,9 @@ test('WebSocket cookies use HTTP schemes, path, Secure, SameSite and HttpOnly ru
   assert.equal(options('wss://chat.example.test/', 'https://chat.example.test/', 'https://different.test/').headers.Cookie, 'none=n');
   assert.equal(options('ws://chat.example.test/', 'http://chat.example.test/').headers.Cookie, 'strict=s; lax=l');
   assert.equal(options('wss://unrelated.test/').headers.Cookie, undefined);
+  const opaque=websocket_options(store,'wss://chat.example.test/socket/live',{url:'https://chat.example.test/',broadcast_origin:'opaque:frame',userAgent:'test browser'});
+  assert.equal(opaque.headers.Origin,'null');
+  assert.equal(opaque.headers.Cookie,'none=n');
   assert.throws(() => options('https://chat.example.test/'), TypeError);
   own.onHeader('set-cookie', 'handshake=accepted; HttpOnly; Path=/');
   assert.ok(store.cookies.getCookieStringSync('https://chat.example.test/').includes('handshake=accepted'));

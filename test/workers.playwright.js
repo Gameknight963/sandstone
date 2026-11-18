@@ -62,7 +62,7 @@ async page => {
     windowType:'undefined',documentType:'undefined',storageType:'undefined',historyType:'undefined',detached:true};
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(classic.uuid))throw new Error('Worker UUID is unavailable or invalid');
   delete classic.uuid;
-  if(classic.requestURL!=='https://fixture.test/workers/side-effect'||classic.requestReferrer!=='https://fixture.test/workers/chosen')throw new Error('Worker Request did not use virtual URLs: '+JSON.stringify(classic));
+  if(classic.requestURL!=='https://fixture.test/workers/side-effect'||classic.requestReferrer!=='https://fixture.test/workers/chosen#fragment')throw new Error('Worker Request did not use virtual URLs: '+JSON.stringify(classic));
   delete classic.requestURL;delete classic.requestReferrer;
   if (JSON.stringify(classic)!==JSON.stringify(expected)) throw new Error('Classic worker failed: '+JSON.stringify(classic));
   const computed = JSON.parse(await page.evaluate(() => main_frame.eval_js(`new Promise((resolve,reject) => {

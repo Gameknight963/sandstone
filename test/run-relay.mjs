@@ -130,6 +130,7 @@ echoes.on('headers',(headers,request)=>{
   );
 });
 echoes.on('connection', (socket, request) => {
+  if(request.url==='/ws-context')socket.send(JSON.stringify({origin:request.headers.origin,cookies:(request.headers.cookie||'').split('; ').filter(Boolean).sort()}));
   if (request.url === '/ws-close') { socket.close(4001, 'server finished'); return; }
   socket.on('message', (data, isBinary) => socket.send(data, {binary: isBinary}));
 });
@@ -142,7 +143,7 @@ server.on('upgrade',(request,socket,head)=>{
     }
     echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
   }
-  else if (request.url === '/echo' || request.url === '/ws-close') echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
+  else if (request.url === '/echo' || request.url === '/ws-close' || request.url==='/ws-context') echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
   else if (request.url === '/ws-pending') server.emit('ws-pending',socket);
   else if (request.url === '/ws-refused') socket.end('HTTP/1.1 403 Forbidden\r\nSet-Cookie: refused=visible; Path=/\r\nContent-Length: 0\r\n\r\n');
   else wisp.routeRequest(request,socket,head);
@@ -151,6 +152,14 @@ server.listen(0,'127.0.0.1');await once(server,'listening');
 const origin=`http://127.0.0.1:${server.address().port}`;
 wisp.options.allow_loopback_ips=true;wisp.options.port_whitelist=[server.address().port];
 const channel=process.env.BROWSER_CHANNEL||'chrome';
+const opaqueSocketChild=`const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-context')});socket.onmessage=event=>{parent.postMessage({socketContext:JSON.parse(event.data)},'*');socket.close();};socket.onerror=()=>parent.postMessage({socketContextError:true},'*');`;
+const opaqueSocketScript=`new Promise((resolve,reject)=>{
+  const child=document.createElement('iframe');child.sandbox='allow-scripts';
+  const cleanup=()=>{clearTimeout(timer);removeEventListener('message',receive);child.remove();};
+  const receive=event=>{if(event.source!==child.contentWindow)return;if(event.data?.socketContext){cleanup();resolve(event.data.socketContext);}else if(event.data?.socketContextError){cleanup();reject(new Error('Opaque frame socket failed'));}};
+  const timer=setTimeout(()=>{cleanup();reject(new Error('Opaque frame socket timed out'));},10000);
+  addEventListener('message',receive);child.srcdoc=${JSON.stringify('<script>'+opaqueSocketChild+'</script>')};document.body.append(child);
+})`;
 let browser;
 const sourceScript=(client,redirect=false)=>`new Promise((resolve,reject)=>{
   const events=[];
@@ -281,6 +290,8 @@ try{
   const baseline=JSON.parse(await nativePage.evaluate(source=>eval(source),sourceScript('native')).catch(error=>{console.error(JSON.stringify({requests,held:[...held.keys()]}));throw error;}));
   const authBaseline=JSON.parse(await nativePage.evaluate(source=>eval(source),authenticatedScript));
   assert.deepEqual(authBaseline,{visible:['auth_login=visible','auth_visible=handshake'],sent:['auth_hidden=secret','auth_login=visible','auth_visible=handshake']});
+  const opaqueSocketBaseline=await nativePage.evaluate(source=>eval(source),opaqueSocketScript);
+  assert.deepEqual(opaqueSocketBaseline,{origin:'null',cookies:[]});
   const beaconBaseline=JSON.parse(await nativePage.evaluate(source=>eval(source),beaconScript('native')));
   assert.deepEqual(beaconBaseline,[true,true,true,true,true,true,false,'TypeError','TypeError','TypeError']);
   await waitBeacons('native',6);const nativeBeaconBodies=await beaconBodies('native');
@@ -424,6 +435,7 @@ try{
   const reflectedAuthScript=authenticatedScript.replace('new WebSocket(', 'new (Object.getOwnPropertyDescriptor(globalThis,"WebSocket").value)(');
   const reflectedAuth=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),reflectedAuthScript));
   assert.deepEqual(reflectedAuth,authBaseline,'Reflected WebSocket bypassed virtual authentication or the relay');
+  assert.deepEqual(await page.evaluate(source=>main_frame.eval_js(source),opaqueSocketScript),opaqueSocketBaseline,'Opaque frame WebSocket origins or SameSite cookies differ from native Chromium');
   const beaconClient='beacon-'+storageDenied;
   const beaconResult=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),beaconScript(beaconClient)));
   assert.deepEqual(beaconResult,beaconBaseline,'sendBeacon synchronous behavior differs from native Chromium');
@@ -676,7 +688,7 @@ try{
   assert.deepEqual(direct,[],'A relayed connection made a direct HTTP request');
   assert.deepEqual(errors,[],'A relayed connection produced a browser error');
   assert.ok(closed.some(value=>value.client===client&&value.count===3));
-    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','native request cleanup'],events:proxied,direct}));
+    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','opaque iframe WebSocket Origin and SameSite cookie parity','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','native request cleanup'],events:proxied,direct}));
   await context.close();
   }
 }finally{

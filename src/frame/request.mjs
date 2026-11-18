@@ -10,8 +10,9 @@ export function create_request_class(base,source=base) {
       let referrer=explicit_referrer!==undefined?String(explicit_referrer):input instanceof NativeRequest?input.referrer:'about:client';
       if(referrer!==''&&referrer!=='about:client'){
         const url=new URL(referrer,base());
-        if(url.origin!==new URL(source()).origin)referrer='about:client';
-        else{url.username='';url.password='';url.hash='';referrer=url.href;}
+        const origin=new URL(source()).origin;
+        if(origin==='null'||url.origin!==origin)referrer='about:client';
+        else referrer=url.href;
       }
       // The native realm has an opaque origin and would discard a valid
       // virtual referrer. Preserve it alongside the otherwise native request.

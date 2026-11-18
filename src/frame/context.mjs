@@ -99,9 +99,9 @@ export class CustomCTX {
   get StaticRange(){return Object.hasOwn(internal,'StaticRange')?internal.StaticRange:intercept.ranges.StaticRange;}
   set StaticRange(value){internal.StaticRange=value;}
   get indexedDB() {return polyfill.idb.indexedDB}
-  get caches(){if(internal.storage_unavailable||this.origin==='null')throw new DOMException('Cache origin is unavailable','SecurityError');return polyfill.cache.caches}
-  get Cache(){return polyfill.cache.Cache}
-  get CacheStorage(){return polyfill.cache.CacheStorage}
+  get caches(){if(is_worker&&this.origin==='null')return undefined;if(internal.storage_unavailable||this.origin==='null')throw new DOMException('Cache origin is unavailable','SecurityError');return polyfill.cache.caches}
+  get Cache(){return is_worker&&this.origin==='null'?undefined:polyfill.cache.Cache}
+  get CacheStorage(){return is_worker&&this.origin==='null'?undefined:polyfill.cache.CacheStorage}
   get IDBFactory() {return polyfill.idb.IDBFactory}
   get IDBDatabase() {return polyfill.idb.IDBDatabase}
   get IDBTransaction() {return polyfill.idb.IDBTransaction}

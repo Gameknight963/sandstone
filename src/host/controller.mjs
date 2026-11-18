@@ -305,14 +305,16 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   const srcdoc=!!options.srcdoc;
   if(srcdoc&&(new URL(url).protocol!=='about:'||new URL(url).pathname!=='srcdoc'||new URL(url).search))throw new TypeError('Invalid inline frame URL');
   const inherited_origin=parent.origin||parent.url.origin;
+  const opaque=options.opaque||parent_broadcast.startsWith('opaque:')||options.worker&&new URL(url).protocol==='data:';
   const effective_url=()=>parent.request_url||parent.url.href;
   const child = {
     id: child_id, parent_id, root_id: root.id, url: new URL(url),worker:!!options.worker,
     navigation_sandbox:navigation_sandbox(parent.navigation_sandbox,options.sandbox??null),
     window_name:saved?.window_name??options.window_name??'',
-    origin: srcdoc ? options.opaque||parent_broadcast.startsWith('opaque:')?'null':inherited_origin : options.worker ? new URL(url).protocol === "data:" ? "null" : inherited_origin : new URL(url).origin,
+    origin: opaque?'null':srcdoc||options.worker?inherited_origin:new URL(url).origin,
     broadcast_origin:options.worker ? new URL(url).protocol==='data:'?opaque_broadcast:parent_broadcast : options.opaque||parent_broadcast.startsWith('opaque:')?opaque_broadcast:srcdoc?parent_broadcast:new URL(url).origin,
     cookie_url:srcdoc ? parent.cookie_url||effective_url() : undefined,
+    referrer_url:options.worker&&new URL(url).protocol==='blob:'?url:undefined,
     get request_url(){return srcdoc?effective_url():undefined;},
     session_storage: parent.session_storage,
     history: saved?.history || new NavigationHistory(),
@@ -336,10 +338,11 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
   child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push"});
   return {
     window_name:child.window_name,
-    beacon_context: network.beacons.register(child_id, {url:child.request_url||(child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href), top_url: root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id}),
+    beacon_context: network.beacons.register(child_id, {url:child.request_url||(child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href), referrer_url:child.referrer_url,top_url: root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id}),
     cookie_cross_site:frame_cross_site(child,iframes),
     message_origin:child.broadcast_origin.startsWith('opaque:')?'null':srcdoc?child.origin:undefined,
-    ...(srcdoc?{document_origin:child.origin,cookie_url:child.cookie_url}:{}),
+    document_origin:child.origin,
+    ...(srcdoc?{cookie_url:child.cookie_url}:{}),
     crypto_available: crypto_service.methods,
     local_storage: site_data.local[child.origin],
     session_storage: child.session_storage[child.origin],

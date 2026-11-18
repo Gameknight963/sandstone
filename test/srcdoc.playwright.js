@@ -1,9 +1,20 @@
 async page=>{
+  const differences=(expected,actual,path='$',output=[])=>{
+    if(JSON.stringify(expected)===JSON.stringify(actual))return output;
+    if(expected&&actual&&typeof expected==='object'&&typeof actual==='object'){
+      for(const key of new Set([...Object.keys(expected),...Object.keys(actual)]))differences(expected[key],actual[key],path+'.'+key,output);
+    }else output.push({path,expected,actual});
+    return output;
+  };
   const origin='https://srcdoc.test',start=origin+'/parent/page';
   const context=await page.context().browser().newContext(),native=await context.newPage();
   const parent='<!doctype html><base href="/assets/"><body>Inline frame fixture';
   const external='globalThis.externalInline=true;';
-  const workerCode='postMessage({url:location.href,origin:location.origin});';
+  const workerCode=`const attempt=fn=>{try{return fn();}catch(error){return error.name;}};
+    (async()=>{postMessage({url:location.href,origin:location.origin,globalOrigin:origin,
+      referrer:new Request('https://srcdoc.test/echo',{referrer:'https://srcdoc.test/worker-ref#part'}).referrer,
+      database:attempt(()=>{const request=indexedDB.open('inline-worker-probe');request.onsuccess=()=>request.result.close();request.onerror=event=>event.preventDefault();return 'pending';}),comparison:attempt(()=>indexedDB.cmp(1,2)),cache:attempt(()=>typeof caches),cacheType:typeof Cache,cacheStorageType:typeof CacheStorage,
+      fetch:await(await fetch('https://srcdoc.test/echo',{method:'POST'})).json(),explicit:await(await fetch('https://srcdoc.test/echo',{method:'POST',referrer:'https://srcdoc.test/worker-ref#part'})).json()});})();`;
   const code=`(async()=>{
     const attempt=fn=>{try{return fn();}catch(error){return error.name;}};
     const snapshot=async()=>({url:location.href,docURL:document.URL,locOrigin:location.origin,origin,
@@ -11,7 +22,13 @@ async page=>{
       storage:attempt(()=>localStorage.shared),external:globalThis.externalInline,
       indexedDB:attempt(()=>typeof indexedDB),cache:attempt(()=>typeof caches),
       database:attempt(()=>{const request=indexedDB.open('inline-probe');request.onsuccess=()=>request.result.close();request.onerror=event=>event.preventDefault();return 'pending';}),
+      opaqueWorker:origin==='null'?attempt(()=>{const worker=new Worker('worker.js');worker.terminate();return 'created';}):'allowed',
       fetch:await(await fetch('echo',{method:'POST'})).json(),
+      blobWorker:await new Promise(resolve=>{try{const url=URL.createObjectURL(new Blob([${JSON.stringify(workerCode.replace('url:location.href,',''))}],{type:'text/javascript'}));const worker=new Worker(url);worker.onmessage=event=>{worker.terminate();URL.revokeObjectURL(url);resolve(event.data);};worker.onerror=event=>{event.preventDefault();worker.terminate();URL.revokeObjectURL(url);resolve({error:event.message});};}catch(error){resolve({error:error.name});}}),
+      requests:await Promise.all(['/chosen#private','','https://foreign.test/ref','about:client','about:srcdoc#part','data:text/plain,value','https://user:pass@srcdoc.test/credential#secret'].map(async referrer=>{
+        try{const request=new Request('echo',{method:'POST',referrer});return {referrer:request.referrer,clone:request.clone().referrer,fetch:await(await fetch(request)).json(),direct:await(await fetch('echo',{method:'POST',referrer})).json()};}
+        catch(error){return {error:error.name};}
+      })),
       worker:origin==='null'?'blocked':await new Promise((resolve,reject)=>{const worker=new Worker('worker.js');worker.onmessage=event=>{worker.terminate();resolve(event.data);};worker.onerror=reject;})});
     parent.postMessage({kind:'inline-ready',snapshot:await snapshot()},'*');
     addEventListener('message',async event=>{if(event.data==='snapshot')parent.postMessage({kind:'inline-after',snapshot:await snapshot()},'*');});
@@ -20,7 +37,7 @@ async page=>{
   await native.route(origin+'/**',route=>{
     const request=route.request(),path=new URL(request.url()).pathname;
     return route.fulfill(path.endsWith('/echo')?{contentType:'application/json',body:JSON.stringify({url:request.url(),origin:request.headers().origin??null,referrer:request.headers().referer??null,cookie:request.headers().cookie??null})}:
-      path.endsWith('.js')?{contentType:'text/javascript',body:path.endsWith('/worker.js')?workerCode:external}:path.endsWith('.css')?{contentType:'text/css',body:'body { color: rgb(1, 2, 3); }'}:{contentType:'text/html',body:parent});
+      path.endsWith('.js')?{contentType:'text/javascript',body:path.endsWith('/worker.js')?workerCode:external}:path.endsWith('.css')?{contentType:'text/css',body:'body { color: rgb(1, 2, 3); }'}:{contentType:'text/html',body:path==='/opaque-page'?markup:parent});
   });
   const evaluate=(proxy,source)=>proxy?page.evaluate(source=>main_frame.eval_js(source),source):native.evaluate(source=>eval(source),source);
   const read=(proxy,source)=>evaluate(proxy,'JSON.stringify('+source+')').then(JSON.parse);
@@ -30,17 +47,17 @@ async page=>{
   };
   const run=async proxy=>{
     const results=[];
-    for(const sandbox of [null,'allow-scripts','allow-scripts allow-same-origin']){
-      console.log(JSON.stringify({fixture:'Inline frame',proxy,sandbox}));
+    for(const {sandbox,inline} of [{sandbox:null,inline:true},{sandbox:'allow-scripts',inline:true},{sandbox:'allow-scripts allow-same-origin',inline:true},{sandbox:'allow-scripts',inline:false},{sandbox:'allow-scripts allow-same-origin',inline:false}]){
+      console.log(JSON.stringify({fixture:'Frame origin',proxy,sandbox,inline}));
       if(proxy)await page.evaluate(async({start,parent})=>{main_frame.special_pages[start]=parent;await main_frame.navigate_to(start);},{start,parent});
       else await native.goto(start);
       await evaluate(proxy,`document.cookie='root=one; Path=/';document.cookie='parent=one; Path=/parent';document.cookie='assets=one; Path=/assets';localStorage.shared='parent';
         globalThis.inlineMessages=[];globalThis.inlineLoads=0;addEventListener('message',event=>{if(event.data?.kind?.startsWith('inline-'))inlineMessages.push({data:event.data,origin:event.origin,source:event.source===child.contentWindow});});
         globalThis.child=document.createElement('iframe');child.onload=()=>inlineLoads++;${sandbox===null?'':'child.sandbox='+JSON.stringify(sandbox)+';'}
-        child.src='/should-not-fetch';child.srcdoc=${JSON.stringify(markup)};document.body.append(child);true`);
+        ${inline?"child.src='/should-not-fetch';child.srcdoc="+JSON.stringify(markup):"child.src='/opaque-page'"};document.body.append(child);true`);
       try{await until(()=>evaluate(proxy,"inlineMessages.some(entry=>entry.data.kind==='inline-ready')&&inlineLoads>=1"));}
       catch(error){throw new Error(error.message+': '+JSON.stringify({proxy,sandbox,state:await read(proxy,'({messages:inlineMessages,loads:inlineLoads,html:child.outerHTML})'),frames:await Promise.all((proxy?page:native).frames().map(async frame=>{try{return await frame.evaluate(()=>({url:location.href,virtual:globalThis.sandstone_frame?.loader.url,loaded:globalThis.sandstone_frame?.loader.is_loaded,ready:document.readyState,phase:globalThis.sandstone_frame?.loader.ready_state,onload:typeof document.querySelector("iframe")?.onload}));}catch(error){return error.message;}}))}));}
-      results.push(await read(proxy,`({message:inlineMessages.find(entry=>entry.data.kind==='inline-ready'),src:child.getAttribute('src'),srcdoc:child.srcdoc===${JSON.stringify(markup)},attribute:child.getAttributeNode('srcdoc').value===child.srcdoc,sandbox:child.getAttribute('sandbox'),tokens:child.sandbox.value,loads:inlineLoads})`));
+      results.push(await read(proxy,`({message:inlineMessages.find(entry=>entry.data.kind==='inline-ready'),src:child.getAttribute('src'),srcdoc:child.srcdoc===${JSON.stringify(markup)},attribute:child.getAttributeNode('srcdoc')?.value===child.srcdoc,sandbox:child.getAttribute('sandbox'),tokens:child.sandbox.value,loads:inlineLoads})`));
       await evaluate(proxy,"document.querySelector('base').href='/changed/';history.replaceState(null,'','/moved/page');child.contentWindow.postMessage('snapshot','*');true");
       await until(()=>evaluate(proxy,"inlineMessages.some(entry=>entry.data.kind==='inline-after')"));
       results.push(await read(proxy,"inlineMessages.find(entry=>entry.data.kind==='inline-after')"));
@@ -50,17 +67,17 @@ async page=>{
   };
   try{
     const expected=await run(false);
-    await page.evaluate(({origin,external,parent,workerCode})=>{
+    await page.evaluate(({origin,external,parent,workerCode,markup})=>{
       const previous=sandstone.network.session.fetch;globalThis.inlineRequests=[];
       sandstone.network.session.fetch=(url,options)=>{
         if(!url.startsWith(origin+'/'))return previous(url,options);
         inlineRequests.push(url);const path=new URL(url).pathname,headers=new Headers(options.headers);
         return Promise.resolve(path.endsWith('/echo')?Response.json({url,origin:headers.get('origin'),referrer:headers.get('referer'),cookie:headers.get('cookie')}):
-          new Response(path.endsWith('/worker.js')?workerCode:path.endsWith('.js')?external:path.endsWith('.css')?'body { color: rgb(1, 2, 3); }':parent,{headers:{'Content-Type':path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':'text/html'}}));
+          new Response(path.endsWith('/worker.js')?workerCode:path.endsWith('.js')?external:path.endsWith('.css')?'body { color: rgb(1, 2, 3); }':path==='/opaque-page'?markup:parent,{headers:{'Content-Type':path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':'text/html'}}));
       };
-    },{origin,external,parent,workerCode});
+    },{origin,external,parent,workerCode,markup});
     const actual=await run(true);
-    if(JSON.stringify(actual)!==JSON.stringify(expected))throw new Error('Inline frame parity: '+JSON.stringify({expected,actual}));
+    if(JSON.stringify(actual)!==JSON.stringify(expected))throw new Error('Frame origin parity: '+JSON.stringify(differences(expected,actual)));
     if(await page.evaluate(()=>inlineRequests.some(url=>url.includes('should-not-fetch')||url.includes('/changed/'))))throw new Error('Inline frame precedence or frozen base failed');
     const mutations=async proxy=>{
       await evaluate(proxy,"child.remove();globalThis.child=document.createElement('iframe');globalThis.inlineLoads=0;globalThis.mutations=[];child.onload=()=>inlineLoads++;addEventListener('message',event=>{if(event.data?.mutation!==undefined)mutations.push(event.data.mutation);});document.body.append(child);true");
@@ -135,6 +152,6 @@ async page=>{
     await page.evaluate(()=>releaseInlineScript());
     await page.waitForTimeout(40);
     if(await evaluate(true,'mutations.includes(700)||inlineLoads!==1'))throw new Error('Superseded inline document completed or executed stale scripts');
-    return ['Inline frame scripts, styles, workers and fetches use the relay','Inline frames inherit origin, cookie URL and storage while preserving about:srcdoc','Inline frame bases remain frozen while request referrers follow parent history','Inline frame sandbox tokens, opaque origins and message sources match native behavior','Inline frame property, Attr, namespace and NamedNodeMap writes preserve authored markup','Empty and cloned inline documents retain srcdoc precedence','Inline frames honor script sandboxing and DOMTokenList updates','Inline frame fragments, reloads and src fallback preserve authored attributes','Parser-created inline frames preserve creation bases and delay parent load','Replacing inline frames cancels blocked initialization and stale scripts'];
+    return ['Request referrers retain inherited origins and authored metadata','Opaque frames and blob workers enforce native storage and API access','Inline frame scripts, styles, workers and fetches use the relay','Inline frames inherit origin, cookie URL and storage while preserving about:srcdoc','Inline frame bases remain frozen while request referrers follow parent history','Inline frame sandbox tokens, opaque origins and message sources match native behavior','Inline frame property, Attr, namespace and NamedNodeMap writes preserve authored markup','Empty and cloned inline documents retain srcdoc precedence','Inline frames honor script sandboxing and DOMTokenList updates','Inline frame fragments, reloads and src fallback preserve authored attributes','Parser-created inline frames preserve creation bases and delay parent load','Replacing inline frames cancels blocked initialization and stale scripts'];
   }finally{await context.close();}
 }

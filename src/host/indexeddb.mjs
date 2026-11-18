@@ -20,7 +20,7 @@ export const indexed_db = new IndexedDBService(factory, {
 
 function origin(id) {
   const value = iframes[id]?.origin || iframes[id]?.url?.origin;
-  if (!value || value === "null") throw new DOMException("Database origin is unavailable", "SecurityError");
+  if (!value || value === "null" || iframes[id]?.broadcast_origin?.startsWith('opaque:')) throw new DOMException("Database origin is unavailable", "SecurityError");
   return value;
 }
 

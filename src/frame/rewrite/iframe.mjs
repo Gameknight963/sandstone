@@ -54,7 +54,7 @@ export function rewrite_iframe(iframe_element) {
   let physical_inline='',finish_load,active_target,native_runtime_load,set_src;
   let runtime_sandbox=authored.get('srcdoc')!==null;
   listen_runtime(iframe_element,'load',event=>{
-    if(event.isTrusted&&(authored.get('srcdoc')!==null||iframe_url||native_runtime_load)){event.stopImmediatePropagation();native_runtime_load?.(event);}
+    if(event.isTrusted&&(runtime_sandbox||iframe_url||native_runtime_load)){event.stopImmediatePropagation();native_runtime_load?.(event);}
   },true);
   const release_load=()=>{finish_load?.();finish_load=undefined;};
   const render_sandbox=()=>{
@@ -251,6 +251,7 @@ export function rewrite_iframe(iframe_element) {
         render_media_attribute(iframe_element,'src',value??'');
       }
       else {
+        runtime_sandbox=true;render_sandbox();
         render_media_attribute(iframe_element,'src','');
         fetch_src(value).catch(console.error);
       }
