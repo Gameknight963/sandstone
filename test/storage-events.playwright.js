@@ -36,12 +36,14 @@ async page=>{
     try{
     if(proxy){
       const peerId=await page.evaluate(()=>storagePeer.id);
+      const unrelatedGroups=await page.evaluate(({other})=>[storagePeer.document_context,Object.values(sandstone.controller.iframes).find(frame=>frame.url.href===other+'observer').document_context],{other});
       await evaluate(true,`(async()=>{
         const rpc=window.sandstone_frame.rpc,id=window.sandstone_frame.loader.frame_id,token=window.sandstone_frame.loader.beacon_context;
         const denied=async(name,args)=>{try{await rpc.call_procedure(rpc.host,name,args);}catch(error){if(error.name==='SecurityError')return;throw error;}throw new Error('Unrelated storage RPC was accepted: '+name);};
         await denied('local_storage',[id,undefined,{type:'set',key:'forged',value:'bad'}]);
         await denied('session_storage',[${JSON.stringify(peerId)},undefined,{type:'set',key:'forged',value:'bad',context:token}]);
         await denied('storage_disconnect',[${JSON.stringify(peerId)}]);
+        for(const group of ${JSON.stringify(unrelatedGroups)})await denied('local_storage',[id,undefined,{type:'set',key:'forged',value:'bad',context:token,group,order:1}]);
       })()`);
       if(await evaluate(true,'localStorage.getItem("forged")')!==null||await peerRead('sessionStorage.getItem("forged")')!==null)throw new Error('Storage mutation accepted an unrelated document context');
     }

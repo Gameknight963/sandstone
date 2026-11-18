@@ -2,10 +2,12 @@
 export class FakeStorage {
   #map;
   #sync;
+  #validate;
 
-  constructor(entries = [], sync = () => {}) {
+  constructor(entries = [], sync = () => {}, validate = () => {}) {
     this.#map = new Map(entries);
     this.#sync = sync;
+    this.#validate = validate;
     return new Proxy(this, {
       get: (target, key) => {
         if (typeof key === "symbol") return Reflect.get(target, key, target);
@@ -13,7 +15,7 @@ export class FakeStorage {
           const value = Reflect.get(target, key, target);
           return typeof value === "function" ? value.bind(target) : value;
         }
-        return this.#map.get(key);
+        this.#validate();return this.#map.get(key);
       },
       set: (target, key, value) => {
         if (typeof key !== "string") return Reflect.set(target, key, value, target);
@@ -21,28 +23,30 @@ export class FakeStorage {
         return true;
       },
       deleteProperty: (target, key) => { this.removeItem(key); return true; },
-      ownKeys: () => [...this.#map.keys()],
-      has: (target, key) => key in target || this.#map.has(key),
-      getOwnPropertyDescriptor: (target, key) => this.#map.has(key) ? {
+      ownKeys: () => {this.#validate();return [...this.#map.keys()];},
+      has: (target, key) => {this.#validate();return key in target || this.#map.has(key);},
+      getOwnPropertyDescriptor: (target, key) => {this.#validate();return this.#map.has(key) ? {
         value: this.#map.get(key), writable: true, enumerable: true, configurable: true
-      } : Reflect.getOwnPropertyDescriptor(target, key)
+      } : Reflect.getOwnPropertyDescriptor(target, key);}
     });
   }
 
-  get length() { return this.#map.size; }
-  key(index) { return [...this.#map.keys()][Number(index) >>> 0] ?? null; }
-  getItem(key) { return this.#map.get(String(key)) ?? null; }
+  get length() { this.#validate();return this.#map.size; }
+  key(index) { this.#validate();return [...this.#map.keys()][Number(index) >>> 0] ?? null; }
+  getItem(key) { this.#validate();return this.#map.get(String(key)) ?? null; }
   setItem(key, value) {
+    this.#validate();
     key=String(key);value=String(value);
     this.#map.set(key, value);
     this.#sync(this._get_entries(),{type:'set',key,value});
   }
   removeItem(key) {
+    this.#validate();
     key=String(key);
     this.#map.delete(key);
     this.#sync(this._get_entries(),{type:'remove',key});
   }
-  clear() { this.#map.clear(); this.#sync([],{type:'clear'}); }
+  clear() { this.#validate();this.#map.clear(); this.#sync([],{type:'clear'}); }
   _get_entries() { return [...this.#map]; }
   _replace_entries(entries){this.#map=new Map(entries);}
   toString() { return "[object Storage]"; }
