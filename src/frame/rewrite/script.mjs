@@ -9,6 +9,7 @@ import {script_kind} from '../script_types.mjs';
 import {defer_script,deferred_script} from '../script_preparation.mjs';
 import {ordered_script,ordered_classic} from '../script_schedule.mjs';
 import {delay_script_load} from '../script_lifetime.mjs';
+import {script_text} from '../script_text.mjs';
 
 export const pending_scripts = [];
 let script_num = 0;
@@ -27,7 +28,7 @@ let inert;
 function eligible(element,record){
   const kind=script_kind(record?record.type():get.call(element,'type'),get.call(element,'language'));
   return kind!==null&&
-    ((record?record.src():get.call(element,'src'))!==null||data.get.call(element).length>0);
+    ((record?record.src():get.call(element,'src'))!==null||script_text(element).length>0);
 }
 export function mark_script_connected(element){
   if(is_svg_script(element)){mark_svg_script_connected(element);return;}
@@ -82,14 +83,14 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
   remember_attribute_order(element,['src','type']);
   const original_type=get.call(element,'type');
   const kind=script_kind(original_type,get.call(element,'language'));
-  if(!awakened&&!element.__sandstone_inert__&&(kind===null||get.call(element,'src')===null&&data.get.call(element)==='')){
+  if(!awakened&&!element.__sandstone_inert__&&(kind===null||get.call(element,'src')===null&&script_text(element)==='')){
     defer_script(element,()=>rewrite_script(element,{sourceElement,awakened:true}));return;
   }
   if (kind === "importmap") {
     records.set(element,{started:false,type:()=>get.call(element,'type')==='application/x-sandstone-importmap'?original_type:get.call(element,'type'),src:()=>get.call(element,'src')});
     element.type = "application/x-sandstone-importmap";
     if (loader.site_settings.allow_js && !element.__sandstone_inert__) {
-      try { modules.map.add(element.textContent, ctx.document.baseURI); }
+      try { modules.map.add(script_text(element), ctx.document.baseURI); }
       catch (error) { element.dispatchEvent(new Event("error")); console.error(error); }
     }
     return;
@@ -103,7 +104,7 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
   const ordered=!parser&&enabled&&(is_module||script_url!==null)&&element.async===false;
   records.set(element,{started:false,type:()=>get.call(element,'type')==='application/x-sandstone-script'?original_type:get.call(element,'type'),src:()=>authored_src});
   const num = script_num++;
-  let text = element.textContent;
+  let text = script_text(element);
   let ready = script_url===null;
   let executed = false;
   let started = false;
@@ -116,7 +117,7 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
     if(!was_connected&&element.isConnected){
       was_connected=true;preparation_document=owner.call(sourceElement);
     }
-    if (!enabled || executed || !was_connected || (script_url===null && !element.textContent.trim())) return;
+    if (!enabled || executed || !was_connected || (script_url===null && script_text(element)==='')) return;
     if(!parser&&!load_started&&(is_module||script_url!==null)){load_started=true;finish_load=delay_script_load();}
     if(ordered){
       executed=true;order=ordered_script();
@@ -124,8 +125,8 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
         order_released=true;
         if(owner.call(sourceElement)!==preparation_document){finish_load();return;}
         if(failure)return ordered_classic(()=>{try{deliver_error(failure);}finally{finish_load();}});
-        if(is_module)return record?execute_module(record,{ordered:true}).then(()=>{sourceElement.dispatchEvent(new Event('load'));finish_load();}):undefined;
-        return ordered_classic(()=>{try{return loader.eval_script(sourceElement,text,{run});}finally{finish_load();}});
+        if(is_module)return record?execute_module(record,{ordered:true}).then(()=>{if(script_url!==null)sourceElement.dispatchEvent(new Event('load'));finish_load();}):undefined;
+        return ordered_classic(execute_classic);
       }));
       return order.finished.catch(report_error);
     }
@@ -136,15 +137,22 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
       return prepared.then(async record => {
         if (!record) return;
         await execute_module(record);
-        sourceElement.dispatchEvent(new Event("load"));
+        if(script_url!==null)sourceElement.dispatchEvent(new Event("load"));
         finish_load();
       }).catch(report_error);
     }
     if (!ready) return;
     started = true;
     executed = true;
-    try{return loader.eval_script(sourceElement, script_url ? text : element.textContent,{run});}finally{finish_load();}
+    return execute_classic();
   };
+
+  function execute_classic(){
+    try{
+      loader.eval_script(sourceElement,script_url!==null?text:script_text(element),{run});
+      if(script_url!==null)sourceElement.dispatchEvent(new Event('load'));
+    }finally{finish_load();}
+  }
 
   function report_error(error) {
     if(signal?.aborted)return;
@@ -165,13 +173,13 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
 
   async function prepare_module() {
     if (!enabled) return null;
-    if(script_url===null&&!element.textContent.trim())return null;
+    if(script_url===null&&script_text(element)==='')return null;
     started=true;
     const credentials = element.crossOrigin === "use-credentials" ? "include" : "same-origin";
     try {
       if(script_url==='')throw new TypeError('Script source is empty');
       return await (script_url ? modules.prepare_url(convert_url(script_url, ctx.document.baseURI), ctx.document.baseURI, {credentials}) :
-        modules.prepare_inline(element.textContent, ctx.document.baseURI, credentials));
+        modules.prepare_inline(script_text(element), ctx.document.baseURI, credentials));
     } catch(error) {
       report_error(error);
       return null;

@@ -144,6 +144,8 @@ const scriptRetirementTest=await readFile(new URL('script-retirement.playwright.
 const verifyScriptRetirement=runInThisContext(`(${scriptRetirementTest})`);
 const scriptLoadTest=await readFile(new URL('script-load.playwright.js',import.meta.url),'utf8');
 const verifyScriptLoad=runInThisContext(`(${scriptLoadTest})`);
+const scriptBodiesTest=await readFile(new URL('script-bodies.playwright.js',import.meta.url),'utf8');
+const verifyScriptBodies=runInThisContext(`(${scriptBodiesTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
 let activeStorageMode;
@@ -221,6 +223,7 @@ try {
     result.passed.push(...await timed(verifyScriptRetirement(page), 'Script retirement fixture'));
     try{result.passed.push(...await timed(verifyScriptLoad(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Dynamic script load fixture'));}
     finally{expectedDiagnostics.clear();}
+    result.passed.push(...await timed(verifyScriptBodies(page), 'Script body fixture'));
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));

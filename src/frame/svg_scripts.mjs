@@ -1,6 +1,7 @@
 import {rewrite_script,prime_inert_script} from './rewrite/script.mjs';
 import * as loader from './loader.mjs';
 import {svg_script_kind} from './script_types.mjs';
+import {script_text} from './script_text.mjs';
 
 const states=new WeakMap(),primed=new WeakSet(),parser_scripts=new WeakSet(),animated=new WeakMap(),maps=new WeakMap();
 const E=globalThis.Element?.prototype,N=globalThis.Node?.prototype,A=globalThis.Attr?.prototype;
@@ -8,15 +9,11 @@ const get=E?.getAttribute,getNS=E?.getAttributeNS,remove=E?.removeAttributeNode,
 const attrs=E&&Object.getOwnPropertyDescriptor(E,'attributes').get,owner=N&&Object.getOwnPropertyDescriptor(N,'ownerDocument').get;
 const view=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get;
 const connected=N&&Object.getOwnPropertyDescriptor(N,'isConnected').get;
-const children=N&&Object.getOwnPropertyDescriptor(N,'childNodes').get;
-const kind=N&&Object.getOwnPropertyDescriptor(N,'nodeType').get;
-const data=globalThis.CharacterData&&Object.getOwnPropertyDescriptor(CharacterData.prototype,'data').get;
 const attrOwner=A&&Object.getOwnPropertyDescriptor(A,'ownerElement').get;
 const href=globalThis.SVGScriptElement&&Object.getOwnPropertyDescriptor(SVGScriptElement.prototype,'href')?.get;
 let inert,hooks=false;
 export const is_svg_script=node=>!!globalThis.SVGScriptElement&&node instanceof SVGScriptElement;
 const source=node=>get.call(node,'href')??getNS.call(node,'http://www.w3.org/1999/xlink','href');
-const script_text=node=>[...children.call(node)].filter(child=>[3,4].includes(kind.call(child))).map(child=>data.call(child)).join('');
 function eligible(node){return source(node)!==null||script_text(node).length>0;}
 function prime(node){
   if(primed.has(node))return;

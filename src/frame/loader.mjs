@@ -62,7 +62,6 @@ export function eval_script(script_element, script_text,{run=callback=>run_docum
   }
   script.remove();
   set_current_script(previous_script);
-  script_element.dispatchEvent(new Event("load"));
 }
 
 export function set_frame_id(id) {
