@@ -3,6 +3,26 @@ import * as rpc from "../../rpc.mjs";
 import { ctx } from "../context.mjs";
 import { set_location } from "./location.mjs";
 import { history_url } from "../../history.mjs";
+import {document_states} from '../document_identity.mjs';
+import {cookie_document_active} from './cookie.mjs';
+
+const views=document_states('history-views');
+const NativeHistory=globalThis.History,native=NativeHistory&&Object.getOwnPropertyDescriptors(NativeHistory.prototype);
+const text=value=>{if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);};
+if(NativeHistory){
+  for(const name of ['pushState','replaceState','go','back','forward'])Object.defineProperty(NativeHistory.prototype,name,{...native[name],value:new Proxy(native[name].value,{apply(target,receiver,args){
+    const view=views.get(receiver);return view?view.invoke(name,'value',args):Reflect.apply(target,receiver,args);
+  }})});
+  for(const name of ['state','length','scrollRestoration']){
+    const descriptor={...native[name]};
+    for(const operation of ['get','set'])if(descriptor[operation])descriptor[operation]=new Proxy(descriptor[operation],{apply(target,receiver,args){
+      const view=views.get(receiver);return view?view.invoke(name,operation,args):Reflect.apply(target,receiver,args);
+    }});
+    Object.defineProperty(NativeHistory.prototype,name,descriptor);
+  }
+}
+export const history_hash=(history,...args)=>views.get(history).invoke('_hash','value',args);
+export const restore_history=(history,...args)=>views.get(history).invoke('_restored','value',args);
 
 const mutate = rpc.create_rpc_wrapper(rpc.host, "history_mutate");
 const traverse = rpc.create_rpc_wrapper(rpc.host, "history_go");
@@ -22,16 +42,33 @@ export class FakeHistory {
   #length;
   #index;
   #scrollRestoration = "auto";
+  #native;
+  #document;
   constructor(snapshot = {}) {
     this.#state = "state" in snapshot ? structuredClone(snapshot.state) : null;
     this.#length = snapshot.length || 1;
     this.#index = snapshot.index ?? 0;
+    this.#native=globalThis.history;
+    this.#document=globalThis.document;
+    const facade=Object.create(NativeHistory.prototype),controller=this;
+    // Private fields belong to the creating realm's class. Dispatch borrowed
+    // prototype calls through that realm instead of applying a foreign class.
+    views.set(facade,{invoke(name,operation,args){return Reflect.apply(Object.getOwnPropertyDescriptor(FakeHistory.prototype,name)[operation],controller,args);}});
+    return facade;
   }
-  get length() { return this.#length; }
-  get state() { return this.#state; }
-  get scrollRestoration() { return this.#scrollRestoration; }
+  #validate(){
+    // Inherited about:blank runtimes can retain readable native History slots
+    // after removal. Use the original document liveness probe as well.
+    if(!cookie_document_active(this.#document))throw new DOMException('History document is unavailable','SecurityError');
+    Reflect.apply(native.state.get,this.#native,[]);
+  }
+  get length() { this.#validate();return this.#length; }
+  get state() { this.#validate();return this.#state; }
+  get scrollRestoration() { this.#validate();return this.#scrollRestoration; }
   set scrollRestoration(value) {
-    if (!["auto", "manual"].includes(value)) throw new TypeError("Invalid scroll restoration mode");
+    value=text(value);
+    if (!["auto", "manual"].includes(value))return;
+    this.#validate();
     this.#scrollRestoration = value;
   }
   #mutate(kind, state, value) {
@@ -45,16 +82,18 @@ export class FakeHistory {
   }
   pushState(state, unused, url) {
     if (arguments.length < 2) throw new TypeError("pushState requires state and title");
+    text(unused);url=url==null?null:text(url);this.#validate();
     this.#mutate("push", state, url);
   }
   replaceState(state, unused, url) {
     if (arguments.length < 2) throw new TypeError("replaceState requires state and title");
+    text(unused);url=url==null?null:text(url);this.#validate();
     this.#mutate("replace", state, url);
   }
   back() { this.go(-1); }
   forward() { this.go(1); }
   go(delta = 0) {
-    delta = Number(delta) >> 0;
+    delta = (+delta) >> 0;this.#validate();
     if (!delta) { ctx.location.reload(); return; }
     traverse(loader.frame_id, delta, scroll()).then(snapshot => {
       if (!snapshot) return;

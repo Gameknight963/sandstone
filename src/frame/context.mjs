@@ -199,7 +199,6 @@ export function update_ctx(options = {}) {
   internal.location = is_worker ? new polyfill.FakeWorkerLocation() : new polyfill.FakeLocation();
   internal.self = ctx.__proxy__;
   internal.globalThis = ctx.__proxy__;
-  internal.history = is_worker ? undefined : new polyfill.FakeHistory(options.history);
   if (is_worker) { internal.localStorage = undefined; internal.sessionStorage = undefined; }
   if (!is_worker) {
     internal.storage_unavailable=ctx.origin==='null';
@@ -207,6 +206,9 @@ export function update_ctx(options = {}) {
     internal.localStorage=stores.local;internal.sessionStorage=stores.session;
     storageReady=stores.ready.then(snapshot=>{internal.storage_unavailable=!!snapshot.opaque;});
   }
+  // Register the History view after storage selects the same-origin document
+  // registry, so borrowed methods can recognize accessible peer histories.
+  internal.history = is_worker ? undefined : new polyfill.FakeHistory(options.history);
   // Native Navigation targets the physical sandbox document. Hide its feature
   // flags until it can use virtual history, so routers use their History fallback.
   // Native network APIs without relay adapters must not connect directly.

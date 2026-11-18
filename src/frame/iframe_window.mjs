@@ -83,6 +83,10 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
       if(state.opaque())throw new DOMException('Blocked access to a sandboxed frame','SecurityError');
       if(!url)return 'about:blank';
       if(state.origin()!==ctx.origin)throw new DOMException('Blocked access to a cross-origin frame','SecurityError');
+      // Same-document History changes are synchronous in the child. Its host
+      // URL notification arrives later, so prefer the accessible live view.
+      let context;try{context=target.__ctx__;}catch{}
+      if(context)return context.location.href;
       return url;
     };
     const navigate=(value,mode)=>{

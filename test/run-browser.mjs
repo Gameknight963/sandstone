@@ -18,6 +18,8 @@ const workerTest = await readFile(new URL("workers.playwright.js", import.meta.u
 const verifyWorkers = runInThisContext(`(${workerTest})`);
 const historyTest = await readFile(new URL("history.playwright.js", import.meta.url), "utf8");
 const verifyHistory = runInThisContext(`(${historyTest})`);
+const historyInterfaceTest=await readFile(new URL('history-interface.playwright.js',import.meta.url),'utf8');
+const verifyHistoryInterface=runInThisContext(`(${historyInterfaceTest})`);
 const linkTest=await readFile(new URL('links.playwright.js',import.meta.url),'utf8');
 const verifyLinks=runInThisContext(`(${linkTest})`);
 const hyperlinkTest=await readFile(new URL('hyperlinks.playwright.js',import.meta.url),'utf8');
@@ -272,6 +274,7 @@ try {
     result.passed.push(...await timed(verifyWorkerBundles(page), 'Worker bundle fixture'));
     result.passed.push(...await timed(verifyCrypto(page), 'Web Crypto fixture'));
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
+    result.passed.push(...await timed(verifyHistoryInterface(page), 'History interface fixture'));
     result.passed.push(...await timed(verifyStorageWrites(page), 'Concurrent storage fixture'));
     result.passed.push(...await timed(verifyStorageSynchronous(page), 'Synchronous shared storage fixture'));
     result.passed.push(...await timed(verifyStorageInterface(page), 'Storage interface fixture'));

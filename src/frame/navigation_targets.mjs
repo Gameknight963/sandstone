@@ -4,6 +4,7 @@ import * as rpc from '../rpc.mjs';
 import {document_referrer_policy} from './intercept/document.mjs';
 import {find_frame_target,navigate_frame_target} from './iframe_window.mjs';
 import {load_cookies} from './polyfill/cookie.mjs';
+import {history_hash} from './polyfill/history.mjs';
 
 const attribute=globalThis.Element?.prototype.getAttribute;
 export function navigation_target(element,override=null){
@@ -18,7 +19,7 @@ export function navigate_target(url,target='',form_data=null,navigation={}){
   if(!target||keyword==='_self'||!['_parent','_top','_blank'].includes(keyword)&&target===ctx.name){
     const next=new URL(url),current=new URL(ctx.location.href);
     if(!form_data&&next.origin===current.origin&&next.pathname===current.pathname&&next.search===current.search&&url.includes('#')){
-      ctx.history._hash(url);return Promise.resolve();
+      history_hash(ctx.history,url);return Promise.resolve();
     }
     return loader.navigate(loader.frame_id,url,true,form_data,navigation);
   }
@@ -29,4 +30,4 @@ export function navigate_target(url,target='',form_data=null,navigation={}){
 }
 rpc.rpc_handlers.find_navigation_target=name=>ctx.name===name?{id:loader.frame_id}:find_frame_target(name,loader.frame_id);
 rpc.rpc_handlers.navigate_child_target=(id,url,form_data,navigation)=>navigate_frame_target(id,url,form_data,navigation);
-rpc.rpc_handlers.navigate_fragment=url=>{ctx.history._hash(url);};
+rpc.rpc_handlers.navigate_fragment=url=>{history_hash(ctx.history,url);};

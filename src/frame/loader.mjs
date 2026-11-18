@@ -6,6 +6,7 @@ import { update_ctx, run_script, ctx } from "./context.mjs";
 import { load_cookies,configure_cookies } from "./polyfill/cookie.mjs";
 import {configure_crypto} from './polyfill/crypto.mjs';
 import {set_location} from './polyfill/location.mjs';
+import {restore_history} from './polyfill/history.mjs';
 import {default_referrer_policy} from '../referrer.mjs';
 import {document_referrer_policy,reset_document_referrer_policy,set_current_script,get_current_script} from './intercept/document.mjs';
 import {configure_window_messages} from './window_messages.mjs';
@@ -172,7 +173,7 @@ async function load_html(options) {
 
   is_loaded = true;
   await load_document_html(options.html,{scriptingEnabled:site_settings.allow_js});
-  ctx.history._restored(options.history);
+  restore_history(ctx.history,options.history);
 }
 
 async function get_favicon() {
