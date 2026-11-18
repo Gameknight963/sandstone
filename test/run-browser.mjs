@@ -96,6 +96,8 @@ const cryptoTest = await readFile(new URL('crypto.playwright.js',import.meta.url
 const verifyCrypto = runInThisContext(`(${cryptoTest})`);
 const iframeWindowTest=await readFile(new URL('iframe-window.playwright.js',import.meta.url),'utf8');
 const verifyIframeWindow=runInThisContext(`(${iframeWindowTest})`);
+const frameDOMTest=await readFile(new URL('frame-dom.playwright.js',import.meta.url),'utf8');
+const verifyFrameDOM=runInThisContext(`(${frameDOMTest})`);
 const rpcSourceTest=await readFile(new URL('rpc-source.playwright.js',import.meta.url),'utf8');
 const verifyRPCSource=runInThisContext(`(${rpcSourceTest})`);
 const bootstrapTest=await readFile(new URL('bootstrap.playwright.js',import.meta.url),'utf8');
@@ -252,6 +254,7 @@ try {
     result.passed.push(...await timed(verifyChildReadiness(page), 'Child readiness fixture'));
     result.passed.push(...await timed(verifyRootInitialization(page), 'Root initialization fixture'));
     result.passed.push(...await timed(verifyIframeWindow(page), 'Frame window fixture'));
+    result.passed.push(...await timed(verifyFrameDOM(page), 'Same-origin frame DOM fixture'));
     result.passed.push(...await timed(verifyRPCSource(page), 'RPC source fixture'));
     result.passed.push(...await timed(verifyBootstrap(page), 'Bootstrap message fixture'));
     result.passed.push(...await timed(verifyInsecureHost(page,await readFile(artifact,'utf8')), 'Insecure host fixture'));

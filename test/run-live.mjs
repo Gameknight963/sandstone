@@ -163,6 +163,9 @@ async function context(denyStorage=storageDenied){
 try{
   const channel=process.env.BROWSER_CHANNEL||'chrome';
   browser=await chromium.launch({headless:true,channel:channel==='headless'?undefined:channel});
+  const browserDiagnostics=await browser.newBrowserCDPSession();
+  await browserDiagnostics.send('Target.setDiscoverTargets',{discover:true});
+  browserDiagnostics.on('Target.targetCrashed',event=>console.log(JSON.stringify({browserCrash:{status:event.status,errorCode:event.errorCode}})));
   for(const site of targets){
     // Compare the site's ordinary native behavior with a standalone host whose
     // real storage may be denied. Proxied sites should still have virtual stores.

@@ -12,11 +12,18 @@ import {child_message_parent} from '../window_messages.mjs';
 import {track_iframe} from '../iframe_lifecycle.mjs';
 import {sandbox_tokens} from '../../navigation_policy.mjs';
 import {resource_attribute} from '../resource_attributes.mjs';
-import {register_media_attributes,render_media_attribute,media_attribute_mirror} from '../media_attributes.mjs';
+import {register_media_attributes,render_media_attribute,media_attribute_mirror,raw_media_attribute} from '../media_attributes.mjs';
 import {delay_script_load} from '../script_lifetime.mjs';
-import {bootstrap_html,create_bootstrap_nonce} from '../../bootstrap.mjs';
+import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../../bootstrap.mjs';
+import {on_shadow_root} from '../shadow_roots.mjs';
 
 const inline_frames=new WeakMap(),sandbox_lists=new WeakMap();
+const runtime_loads=new WeakMap();
+// Intercept physical runtime loads before author capture listeners, including
+// listeners attached before the iframe enters the document.
+const capture_runtime_load=event=>{if(event.isTrusted)runtime_loads.get(event.target)?.(event);};
+if(globalThis.document)listen_runtime(document,'load',capture_runtime_load,true);
+on_shadow_root(root=>listen_runtime(root,'load',capture_runtime_load,true));
 const inline_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'srcdoc');
 const source_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'src');
 const sandbox_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'sandbox');
@@ -54,9 +61,9 @@ export function rewrite_iframe(iframe_element) {
   const authored=new Map(['src','srcdoc','sandbox'].map(key=>[key,iframe_element.getAttribute(key)]));
   let physical_inline='',finish_load,active_target,native_runtime_load,set_src;
   let runtime_sandbox=authored.get('srcdoc')!==null;
-  listen_runtime(iframe_element,'load',event=>{
+  runtime_loads.set(iframe_element,event=>{
     if(event.isTrusted&&(runtime_sandbox||iframe_url||native_runtime_load)){event.stopImmediatePropagation();native_runtime_load?.(event);}
-  },true);
+  });
   const release_load=()=>{finish_load?.();finish_load=undefined;};
   const render_sandbox=()=>{
     const value=authored.get('sandbox');
@@ -158,13 +165,26 @@ export function rewrite_iframe(iframe_element) {
       //load the frame runtime
       const bootstrap_nonce=create_bootstrap_nonce(),runtime_source=bootstrap_html(loader.frame_html,bootstrap_nonce,2);
       const use_inline=authored.get('srcdoc')!==null;
-      const runtime_url=use_inline?'about:srcdoc#'+crypto.randomUUID():network.create_blob_url(new Blob([runtime_source], {type: "text/html"}));
+      const share_origin=!use_inline&&new URL(final_url).origin===ctx.origin&&!(authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'));
+      const runtime_url=use_inline?'about:srcdoc#'+crypto.randomUUID():share_origin?'about:blank?'+crypto.randomUUID():runtime_seed(bootstrap_nonce);
       const runtime_html=use_inline?runtime_source.replace(/(<head[^>]*>)/i,'$1<script>history.replaceState(null,"",'+JSON.stringify(runtime_url)+');document.currentScript.remove();<\/script>'):undefined;
       await new Promise((resolve) => {
         const cleanup=()=>{if(native_runtime_load===loaded)native_runtime_load=undefined;controller.signal.removeEventListener('abort',aborted);};
         const aborted=()=>{cleanup();resolve();};
         const loaded=event=>{
           event.stopImmediatePropagation();
+          if(share_origin){
+            let target,doc;
+            try{target=native_frame_window(iframe_element);doc=target.document;if(doc.URL!==runtime_url)return;}catch{return;}
+            // Populate a fresh inherited-origin document using its pristine
+            // DOM methods. Replacing the inert script executes the runtime in
+            // the child's own realm without giving it the host's origin.
+            if(!doc.doctype)doc.insertBefore(doc.implementation.createDocumentType('html','',''),doc.documentElement);
+            doc.documentElement.innerHTML=runtime_source;
+            const old=doc.querySelector('script'),script=doc.createElement('script');
+            script.setAttribute('data-sandstone-bootstrap',old.getAttribute('data-sandstone-bootstrap'));
+            script.textContent=old.textContent;old.replaceWith(script);
+          }
           cleanup();resolve();
         };
         native_runtime_load=loaded;
@@ -176,7 +196,15 @@ export function rewrite_iframe(iframe_element) {
       if(!current())return;
       // A load event may belong to the previous document or the blank reset.
       // The reflected src is virtual, so identify the physical runtime explicitly.
-      try{await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:runtime_url,nonce:bootstrap_nonce});}
+      try{
+        await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:runtime_url,nonce:bootstrap_nonce});
+        if(!use_inline&&!share_origin){
+          const prepared=await rpc.load_frame_runtime(iframe_element,runtime_source,bootstrap_nonce,{signal:controller.signal});
+          if(!current())return;
+          rpc.commit_frame_runtime(iframe_element,prepared,bootstrap_nonce);
+          await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:prepared,nonce:bootstrap_nonce});
+        }
+      }
       catch(error){if(!current())return;throw error;}
       if(!current())return;
 
@@ -259,7 +287,10 @@ export function rewrite_iframe(iframe_element) {
       }
       else {
         runtime_sandbox=true;render_sandbox();
-        render_media_attribute(iframe_element,'src','');
+        // Keep a loaded document visible while its next response is fetched.
+        // Resetting through about:blank adds an unnecessary origin/process
+        // swap and destroys the old document before the navigation commits.
+        render_media_attribute(iframe_element,'src','',registered&&!!iframe_url&&raw_media_attribute(iframe_element,'src')!==null);
         fetch_src(value).catch(console.error);
       }
   };

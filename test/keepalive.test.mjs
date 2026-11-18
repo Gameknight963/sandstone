@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {BeaconQueue} from '../src/host/beacon.mjs';
 import {KeepaliveRequests} from '../src/host/keepalive.mjs';
-import {serialize_request} from '../src/frame/polyfill/request.mjs';
+import {serialize_request,prepare_request} from '../src/frame/polyfill/request.mjs';
 import {create_beacon_sender} from '../src/frame/beacon.mjs';
 import {keepalive_budget,reserve_keepalive} from '../src/frame/keepalive_budget.mjs';
 
@@ -110,6 +110,15 @@ test('Keepalive serialization snapshots bodies and reserves bytes before its fir
     assert.equal(normalized.options.headers['content-type'],new Request('https://site.test/',{method:'POST',body:value}).headers.get('content-type'));
   }
   await assert.rejects(serialize_request('/api',{method:'POST',body:new ReadableStream(),keepalive:true},'https://site.test/'),TypeError);
+});
+
+test('Snapshot keepalive requests are ready for dispatch before another promise job runs',async()=>{
+  for(const body of ['text',new Uint8Array([1,2]),new Blob(['blob']),new URLSearchParams({x:'y'}),undefined]){
+    const request=prepare_request('/unload',{method:'POST',body,keepalive:true},'https://site.test/');
+    assert.equal(request instanceof Promise,false);assert.equal(request.url,'https://site.test/unload');assert.equal(request.options.keepalive,true);
+  }
+  const streamed=prepare_request('/upload',{method:'POST',body:'ordinary body'},'https://site.test/');
+  assert.ok(streamed instanceof Promise);assert.equal(new TextDecoder().decode((await streamed).options.body),'ordinary body');
 });
 
 test('Frame keepalive and beacon reservations share the exact byte limit and release once',async()=>{

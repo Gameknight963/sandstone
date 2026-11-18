@@ -9,3 +9,32 @@ export function bootstrap_html(html,nonce,channels=1){
   return html.replace(/<script\b([^>]*)>/i,(_,attributes)=>'<script'+attributes.replace(/\sdata-sandstone-bootstrap\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,'')+' '+bootstrap_attribute+'="'+value+'">');
 }
 export function bootstrap_worker(source,nonce){return 'globalThis.'+bootstrap_global+'='+JSON.stringify({nonce,channels:1})+';\n'+source;}
+
+// Keep opaque document URLs small. The authenticated seed receives the bundle
+// after navigation, rather than copying the entire bundle into session history
+// and every browser protocol URL/stack trace.
+export function runtime_seed(nonce){
+  const source=function(nonce){
+    let prepared;
+    const receive=event=>{
+      const message=event.data;
+      if(!event.isTrusted||event.source!==parent||message?.sandstone_bootstrap!==1)return;
+      if(!['ping','runtime','commit_runtime'].includes(message.type))return;
+      event.stopImmediatePropagation();
+      for(const port of event.ports||[])port.close();
+      if(message.type==='ping'){
+        if(message.url===undefined||message.url===location.href)event.source.postMessage({sandstone_bootstrap:1,type:'pong',id:message.id,url:location.href,nonce},'*');
+      }else if(message.type==='runtime'&&!prepared&&message.nonce===nonce&&typeof message.html==='string'){
+        // Create the blob in this isolated origin, not in the file/HTTP host.
+        // Wait for the parent to accept the URL before beginning navigation.
+        const url=URL.createObjectURL(new Blob([message.html],{type:'text/html'}));
+        prepared=url;
+        event.source.postMessage({sandstone_bootstrap:1,type:'runtime_url',id:message.id,nonce,url},'*');
+      }else if(message.type==='commit_runtime'&&message.nonce===nonce&&message.url===prepared&&prepared){
+        removeEventListener('message',receive,true);location.replace(prepared);
+      }
+    };
+    addEventListener('message',receive,true);
+  };
+  return 'data:text/html;charset=utf-8,'+encodeURIComponent('<!doctype html><script data-sandstone-seed="'+nonce+'">('+source.toString()+')('+JSON.stringify(nonce)+');<\/script>');
+}

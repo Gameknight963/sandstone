@@ -6,6 +6,17 @@ import {sandbox_tokens} from '../navigation_policy.mjs';
 const frames=new WeakMap();
 const windows=new WeakMap();
 const descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentWindow');
+const document_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentDocument');
+function context_value(target,key){
+  let context;try{context=target.__ctx__;}catch{}
+  return context?context[key]:target[key];
+}
+if(document_descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentDocument',{...document_descriptor,get(){
+  const value=document_descriptor.get.call(this),state=frames.get(this);if(!value||!state)return value;
+  if(!state.url()||state.opaque()||state.origin()!==ctx.origin)return null;
+  try{if(!descriptor.get.call(this).__ctx__)return null;}catch{return null;}
+  return context_value(descriptor.get.call(this),'document');
+}});
 export function native_frame_window(element){return descriptor?.get.call(element);}
 export function find_frame_target(name,parent){
   const elements=[...document.querySelectorAll('iframe')];
@@ -102,12 +113,20 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
     });
     const replacements=Object.create(null);
     Object.defineProperties(replacements,{
+      document:{get(){
+        readable();
+        // Initial blank documents have not installed resource interception.
+        // Keep them unavailable until their runtime is prepared; exposing raw
+        // documents here would let ordinary iframe writers bypass the relay.
+        if(!state.url()||!target.__ctx__)throw new DOMException('The frame runtime is not ready','SecurityError');
+        return context_value(target,'document');
+      }},
       postMessage:{value:(...args)=>window_post_message(target,state.token,args)},
       location:{get:()=>location,set:value=>{location.href=value;}},
       window:{get:()=>state.window},self:{get:()=>state.window},frames:{get:()=>state.window},
       parent:{get:()=>ctx.window},top:{get:()=>ctx.top}
     });
-    state.window=create_obj_proxy(replacements,['location'],target);
+    state.window=create_obj_proxy(replacements,['location'],target,undefined,key=>context_value(target,key));
     windows.set(target,state.window);
     register_message_peer(target,state.token,()=>state.window);
     return state.window;

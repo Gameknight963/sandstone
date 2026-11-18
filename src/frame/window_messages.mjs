@@ -67,7 +67,10 @@ function ancestor_window(target,token,parent,top){
     window:{get:()=>window},self:{get:()=>window},frames:{get:()=>window},
     parent:{get:()=>parent?.()||window},top:{get:()=>top?.()||window}
   });
-  window=create_obj_proxy(replacements,[],target);
+  window=create_obj_proxy(replacements,[],target,undefined,key=>{
+    let context;try{context=target.__ctx__;}catch{}
+    return context?context[key]:target[key];
+  });
   register_message_peer(target,token,()=>window);
   return window;
 }

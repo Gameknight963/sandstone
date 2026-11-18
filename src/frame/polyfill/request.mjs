@@ -1,7 +1,7 @@
 // Normalize with the browser's Request implementation, retaining generated body headers.
 import {beacon_body} from '../beacon.mjs';
 
-export async function serialize_request(resource, init, base, source_url = base, reserve) {
+export function prepare_request(resource, init, base, source_url = base, reserve) {
   const input = resource instanceof Request ? resource : new URL(resource, base).href;
   const options = {...init};
   const keepalive = options.keepalive ?? (resource instanceof Request && resource.keepalive);
@@ -30,13 +30,7 @@ export async function serialize_request(resource, init, base, source_url = base,
   request.signal.throwIfAborted();
   const reserved = request.keepalive && (snapshot !== null || no_body);
   if (reserved) reserve?.(snapshot?.size || 0);
-  // Firefox may expose a null .body for FormData while arrayBuffer() still contains it.
-  let body;
-  if (!/^(GET|HEAD)$/.test(request.method)) {
-    if (snapshot) body = snapshot;
-    else if (request.keepalive && no_body) body = new ArrayBuffer(0);
-    else body = await request.arrayBuffer();
-  }
+  const finish=body=>{
   if (request.keepalive && !reserved) reserve?.(body?.byteLength || 0);
   return {
     url: request.url,
@@ -54,4 +48,11 @@ export async function serialize_request(resource, init, base, source_url = base,
       referrerPolicy: request.referrerPolicy
     }
   };
+  };
+  if(/^(GET|HEAD)$/.test(request.method))return finish(undefined);
+  if(snapshot)return finish(snapshot);
+  if(request.keepalive&&no_body)return finish(new ArrayBuffer(0));
+  // Firefox may expose a null .body for FormData while arrayBuffer() still contains it.
+  return request.arrayBuffer().then(finish);
 }
+export async function serialize_request(...args){return prepare_request(...args);}

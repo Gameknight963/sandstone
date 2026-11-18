@@ -124,9 +124,19 @@ test('Child readiness uses the physical runtime URL instead of a reflected virtu
 test('Readiness authenticates the new document without disclosing its bootstrap nonce',async t=>{
   const events=window_events(t),messages=[],target={postMessage:message=>messages.push(message)};
   let resolved=false;const waiting=rpc.wait_on_frame({src:'blob:runtime',contentWindow:target},{nonce:'new-secret'}).then(()=>resolved=true);
-  const ping=messages[0];assert.equal(ping.nonce,undefined);
-  events.emit({...ping,type:'pong',nonce:'old-secret'},target);
-  events.emit({type:'pong',id:ping.id,url:ping.url,nonce:'new-secret'},target);
+  const ping=messages[0];assert.equal(ping.nonce,undefined);assert.equal(ping.url,undefined);
+  events.emit({...ping,type:'pong',url:'blob:runtime',nonce:'old-secret'},target);
+  events.emit({type:'pong',id:ping.id,url:'blob:runtime',nonce:'new-secret'},target);
   await Promise.resolve();assert.equal(resolved,false);
-  events.emit({...ping,type:'pong',nonce:'new-secret'},target);await waiting;assert.equal(events.listeners(),0);
+  events.emit({...ping,type:'pong',url:'blob:runtime',nonce:'new-secret'},target);await waiting;assert.equal(events.listeners(),0);
+});
+
+test('Runtime preparation accepts only the intended seed reply and abort removes its waiter',async t=>{
+  const events=window_events(t),messages=[],target={postMessage:message=>messages.push(message)};
+  let resolved=false;const prepared=rpc.load_frame_runtime({contentWindow:target},'runtime html','seed-secret').then(url=>{resolved=true;return url;});
+  const request=messages[0],reply={sandstone_bootstrap:1,type:'runtime_url',id:request.id,nonce:'seed-secret',url:'blob:runtime'};
+  events.emit({...reply,nonce:'wrong'},target);events.emit(reply,{});events.emit({...reply,url:'https://remote.test/'},target);
+  await Promise.resolve();assert.equal(resolved,false);events.emit(reply,target);assert.equal(await prepared,'blob:runtime');assert.equal(events.listeners(),0);
+  const controller=new AbortController(),waiting=rpc.load_frame_runtime({contentWindow:target},'runtime html','next-secret',{signal:controller.signal});
+  controller.abort();await assert.rejects(waiting,{name:'AbortError'});assert.equal(events.listeners(),0);
 });

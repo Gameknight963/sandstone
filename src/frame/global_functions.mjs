@@ -24,7 +24,7 @@ export function bind_global_function(target, method, virtual_target) {
   });
 }
 
-export function create_obj_proxy(obj, ctx_vars, target, map_value) {
+export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native) {
   const methods = new WeakMap(),overrides=new Map(),deleted=new Set(),accessors=new Map();
   const originalOwn=new Set(Reflect.ownKeys(target));
   const descriptor=(object,key)=>{while(object){const found=Reflect.getOwnPropertyDescriptor(object,key);if(found)return found;object=Reflect.getPrototypeOf(object);}};
@@ -41,7 +41,7 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value) {
         const replacement = obj[key];
         if (replacement !== undefined || key in obj) return remember(replacement);
       }
-      const native_value = target[key];
+      const native_value = read_native?read_native(key):target[key];
       const value = map_value ? map_value(native_value,key) : native_value;
       if (typeof value === 'function' && methods.has(value))return methods.get(value);
       if (typeof value === 'function' && !value.prototype) {

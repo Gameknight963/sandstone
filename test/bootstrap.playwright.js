@@ -5,14 +5,22 @@ async page=>{
   const child='<!doctype html><body>Bootstrap child<script>addEventListener("message",event=>{if(!event.data?.pagePacket)return;parent.postMessage({bootstrapEcho:event.data,ports:event.ports.length},"*");event.ports[0]?.postMessage("application-port");});parent.postMessage({bootstrapReady:true},"*");<\/script>';
   await page.evaluate(async({url,child})=>{
     const previous=sandstone.network.session.fetch;
-    sandstone.network.session.fetch=(target,options)=>target==='https://bootstrap.test/child'?Promise.resolve(new Response(child,{headers:{'Content-Type':'text/html'}})):previous(target,options);
+    sandstone.network.session.fetch=(target,options)=>target==='https://bootstrap-child.test/child'?Promise.resolve(new Response(child,{headers:{'Content-Type':'text/html'}})):previous(target,options);
     main_frame.special_pages[url]='<!doctype html><body>Bootstrap parent';await main_frame.navigate_to(url);
   },{url,child});
+  const runtime=page.frames().find(frame=>frame.parentFrame()===page.mainFrame());
+  await runtime.evaluate(()=>{
+    globalThis.bootstrapEncode=encodeURIComponent;
+    globalThis.encodeURIComponent=function(value){
+      if(typeof value==='string'){const seed=value.match(/data-sandstone-seed="([^"]+)"/);if(seed)globalThis.bootstrapSeedNonce=seed[1];}
+      return bootstrapEncode(value);
+    };
+  });
   await evaluate(`globalThis.bootstrapMessages=[];globalThis.privateBootstrapLeaks=[];globalThis.bootstrapEchoes=[];
     globalThis.restoreBootstrapStop=Event.prototype.stopImmediatePropagation;
     Event.prototype.stopImmediatePropagation=function(){if(this.type!=='message')return restoreBootstrapStop.call(this);};
     addEventListener('message',event=>{if(event.data?.sandstone_bootstrap===1&&!event.data.pagePacket)privateBootstrapLeaks.push(event.data.type);if(event.data?.bootstrapReady)bootstrapMessages.push('ready');if(event.data?.bootstrapEcho)bootstrapEchoes.push({data:event.data.bootstrapEcho,ports:event.data.ports});});
-    globalThis.bootstrapChild=document.createElement('iframe');bootstrapChild.src='/child';document.body.append(bootstrapChild);true`);
+    globalThis.bootstrapChild=document.createElement('iframe');bootstrapChild.sandbox='allow-scripts';bootstrapChild.src='https://bootstrap-child.test/child';document.body.append(bootstrapChild);true`);
   try{
     await until(()=>evaluate('bootstrapMessages.length===1'));
     const packets=[{type:'ping',url:'https://bootstrap.test/child',id:'page-ping',pagePacket:true},{type:'set_host',sandstone_bootstrap:1,nonce:'page-nonce',pagePacket:true},{type:'pong',sandstone_bootstrap:1,id:'page-pong',pagePacket:true}];
@@ -42,13 +50,12 @@ async page=>{
     });
     await page.waitForTimeout(30);
     if(await nested.evaluate(()=>sandstone_frame.rpc.host.extra_targets.length)!==before)throw new Error('A frame accepted an unauthorized bootstrap port');
-    await root.evaluate(async url=>{
-      const html=await(await fetch(url)).text();
-      const nonce=JSON.parse(decodeURIComponent(html.match(/data-sandstone-bootstrap="([^"]+)"/)[1])).nonce;
+    await root.evaluate(()=>{
+      const nonce=bootstrapSeedNonce;
       const channel=new MessageChannel();sandstone_frame.rpc.set_host(document.querySelector('iframe'),channel.port2,{nonce});channel.port1.close();
-    },nested.url());
+    });
     await page.waitForTimeout(30);
     if(await nested.evaluate(()=>sandstone_frame.rpc.host.extra_targets.length)!==before)throw new Error('A live document accepted an additional bootstrap channel');
     return ['Application window and worker messages retain bootstrap-like payloads and transferred ports','Bootstrap probes stay private despite page event instrumentation','Bootstrap ports reject wrong document nonces and additional channels'];
-  }finally{await evaluate('Event.prototype.stopImmediatePropagation=restoreBootstrapStop;true');}
+  }finally{await evaluate('Event.prototype.stopImmediatePropagation=restoreBootstrapStop;true');await runtime.evaluate(()=>{globalThis.encodeURIComponent=bootstrapEncode;});}
 }

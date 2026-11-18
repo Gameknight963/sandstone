@@ -35,15 +35,15 @@ export function register_media_attributes(element,authored,update,remove){
 function detached(state,node){
   if(node&&!owner.call(node)&&state.values.has(node))value.set.call(node,state.values.get(node));
 }
-export function render_media_attribute(element,key,source){
+export function render_media_attribute(element,key,source,preserve=false){
   const state=states.get(element),original=attr(element,null,key),canonical=state.authored.get(key);
   if(canonical===null){
     methods.removeAttributeNS.call(state.mirror,null,key);
     methods.removeAttributeNS.call(element,null,key);detached(state,original);
   }else{
     methods.setAttributeNS.call(state.mirror,null,key,canonical);
-    methods.setAttributeNS.call(element,null,key,source);
-    state.values.set(attr(element,null,key),canonical);
+    if(!preserve)methods.setAttributeNS.call(element,null,key,source);
+    const node=attr(element,null,key);if(node)state.values.set(node,canonical);
   }
 }
 function refresh(state,key){

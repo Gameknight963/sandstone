@@ -1,6 +1,6 @@
 import { ctx } from "../context.mjs";
 import * as network from "../network.mjs";
-import { serialize_request } from "./request.mjs";
+import { prepare_request } from "./request.mjs";
 import {reserve_keepalive} from '../keepalive_budget.mjs';
 import {create_request_class} from '../request.mjs';
 
@@ -12,8 +12,11 @@ export const FakeRequest=create_request_class(()=>ctx.document?.baseURI||ctx.loc
 export async function fetch(resource, params = {}) {
   let release;
   try {
-    const request = await serialize_request(resource, params, ctx.document?.baseURI || ctx.location.href, source_url(),
+    const prepared = prepare_request(resource, params, ctx.document?.baseURI || ctx.location.href, source_url(),
       size=>{release=reserve_keepalive(size);});
+    // Unload can destroy this realm before another promise job runs. Snapshot
+    // bodies must reach the host synchronously, before the handler returns.
+    const request = typeof prepared.then === 'function' ? await prepared : prepared;
     request.signal.throwIfAborted();
     return await network.fetch(request.url, {...request.options, signal: request.signal,sandstone_keepalive_release:release});
   } catch (error) { release?.(); throw error; }

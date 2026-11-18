@@ -22,7 +22,17 @@ async(page,artifact)=>{
     if(worker!=='worker-ready')throw new Error('An insecure host could not bootstrap a worker');
     const lock=await host.evaluate(()=>main_frame.eval_js('navigator.locks.request("insecure-host",lock=>lock.name)'));
     if(lock!=='insecure-host')throw new Error('An insecure host could not coordinate virtual-origin locks');
+    await host.evaluate(()=>{
+      const previous=sandstone.network.session.fetch;
+      sandstone.network.session.fetch=(url,options)=>url==='https://insecure-bootstrap.test/echo'?Promise.resolve(new Response(options.body)):previous(url,options);
+    });
+    const body=await host.evaluate(()=>main_frame.eval_js(`(async()=>{
+      const OriginalPromise=Promise;
+      try{globalThis.Promise=class extends OriginalPromise{};return await(await fetch('/echo',{method:'POST',body:'native body promise'})).text();}
+      finally{globalThis.Promise=OriginalPromise;}
+    })()`));
+    if(body!=='native body promise')throw new Error('Replacing the global Promise broke native request body reads');
     if(errors.length)throw new Error('Insecure bootstrap errors: '+JSON.stringify(errors));
-    return ['Insecure HTTP hosts bootstrap pages, inline frames, workers and locks without randomUUID'];
+    return ['Insecure HTTP hosts bootstrap pages, inline frames, workers and locks without randomUUID','Native fetch body promises work when a site replaces the global Promise constructor'];
   }finally{await host.close();}
 }

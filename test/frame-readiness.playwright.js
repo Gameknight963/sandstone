@@ -11,7 +11,7 @@ async page=>{
       main_frame.send_page=send;
     }};
     Object.defineProperty(frame,'src',{configurable:true,get(){return logical;},set(value){
-      logical=value;runtimeGate.held.push({url:value,release:()=>property.set.call(frame,value)});
+      logical=value;if(value.startsWith('blob:')){property.set.call(frame,value);return;}runtimeGate.held.push({url:value,release:()=>property.set.call(frame,value)});
     }});
     main_frame.send_page=function(options){runtimeGate.sent.push(options.url);return Reflect.apply(send,this,[options]);};
     main_frame.navigate_to(first).then(()=>runtimeGate.firstDone=true);

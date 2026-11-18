@@ -226,6 +226,22 @@ export function set_host(frame, msg_port, {nonce}={}) {
   post_bootstrap_message(msg_target,msg,[msg_port],!window_frame);
 }
 
+export function load_frame_runtime(frame,html,nonce,{signal}={}){
+  const id='runtime:'+Math.random()+':'+Math.random();
+  return new Promise((resolve,reject)=>{
+    const cleanup=()=>{bootstrap_waiters.delete(receive);release_bootstrap();signal?.removeEventListener('abort',abort);};
+    const abort=()=>{cleanup();reject(signal.reason||new DOMException('The operation was aborted','AbortError'));};
+    const receive=(message,source)=>{
+      if(message.type!=='runtime_url'||message.id!==id||message.nonce!==nonce||unwrap_global_target(source)!==unwrap_global_target(frame.contentWindow)||typeof message.url!=='string'||!message.url.startsWith('blob:'))return;
+      cleanup();resolve(message.url);
+    };
+    if(signal?.aborted){abort();return;}
+    bootstrap_waiters.add(receive);listen_bootstrap();signal?.addEventListener('abort',abort,{once:true});
+    try{post_bootstrap_message(unwrap_global_target(frame.contentWindow),{type:'runtime',sandstone_bootstrap:1,id,html,nonce});}catch(error){cleanup();reject(error);}
+  });
+}
+export function commit_frame_runtime(frame,url,nonce){post_bootstrap_message(unwrap_global_target(frame.contentWindow),{type:'commit_runtime',sandstone_bootstrap:1,url,nonce});}
+
 export function wait_on_frame(frame,{signal,url=frame.src,nonce}={}) {
   const id=Math.random()+':'+Math.random();
   return new Promise((resolve,reject)=>{
@@ -233,11 +249,13 @@ export function wait_on_frame(frame,{signal,url=frame.src,nonce}={}) {
     const cleanup=()=>{finished=true;clearTimeout(timer);bootstrap_waiters.delete(receive);release_bootstrap();signal?.removeEventListener('abort',abort);};
     const abort=()=>{cleanup();reject(signal.reason||new DOMException('The operation was aborted','AbortError'));};
     const receive=(message,source)=>{
-      if(message.id!==id||message.url!==url||nonce!==undefined&&message.nonce!==nonce||unwrap_global_target(source)!==unwrap_global_target(frame.contentWindow))return;
-      cleanup();resolve();
+      if(message.type!=='pong'||message.id!==id||message.url!==url||nonce!==undefined&&message.nonce!==nonce||unwrap_global_target(source)!==unwrap_global_target(frame.contentWindow))return;
+      cleanup();resolve(message.url);
     };
     const ping=()=>{
-      try{const target=unwrap_global_target(frame.contentWindow);if(target)post_bootstrap_message(target,{type:'ping',sandstone_bootstrap:1,id,url});}
+      // A data URL contains the runtime source and its private nonce. Do not
+      // disclose the intended URL to the previous document during readiness.
+      try{const target=unwrap_global_target(frame.contentWindow);if(target)post_bootstrap_message(target,{type:'ping',sandstone_bootstrap:1,id,...(nonce===undefined?{url}:{})});}
       catch(error){cleanup();reject(error);return;}
       if(!finished)timer=setTimeout(ping,50);
     };
@@ -251,17 +269,18 @@ export function wait_on_frame(frame,{signal,url=frame.src,nonce}={}) {
 //handle the initial set_host message from the host
 function host_set_handler(event) {
   const msg=runtime_message(event,'data'),source=runtime_message(event,'source'),ports=runtime_message(event,'ports')||[];
-  if(!msg||msg.sandstone_bootstrap!==1||!['ping','pong','set_host'].includes(msg.type))return;
+  if(!msg||msg.sandstone_bootstrap!==1||!['ping','pong','set_host','runtime','runtime_url','commit_runtime'].includes(msg.type))return;
   if((bootstrap_window||host)&&!event.isTrusted)return;
   stop_runtime_message(event);
-  if(msg.type==='pong'){
+  if(msg.type==='runtime'||msg.type==='commit_runtime'){for(const port of ports)port.close();return;}
+  if(msg.type==='pong'||msg.type==='runtime_url'){
     for(const receive of [...bootstrap_waiters])receive(msg,source);
     for(const port of ports)port.close();
     return;
   }
   if(!host||!bootstrap_worker&&source!==bootstrap_parent){for(const port of ports)port.close();return;}
   if(msg.type==='ping'){
-    if(source&&msg.url===globalThis.location.href)post_bootstrap_message(source,{type:'pong',sandstone_bootstrap:1,id:msg.id,url:globalThis.location.href,nonce:bootstrap_nonce});
+    if(source&&(msg.url===undefined||msg.url===globalThis.location.href))post_bootstrap_message(source,{type:'pong',sandstone_bootstrap:1,id:msg.id,url:globalThis.location.href,nonce:bootstrap_nonce});
     for(const port of ports)port.close();
     return;
   }

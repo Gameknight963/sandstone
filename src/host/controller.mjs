@@ -12,7 +12,7 @@ import './storage.mjs';
 import './navigation_targets.mjs';
 import {navigation_sandbox} from '../navigation_policy.mjs';
 import {RPCSourcePolicy} from './rpc_policy.mjs';
-import {bootstrap_html,create_bootstrap_nonce} from '../bootstrap.mjs';
+import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../bootstrap.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 export {cache_storage} from './cache.mjs';
@@ -66,7 +66,10 @@ export let local_storage = {};
 local_storage = site_data.local;
 
 function get_frame_bundle(nonce) {
-  return URL.createObjectURL(new Blob([bootstrap_html(frame_html,nonce)],{type:'text/html'}));
+  // A data document has its own opaque origin even with allow-same-origin.
+  // Its inline descendants can inherit that identity without inheriting the
+  // host's file/HTTP origin, which a blob or host-owned srcdoc would expose.
+  return runtime_seed(nonce);
 }
 
 export class ProxyFrame {
@@ -80,7 +83,7 @@ export class ProxyFrame {
     this.id = Math.random() + "";
     this.root_id = this.id;
     this.iframe = document.createElement("iframe");
-    this.iframe.sandbox = "allow-scripts allow-forms allow-modals allow-pointer-lock";
+    this.iframe.sandbox = "allow-scripts allow-same-origin allow-forms allow-modals allow-pointer-lock";
     this.iframe.allowFullscreen = true;
     this.iframe.allow = 'focus-without-user-activation *';
     this.iframe.setAttribute("frame-id", this.id);
@@ -198,7 +201,13 @@ export class ProxyFrame {
     settings = {...this.default_settings, ...settings};
     console.log("site settings:", settings);
 
-    try{await rpc.wait_on_frame(this.iframe,{signal:runtime_wait.signal,nonce:bootstrap_nonce});}
+    try{
+      await rpc.wait_on_frame(this.iframe,{signal:runtime_wait.signal,nonce:bootstrap_nonce});
+      const runtime_url=await rpc.load_frame_runtime(this.iframe,bootstrap_html(frame_html,bootstrap_nonce),bootstrap_nonce,{signal:runtime_wait.signal});
+      if(navigation_id!==this.navigation_id)return;
+      this.runtime_url=runtime_url;rpc.commit_frame_runtime(this.iframe,runtime_url,bootstrap_nonce);
+      await rpc.wait_on_frame(this.iframe,{signal:runtime_wait.signal,url:runtime_url,nonce:bootstrap_nonce});
+    }
     catch(error){if(navigation_id!==this.navigation_id)return;throw error;}
     if (navigation_id !== this.navigation_id) return;
     let msg_channel = new MessageChannel();

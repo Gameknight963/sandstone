@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {runInNewContext} from 'node:vm';
-import {bootstrap_html,bootstrap_worker,bootstrap_attribute,create_bootstrap_nonce} from '../src/bootstrap.mjs';
+import {bootstrap_html,bootstrap_worker,bootstrap_attribute,create_bootstrap_nonce,runtime_seed} from '../src/bootstrap.mjs';
 
 test('Bootstrap nonces use native random bytes without requiring randomUUID',()=>{
   let calls=0;
@@ -24,4 +24,22 @@ test('HTML bootstrap binds the existing runtime script without adding executable
 test('Worker bootstrap configuration exists before runtime evaluation',()=>{
   const context={};runInNewContext(bootstrap_worker('globalThis.observed=globalThis.__sandstone_bootstrap__;','worker-secret'),context);
   assert.equal(context.observed.nonce,'worker-secret');assert.equal(context.observed.channels,1);
+});
+
+test('Opaque runtime seeds authenticate parent messages before preparing a bundle URL',async()=>{
+  const nonce='0123456789abcdef',url=runtime_seed(nonce),html=decodeURIComponent(url.slice(url.indexOf(',')+1));
+  assert.ok(url.length<5000);assert.ok(html.startsWith('<!doctype html>'));
+  const parent={postMessage(value){this.reply=value;}};
+  let listener,removed=false,closed=0,prepared;
+  let navigated;
+  const context={parent,location:{href:url,replace(url){navigated=url;}},URL:{createObjectURL(blob){prepared=blob;return 'blob:isolated-runtime';}},Blob,addEventListener(type,callback){listener=callback;},removeEventListener(){removed=true;}};
+  runInNewContext(html.match(/<script[^>]*>([\s\S]*)<\/script>/)[1],context);
+  const send=(data,options={})=>listener({data,isTrusted:true,source:parent,stopImmediatePropagation(){},ports:[{close(){closed++;}}],...options});
+  send({sandstone_bootstrap:1,type:'runtime',nonce,html:'ignored'},{source:{}});assert.equal(prepared,undefined);
+  send({sandstone_bootstrap:1,type:'runtime',nonce,html:'ignored'},{isTrusted:false});assert.equal(prepared,undefined);
+  send({sandstone_bootstrap:1,type:'ping',id:'probe'});assert.equal(parent.reply.nonce,nonce);assert.equal(parent.reply.url,url);
+  send({sandstone_bootstrap:1,type:'runtime',nonce:'wrong',html:'ignored'});assert.equal(prepared,undefined);
+  send({sandstone_bootstrap:1,type:'runtime',id:'prepare',nonce,html:'bundle'});assert.equal(await prepared.text(),'bundle');assert.equal(prepared.type,'text/html');assert.equal(parent.reply.type,'runtime_url');assert.equal(parent.reply.id,'prepare');assert.equal(parent.reply.url,'blob:isolated-runtime');assert.equal(removed,false);assert.equal(navigated,undefined);
+  send({sandstone_bootstrap:1,type:'commit_runtime',nonce:'wrong',url:'blob:isolated-runtime'});assert.equal(navigated,undefined);
+  send({sandstone_bootstrap:1,type:'commit_runtime',nonce,url:'blob:isolated-runtime'});assert.equal(removed,true);assert.equal(navigated,'blob:isolated-runtime');assert.equal(closed,5);
 });
