@@ -2,14 +2,16 @@ import {unwrap_global_target} from './frame/global_functions.mjs';
 import {listen_runtime,unlisten_runtime} from './frame/runtime_events.mjs';
 
 export let role = null;
-export const rpc_handlers = {};
-export const rpc_requests = {};
+export const rpc_handlers = Object.create(null);
+export const rpc_requests = Object.create(null);
 export let host = null;
 export let on_attach = () => {};
+const rpc_targets=new WeakSet();
 
 //a flexible wrapper for message ports
 export class RPCTarget {
   constructor(target=null) {
+    rpc_targets.add(this);
     this.target = null;
     this.extra_targets = [];
     this.extra_frame_targets = new Map();
@@ -81,15 +83,17 @@ export class RPCTarget {
   }
 }
 
-async function handle_procedure_call(msg) {
-  if (!rpc_handlers[msg.procedure]) {
+async function handle_procedure_call(msg,target,source) {
+  if (!rpc_handlers[msg.procedure]&&!target?.authorize) {
     return;
   }
 
   let output;
   try {
+    const args=target?.authorize?target.authorize(msg,source):msg.arguments;
+    if(!rpc_handlers[msg.procedure])throw new TypeError('Unknown RPC procedure');
     output = {
-      value: await rpc_handlers[msg.procedure](...msg.arguments),
+      value: await rpc_handlers[msg.procedure](...args),
       success: true
     };
   }
@@ -109,10 +113,12 @@ async function handle_procedure_call(msg) {
   };
 }
 
-function handle_procedure_reply(msg) {
+function handle_procedure_reply(msg,source) {
   if (!rpc_requests[msg.id]) {
     return;
   }
+  const expected=rpc_requests[msg.id].source;
+  if(source&&expected&&unwrap_global_target(source)!==unwrap_global_target(expected))return;
   rpc_requests[msg.id](msg.content);
   delete rpc_requests[msg.id];
 }
@@ -123,17 +129,17 @@ export async function message_listener(event, target) {
   if (!msg || typeof msg !== "object" || typeof msg.type === "undefined") return;
 
   if (msg.type === "procedure") {
-    let output = await handle_procedure_call(msg);
+    let output = await handle_procedure_call(msg,target,source);
     if (!source) return;
     if (output) {
       source.postMessage(output, {targetOrigin: "*"});
     }
   }
   else if (msg.type === "reply") {
-    handle_procedure_reply(msg);
+    handle_procedure_reply(msg,source);
   }
   else if(msg.type==='notification'){
-    if(rpc_handlers[msg.procedure])await rpc_handlers[msg.procedure](...msg.arguments);
+    try{const args=target?.authorize?target.authorize(msg,source):msg.arguments;if(rpc_handlers[msg.procedure])await rpc_handlers[msg.procedure](...args);}catch(error){if(!target?.authorize)throw error;}
   }
   
   else if (msg.type === "attach") {
@@ -142,6 +148,7 @@ export async function message_listener(event, target) {
       host.postMessage(msg, {targetOrigin: "*", transfer: [msg_port]});
     }
     else {
+      try{target.authorize_attach?.(source,msg_port,msg.frame_id);}catch{msg_port?.close();return;}
       target.add_extra_target(msg_port, msg.frame_id);
       msg_port.start();
     }
@@ -168,6 +175,7 @@ export async function call_procedure(target, procedure, args, {signal,transfer} 
       if (reply.success) resolve(reply.value);
       else reject(reply.value);
     }
+    rpc_requests[msg.id].source=rpc_targets.has(target)?target.target:target;
     signal?.addEventListener('abort',abort,{once:true});
     try{target.postMessage(msg, {targetOrigin: "*",transfer});}
     catch(error){cleanup();reject(error);}

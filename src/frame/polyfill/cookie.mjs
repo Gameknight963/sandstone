@@ -19,6 +19,6 @@ export function set_cookie(value) {
     const text=String(value),parsed=storage_cookie(text,{crossSite:loader.cookie_cross_site});
     if(!parsed)return;
     cookies.setCookieSync(parsed, loader.cookie_url||loader.url, {http: false, ignoreError: true});
-    cookie_set(loader.frame_id, text).catch(console.error);
+    cookie_set(loader.frame_id, text,loader.cookie_url||loader.url).catch(console.error);
   } catch {}
 }

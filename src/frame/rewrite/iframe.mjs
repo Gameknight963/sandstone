@@ -187,7 +187,12 @@ export function rewrite_iframe(iframe_element) {
       let msg_channel_2 = new MessageChannel();
       let rpc_target = new rpc.RPCTarget(msg_channel_2.port1);
       active_target=rpc_target;
-      rpc_target.onmessage = rpc.message_listener;
+      // This second channel only acknowledges page installation. A child must
+      // not invoke its parent's eval/HTML handlers or forward attachments on it.
+      rpc_target.onmessage=(event,target)=>{
+        if(event.data?.type==='reply')return rpc.message_listener(event,target);
+        for(const port of event.ports)port.close();
+      };
       msg_channel_2.port1.start();
       rpc.set_host(iframe_element, msg_channel_2.port2);
       const send_page=options=>rpc.call_procedure(rpc_target,'html',[options],{signal:controller.signal});

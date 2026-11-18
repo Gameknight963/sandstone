@@ -125,7 +125,8 @@ async page=>{
       if(await evaluate(true,'location.href')!==a+'/target/replacement'||await page.evaluate(()=>targetRequests.some(request=>request.url.endsWith('/target/landing'))))throw new Error('A retired document completed an old target lookup');
       const root=page.frames().find(frame=>frame.parentFrame()===page.mainFrame());
       const count=await page.evaluate(()=>targetRequests.length);
-      await root.evaluate(url=>sandstone_frame.rpc.call_procedure(sandstone_frame.rpc.host,'navigate_target',[sandstone_frame.loader.frame_id,'invalid-document','_top',url,null,{}]),b+'/target/landing');
+      const invalid=await root.evaluate(async url=>{try{await sandstone_frame.rpc.call_procedure(sandstone_frame.rpc.host,'navigate_target',[sandstone_frame.loader.frame_id,'invalid-document','_top',url,null,{}]);return 'accepted';}catch(error){return error.name;}},b+'/target/landing');
+      if(invalid!=='SecurityError')throw new Error('An invalid document token was not rejected');
       if(await page.evaluate(()=>targetRequests.length)!==count)throw new Error('An invalid document token authorized target navigation');
     }finally{await page.evaluate(()=>targetLookupGate?.restore());}
     return ['Named link/form targets navigate blank and existing frames through the relay','Base targets, submitter overrides and masked form target controls match native navigation','Targeted fragments retain their document without another request','Nested parent/top navigations preserve initiating Origin, Referer, cookies and document.referrer','Origin and inherited sandbox restrictions block forbidden ancestor navigation and honor activated top navigation','Retired target lookups and invalid document tokens cannot navigate a newer document'];

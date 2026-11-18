@@ -51,6 +51,16 @@ test('RPC cancellation removes pending replies and ignores late replies',async()
   assert.deepEqual(Object.keys(rpc.rpc_requests),[]);
 });
 
+test('Replies cannot complete requests sent through another endpoint',async()=>{
+  let message;const endpoint={postMessage(value){message=value;}};
+  const request=rpc.call_procedure(endpoint,'pending',[]);
+  await rpc.message_listener({data:{type:'reply',id:message.id,content:{success:true,value:'forged'}},currentTarget:{}});
+  assert.equal(Object.keys(rpc.rpc_requests).length,1);
+  await rpc.message_listener({data:{type:'reply',id:message.id,content:{success:true,value:'original'}},currentTarget:endpoint});
+  assert.equal(await request,'original');assert.deepEqual(Object.keys(rpc.rpc_requests),[]);
+  for(const id of ['__proto__','constructor','toString'])await rpc.message_listener({data:{type:'reply',id,content:{success:true,value:'forged'}},currentTarget:endpoint});
+});
+
 test('RPC abort before sending, normal replies and transport errors all clean up',async()=>{
   const controller=new AbortController();controller.abort(new Error('superseded'));
   let sent=false;
