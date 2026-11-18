@@ -11,6 +11,9 @@ import {track_client_sockets} from './client-sockets.mjs';
 
 const sites=[
   {id:'discourse',url:'https://discuss.python.org/latest'},
+  {id:'openstreetmap',url:'https://www.openstreetmap.org/#map=5/39.828/-98.579'},
+  {id:'mastodon',url:'https://mastodon.social/explore'},
+  {id:'excalidraw',url:'https://excalidraw.com/'},
   {id:'hn',url:'https://news.ycombinator.com/'},
   {id:'mdn',url:'https://developer.mozilla.org/en-US/docs/Web/JavaScript'},
   {id:'wikipedia',url:'https://en.wikipedia.org/wiki/Main_Page'},
@@ -61,6 +64,44 @@ async function wait(page,proxy,expression){
 const summary=(page,proxy)=>read(page,proxy,'({title:document.title,heading:document.querySelector("h1")?.textContent.trim()||"",links:document.links.length})');
 async function interact(page,proxy,site){
   const surface=proxy?page.frameLocator('iframe[frame-id]'):page;
+  if(site.id==='excalidraw'){
+    await surface.getByRole('button',{name:'Rectangle',exact:true}).click();
+    const box=await surface.locator('canvas.interactive').boundingBox();
+    assert.ok(box,'Excalidraw interactive canvas is unavailable');
+    const x=box.x+box.width*.55,y=box.y+box.height*.5;
+    await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+120,y+80,{steps:8});await page.mouse.up();
+    const count='JSON.parse(localStorage.getItem("excalidraw")||"[]").filter(shape=>shape.type==="rectangle"&&!shape.isDeleted).length';
+    await wait(page,proxy,count+'===1');
+    const shapes=await read(page,proxy,'JSON.parse(localStorage.getItem("excalidraw")).filter(shape=>!shape.isDeleted).map(shape=>({type:shape.type,width:shape.width,height:shape.height}))');
+    await surface.getByRole('button',{name:'Undo',exact:true}).click();await wait(page,proxy,count+'===0');
+    await surface.getByRole('button',{name:'Redo',exact:true}).click();await wait(page,proxy,count+'===1');
+    if(proxy){
+      const navigation=await page.evaluate(()=>main_frame.navigation_id);
+      await page.evaluate(()=>main_frame.eval_js('setTimeout(()=>location.reload(),0);true'));
+      await page.waitForFunction(id=>main_frame.navigation_id>id&&!main_frame.is_navigating,navigation);
+    }else await page.reload({waitUntil:'domcontentloaded'});
+    await surface.getByRole('button',{name:'Rectangle',exact:true}).waitFor();await wait(page,proxy,count+'===1');
+    const restored=await read(page,proxy,'JSON.parse(localStorage.getItem("excalidraw")).filter(shape=>!shape.isDeleted).map(shape=>({type:shape.type,width:shape.width,height:shape.height}))');
+    assert.deepEqual(restored,shapes,'Excalidraw lost saved scene geometry after reload');
+    return {shapes,undo:true,redo:true,reloaded:true};
+  }
+  if(site.id==='openstreetmap'){
+    await wait(page,proxy,'Array.from(document.querySelectorAll("img.leaflet-tile-loaded")).some(image=>image.complete&&image.naturalWidth>0)');
+    const map=surface.locator('.leaflet-container');await map.focus();await map.press('Equal');
+    await wait(page,proxy,'location.hash.startsWith("#map=6/")');
+    return read(page,proxy,'({zoom:location.hash.split("/")[0],tiles:Array.from(document.querySelectorAll("img.leaflet-tile-loaded")).some(image=>image.complete&&image.naturalWidth>0)})');
+  }
+  if(site.id==='mastodon'){
+    await wait(page,proxy,'document.querySelectorAll("article[data-variant=feed]").length>0');
+    await (proxy?page.evaluate(()=>main_frame.eval_js('window.liveNavigationMarker="persisted"')):page.evaluate(()=>window.liveNavigationMarker='persisted'));
+    await surface.locator('a[href="/explore/tags"]').click();
+    await wait(page,proxy,'location.pathname==="/explore/tags"&&Array.from(document.links).some(link=>link.getAttribute("href")?.startsWith("/tags/"))');
+    const clientNavigation=await read(page,proxy,'window.liveNavigationMarker==="persisted"');
+    assert.equal(clientNavigation,true,'Mastodon navigation reloaded the document');
+    await (proxy?page.evaluate(()=>main_frame.eval_js('history.back();true')):page.evaluate(()=>history.back()));
+    await wait(page,proxy,'location.pathname==="/explore"&&document.querySelectorAll("article[data-variant=feed]").length>0');
+    return {feed:true,tags:true,returned:true,clientNavigation};
+  }
   if(site.id==='discourse'){
     await wait(page,proxy,'document.querySelectorAll(".topic-list-item a.title").length>0');
     await (proxy?page.evaluate(()=>main_frame.eval_js('window.liveNavigationMarker="persisted"')):page.evaluate(()=>window.liveNavigationMarker='persisted'));
