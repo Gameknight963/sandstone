@@ -2,6 +2,8 @@ import { ModuleLoader } from "../modules.mjs";
 import * as network from "../network.mjs";
 import * as parser from "../parser.mjs";
 import * as loader from "../loader.mjs";
+import {ctx} from '../context.mjs';
+import {document_referrer_policy} from '../intercept/document.mjs';
 
 // Keep native import out of webpack's chunk loader; every URL here is a prepared blob.
 const native_import = Function("url", "options", "return import(url, options)");
@@ -20,6 +22,7 @@ export function flush_import_map() {
 }
 
 export const modules = new ModuleLoader({
+  context:()=>({referrer:ctx.location.href,referrerPolicy:document_referrer_policy()}),
   types:globalThis.CSSStyleSheet?['javascript','json','css']:['javascript','json'],
   fetch: (url, options) => network.fetch(url, {...options,mode:'cors'}),
   rewrite: (source, options) => parser.rewrite_js(source, options),

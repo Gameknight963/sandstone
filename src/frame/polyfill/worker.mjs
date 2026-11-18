@@ -7,6 +7,8 @@ import { ctx, update_ctx, convert_url } from "../context.mjs";
 import { modules } from "./module.mjs";
 import { prefetch_worker_scripts } from "../worker_scripts.mjs";
 import {on_document_unload} from '../runtime_events.mjs';
+import {document_referrer_policy} from '../intercept/document.mjs';
+import {parse_referrer_policy,default_referrer_policy} from '../../referrer.mjs';
 
 const NativeWorker = globalThis.Worker;
 const native_import_scripts = globalThis.importScripts?.bind(globalThis);
@@ -160,6 +162,7 @@ export class FakeWorker extends EventTarget {
   #controller = new AbortController();
   #removeUnload;
   #source_urls=new Map();
+  #referrerPolicy;
 
   constructor(url, options = {}) {
     super();
@@ -174,6 +177,7 @@ export class FakeWorker extends EventTarget {
     this.#receiver = channel.port2;
     for (const type of ["message", "messageerror", "error"]) handler(this, type);
     this.#removeUnload = on_document_unload(() => this.terminate());
+    this.#referrerPolicy=document_referrer_policy();
     this.#start().catch(error => { if (!this.#terminated) { this.#error(error); this.terminate(); } });
   }
 
@@ -188,7 +192,7 @@ export class FakeWorker extends EventTarget {
       frame_id: this.#id, token: this.#token, type: this.#options.type,
       credentials: this.#options.credentials, runtime_src: loader.runtime_src,
       crypto_available: loader.crypto_available,
-      referrer_policy: loader.referrer_policy,
+      referrer_policy: this.#referrerPolicy,
       origin: new URL(url).protocol === "data:" ? "null" : ctx.origin
     };
   }
@@ -238,8 +242,10 @@ export class FakeWorker extends EventTarget {
 
   async #start() {
     const credentials = this.#options.type === "classic" ? "same-origin" : this.#options.credentials;
-    const response = await network.fetch(this.#url, {credentials, signal: this.#controller.signal});
+    const response = await network.fetch(this.#url, {credentials,referrerPolicy:this.#referrerPolicy, signal: this.#controller.signal});
     if (!response.ok) throw new TypeError(`Worker request failed: ${response.status}`);
+    const network_script=/^https?:/.test(response.url||this.#url);
+    this.#referrerPolicy=parse_referrer_policy(response.headers.get('referrer-policy'),network_script?default_referrer_policy:this.#referrerPolicy);
     const source = await response.text();
     const url = response.url || this.#url;
     let sources = new Map();

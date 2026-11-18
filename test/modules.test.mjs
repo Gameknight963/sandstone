@@ -52,11 +52,12 @@ test("Module rewriting preserves local imports and dynamic import argument synta
   rewrite_source(rewritten, [], {module: true});
 });
 
-function environment(sources) {
+function environment(sources,options={}) {
   const requests = [];
   const blobs = new Map();
   const mappings = new Map();
   const loader = new ModuleLoader({
+    context:options.context,
     async fetch(url, options) {
       requests.push({url, ...options});
       const fixture = sources[url];
@@ -76,6 +77,61 @@ function environment(sources) {
   });
   return {loader, requests, blobs, mappings};
 }
+
+test('Module dependencies inherit response policies and final parent URLs, separately from the entry referrer',async()=>{
+  const env=environment({
+    'https://example.com/start.js':{url:'https://cdn.test/modules/root.js',source:'import "./child.js";',headers:{'Referrer-Policy':'unsafe-url'}},
+    'https://cdn.test/modules/child.js':{source:'import "./grand.js";',headers:{'Referrer-Policy':'no-referrer'}},
+    'https://cdn.test/modules/grand.js':'export const value=1;'
+  },{context:()=>({referrer:'https://example.com/page',referrerPolicy:'origin'})});
+  await env.loader.prepare_url('./start.js','https://example.com/',{credentials:'include'});
+  assert.deepEqual(env.requests,[
+    {url:'https://example.com/start.js',credentials:'include',referrer:'https://example.com/page',referrerPolicy:'origin'},
+    {url:'https://cdn.test/modules/child.js',credentials:'include',referrer:'https://cdn.test/modules/root.js',referrerPolicy:'unsafe-url'},
+    {url:'https://cdn.test/modules/grand.js',credentials:'include',referrer:'https://cdn.test/modules/child.js',referrerPolicy:'no-referrer'}
+  ]);
+});
+
+test('Delayed imports retain their module record context without consulting changed document settings',async()=>{
+  let unavailable=false;
+  const env=environment({
+    'https://example.com/start.js':{url:'https://cdn.test/modules/root.js',source:'export const load=()=>import("./late.js");export const url=import.meta.url;',headers:{'Referrer-Policy':'no-referrer'}},
+    'https://cdn.test/modules/late.js':'export default 1;'
+  },{context:()=>{if(unavailable)throw new Error('Current document settings were read');return {referrer:'https://example.com/page',referrerPolicy:'unsafe-url'}}});
+  const entry=await env.loader.prepare_url('./start.js','https://example.com/');
+  const code=env.blobs.get(entry.blob).source;
+  assert.ok(code.includes('__import__.bind(null,'+JSON.stringify({key:entry.key})+')'));
+  assert.ok(code.includes('__module_meta__("https://cdn.test/modules/root.js")'));
+  unavailable=true;
+  await env.loader.import('./late.js',{key:entry.key});
+  assert.deepEqual(env.requests[1],{url:'https://cdn.test/modules/late.js',credentials:'same-origin',referrer:'https://cdn.test/modules/root.js',referrerPolicy:'no-referrer'});
+  await env.loader.prepare_url('./start.js','https://example.com/');
+  assert.equal(env.requests.length,2);
+});
+
+test('Inline modules sharing a base URL retain independent policies for delayed imports',async()=>{
+  const env=environment({'https://example.com/assets/a.js':'export default 1;','https://example.com/assets/b.js':'export default 2;'});
+  const a=await env.loader.prepare_inline('export const load=()=>import("./a.js");','https://example.com/assets/','same-origin',{referrerPolicy:'no-referrer'});
+  const b=await env.loader.prepare_inline('export const load=()=>import("./b.js");','https://example.com/assets/','same-origin',{referrerPolicy:'unsafe-url'});
+  assert.notEqual(a.key,b.key);assert.equal(a.url,b.url);
+  await env.loader.import('./a.js',{key:a.key});await env.loader.import('./b.js',{key:b.key});
+  assert.deepEqual(env.requests.map(({referrer,referrerPolicy})=>({referrer,referrerPolicy})),[
+    {referrer:'https://example.com/assets/',referrerPolicy:'no-referrer'},
+    {referrer:'https://example.com/assets/',referrerPolicy:'unsafe-url'}
+  ]);
+});
+
+test('Invalid response policies preserve inherited module policy and explicit entry options take precedence',async()=>{
+  const env=environment({
+    'https://example.com/root.js':{source:'import "./child.js";',headers:{'Referrer-Policy':'invalid-policy'}},
+    'https://example.com/child.js':'export default 1;'
+  },{context:()=>({referrer:'https://example.com/current',referrerPolicy:'no-referrer'})});
+  await env.loader.prepare_url('./root.js','https://example.com/',{referrer:'https://example.com/chosen',referrerPolicy:'origin'});
+  assert.equal(env.requests[0].referrer,'https://example.com/chosen');
+  assert.equal(env.requests[0].referrerPolicy,'origin');
+  assert.equal(env.requests[1].referrer,'https://example.com/root.js');
+  assert.equal(env.requests[1].referrerPolicy,'origin');
+});
 
 test('CSS modules compile as shared stylesheet exports without parsing CSS as JavaScript or following imports',async()=>{
   const env=environment({

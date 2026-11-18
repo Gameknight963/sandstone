@@ -17,7 +17,7 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false, url, resolve, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false} = {}) {
+export function rewrite_source(source, globals, {module = false, url,importReferrer=url, resolve, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false} = {}) {
   let named=false;
   const onComment=sourceURL?(type,text)=>{
     if(type==='SingleLine'&&/^[#@]\s+sourceURL=\s*\S+\s*$/.test(text))named=true;
@@ -220,7 +220,7 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
       if (stripAttributes && node.attributes?.length) edits.push([node.source.end, node.end, ";"]);
     }
     if ((url||dynamicImport) && node.type === "ImportExpression") {
-      edits.push([node.start, node.start + 6, `${withToken?withToken+'.context':contextName}.__import__.bind(null,${dynamicImport?'null':JSON.stringify(url)})`]);
+      edits.push([node.start, node.start + 6, `${withToken?withToken+'.context':contextName}.__import__.bind(null,${dynamicImport?'null':JSON.stringify(importReferrer)})`]);
     }
     if (url && node.type === "MetaProperty" && node.meta.name === "import") {
       edits.push([node.start, node.end, `${contextName}.__module_meta__(${JSON.stringify(url)})`]);

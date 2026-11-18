@@ -16,6 +16,8 @@ const moduleTest = await readFile(new URL("modules.playwright.js", import.meta.u
 const verifyModules = runInThisContext(`(${moduleTest})`);
 const cssModuleTest=await readFile(new URL('css-modules.playwright.js',import.meta.url),'utf8');
 const verifyCSSModules=runInThisContext(`(${cssModuleTest})`);
+const moduleContextTest=await readFile(new URL('module-context.playwright.js',import.meta.url),'utf8');
+const verifyModuleContext=runInThisContext(`(${moduleContextTest})`);
 const resourceTest = await readFile(new URL("resources.playwright.js", import.meta.url), "utf8");
 const verifyResources = runInThisContext(`(${resourceTest})`);
 const workerTest = await readFile(new URL("workers.playwright.js", import.meta.url), "utf8");
@@ -287,6 +289,7 @@ try {
     assert.equal(await page.evaluate(()=>main_frame.eval_js('typeof navigation==="undefined"&&typeof window.navigation==="undefined"&&typeof NavigationPrecommitController==="undefined"')),true,'Native Navigation must not target the physical sandbox document');
     const moduleResults = await timed(verifyModules(page), "Module fixture");
     result.passed.push(...await timed(verifyCSSModules(page), 'CSS module fixture'));
+    result.passed.push(...await timed(verifyModuleContext(page), 'Module request context fixture'));
     result.passed.push(...await timed(verifyJavascriptASI(page), 'JavaScript ASI fixture'));
     result.passed.push(...await timed(verifyFunctionConstructor(page), 'Function constructor fixture'));
     result.passed.push(...await timed(verifyBlockFunctions(page,blockFunctionCases,globalBlockFunctionCases), 'Block function scope fixture'));

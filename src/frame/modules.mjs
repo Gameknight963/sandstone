@@ -1,4 +1,5 @@
 import { parse } from "./javascript_parser.mjs";
+import {parse_referrer_policy} from '../referrer.mjs';
 const import_string=String;
 
 function url_like(value, base) {
@@ -71,13 +72,14 @@ export function module_dependencies(source) {
 // The browser executes the graph. We provide local blobs and a complete import map
 // before it resolves any dependencies, retaining native cycles and live bindings.
 export class ModuleLoader {
-  constructor({fetch, rewrite, createURL, register, execute, types=['javascript','json','css']}) {
+  constructor({fetch, rewrite, createURL, register, execute, types=['javascript','json','css'],context=()=>({})}) {
     this.fetch = fetch;
     this.rewrite = rewrite;
     this.createURL = createURL;
     this.register = register;
     this.execute = execute;
     this.types=new Set(types);
+    this.context=context;
     this.map = new ImportMap();
     this.records = new Map();
     this.registered = new Set();
@@ -88,12 +90,13 @@ export class ModuleLoader {
     this.preamble = "";
   }
 
-  record(key, type = "javascript", credentials = "same-origin") {
+  record(key, type = "javascript", credentials = "same-origin",context) {
     if (!this.types.has(type)) throw new TypeError(`Unsupported module type: ${type}`);
     let record = this.records.get(key);
     if (record && record.type !== type) throw new TypeError(`Conflicting module types for ${key}`);
     if (!record) {
-      record = {key, url: key, type, credentials, source: undefined, blob: null, nativeKey: `sandstone:module:${++this.module_id}`, dependencies: []};
+      const request={...(typeof context==='function'?context():context||this.context())};
+      record = {key, url: key, type, credentials,request,policy:parse_referrer_policy(request.referrerPolicy), source: undefined, blob: null, nativeKey: `sandstone:module:${++this.module_id}`, dependencies: []};
       this.records.set(key, record);
     }
     return record;
@@ -106,11 +109,16 @@ export class ModuleLoader {
   }
 
   async prepare_url(specifier, base, options = {}) {
-    return this.prepare_graph(this.record(this.map.resolve(specifier, base), options.with?.type || options.assert?.type || "javascript", options.credentials || this.records.get(base)?.credentials));
+    const context=()=>({
+      ...(options.context||this.context()),
+      ...(options.referrer!==undefined?{referrer:options.referrer}:{}),
+      ...(options.referrerPolicy!==undefined?{referrerPolicy:options.referrerPolicy}:{})
+    });
+    return this.prepare_graph(this.record(this.map.resolve(specifier, base), options.with?.type || options.assert?.type || "javascript", options.credentials || this.records.get(base)?.credentials,context));
   }
 
-  prepare_inline(source, base, credentials) {
-    const record = this.record(`sandstone:inline-module:${++this.inline_id}`, "javascript", credentials);
+  prepare_inline(source, base, credentials,context) {
+    const record = this.record(`sandstone:inline-module:${++this.inline_id}`, "javascript", credentials,context);
     record.url = base;
     record.source = source;
     return this.prepare_graph(record);
@@ -120,9 +128,10 @@ export class ModuleLoader {
     return record.loading??=Promise.resolve().then(async()=>{
       try{
         if (record.source === undefined) {
-          const response = await this.fetch(record.key, {credentials: record.credentials});
+          const response = await this.fetch(record.key, {credentials: record.credentials,...record.request});
           if (!response.ok) throw new TypeError(`Module request failed (${response.status}): ${record.key}`);
           record.url = response.url || record.key;
+          record.policy=parse_referrer_policy(response.headers.get('referrer-policy'),record.policy);
           if(record.type==='css'){
             if(response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()!=='text/css')throw new TypeError(`Invalid CSS module MIME type: ${record.key}`);
           }
@@ -134,7 +143,7 @@ export class ModuleLoader {
         record.dependencies = [];
         for (const dependency of module_dependencies(record.source)) {
           const key = this.map.resolve(dependency.specifier, record.url);
-          const target = this.record(key, dependency.type, record.credentials);
+          const target = this.record(key, dependency.type, record.credentials,{referrer:record.url,referrerPolicy:record.policy});
           record.dependencies.push(target);
         }
       } catch (error) { record.error = error; throw error; }
@@ -159,7 +168,7 @@ export class ModuleLoader {
   compile_graph(entry,graph){
     const compile = record => {
       let source = record.type === "json" ? `export default __ctx__.__json_module__(${JSON.stringify(record.source)});` : record.type==='css'?`export default __ctx__.__css_module__(${JSON.stringify(record.source)},${JSON.stringify(record.url)});`:this.rewrite(record.source, {
-        module: true, url: record.url, sourceURL:record.url, stripAttributes: true, resolve: specifier => {
+        module: true, url: record.url, sourceURL:record.url,importReferrer:{key:record.key}, stripAttributes: true, resolve: specifier => {
           const dependency = this.records.get(this.map.resolve(specifier, record.url));
           return dependency.blob || dependency.nativeKey;
         }
@@ -211,8 +220,12 @@ export class ModuleLoader {
     const credentials=options?.credentials;
     // Constructor-created functions use the current document/worker base,
     // after specifier conversion and option getters have finished running.
-    if(typeof base==='function')base=base();
-    const record = await this.prepare_url(specifier, base, {with:snapshot,credentials});
+    // Inline modules can share a URL while retaining different fetch options.
+    // Rewritten imports carry their record identity, separately from URL labels.
+    const parent=base&&typeof base==='object'?this.records.get(base.key):undefined;
+    if(parent)base=parent.url;
+    else if(typeof base==='function')base=base();
+    const record = await this.prepare_url(specifier, base, {with:snapshot,credentials:credentials??parent?.credentials,context:parent?{referrer:parent.url,referrerPolicy:parent.policy}:undefined});
     return this.execute(record.blob);
   }
 

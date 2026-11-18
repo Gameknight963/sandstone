@@ -10,6 +10,8 @@ import {defer_script,deferred_script} from '../script_preparation.mjs';
 import {ordered_script,ordered_classic} from '../script_schedule.mjs';
 import {delay_script_load} from '../script_lifetime.mjs';
 import {script_text} from '../script_text.mjs';
+import {document_referrer_policy} from '../intercept/document.mjs';
+import {parse_referrer_policy} from '../../referrer.mjs';
 
 export const pending_scripts = [];
 let script_num = 0;
@@ -176,10 +178,11 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
     if(script_url===null&&script_text(element)==='')return null;
     started=true;
     const credentials = element.crossOrigin === "use-credentials" ? "include" : "same-origin";
+    const context={referrer:ctx.location.href,referrerPolicy:parse_referrer_policy(element.referrerPolicy,document_referrer_policy())};
     try {
       if(script_url==='')throw new TypeError('Script source is empty');
-      return await (script_url ? modules.prepare_url(convert_url(script_url, ctx.document.baseURI), ctx.document.baseURI, {credentials}) :
-        modules.prepare_inline(script_text(element), ctx.document.baseURI, credentials));
+      return await (script_url ? modules.prepare_url(convert_url(script_url, ctx.document.baseURI), ctx.document.baseURI, {credentials,context}) :
+        modules.prepare_inline(script_text(element), ctx.document.baseURI, credentials,context));
     } catch(error) {
       report_error(error);
       return null;
