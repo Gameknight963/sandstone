@@ -1,14 +1,15 @@
 import {ctx} from './context.mjs';
 import {unwrap_global_target} from './global_functions.mjs';
 
-const local={targets:new WeakMap(),states:new Map()},registries=new Set([local]);
+const local={targets:new WeakMap(),aliases:new WeakMap(),states:new Map()},registries=new Set([local]);
 let active=local;
 // The storage group has already checked both native accessibility and virtual
 // origin. Never discover a document by reading properties of an author object.
 export function register_document(group,alias){
-  active=group.document_identity??={targets:new WeakMap(),states:new Map()};
+  active=group.document_identity??={targets:new WeakMap(),aliases:new WeakMap(),states:new Map()};
   registries.add(active);
   active.targets.set(alias,globalThis.document);
+  active.aliases.set(globalThis.document,alias);
 }
 export function document_states(name){
   const map=registry=>{let result=registry.states.get(name);if(!result)registry.states.set(name,result=new WeakMap());return result;};
@@ -30,5 +31,9 @@ export function unwrap_document(value){
 export function unwrap_frame_document(value){
   for(const registry of registries)if(registry.targets.has(value))return registry.targets.get(value);
   return unwrap_document(value);
+}
+export function wrap_frame_document(value){
+  for(const registry of registries)if(registry.aliases.has(value))return registry.aliases.get(value);
+  return wrap_document(value);
 }
 export function wrap_document(value){return globalThis.document&&value===document?ctx.document:value;}

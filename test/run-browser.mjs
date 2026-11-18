@@ -100,6 +100,8 @@ const frameDOMTest=await readFile(new URL('frame-dom.playwright.js',import.meta.
 const verifyFrameDOM=runInThisContext(`(${frameDOMTest})`);
 const frameTraversalTest=await readFile(new URL('frame-traversal.playwright.js',import.meta.url),'utf8');
 const verifyFrameTraversal=runInThisContext(`(${frameTraversalTest})`);
+const frameRangeTest=await readFile(new URL('frame-ranges.playwright.js',import.meta.url),'utf8');
+const verifyFrameRanges=runInThisContext(`(${frameRangeTest})`);
 const blankFramesTest=await readFile(new URL('blank-frames.playwright.js',import.meta.url),'utf8');
 const verifyBlankFrames=runInThisContext(`(${blankFramesTest})`);
 const rpcSourceTest=await readFile(new URL('rpc-source.playwright.js',import.meta.url),'utf8');
@@ -272,6 +274,7 @@ try {
     result.passed.push(...await timed(verifyIframeWindow(page), 'Frame window fixture'));
     result.passed.push(...await timed(verifyFrameDOM(page), 'Same-origin frame DOM fixture'));
     result.passed.push(...await timed(verifyFrameTraversal(page), 'Same-origin frame traversal fixture'));
+    result.passed.push(...await timed(verifyFrameRanges(page), 'Same-origin frame range fixture'));
     result.passed.push(...await timed(verifyBlankFrames(page), 'Synchronous blank frame fixture'));
     result.passed.push(...await timed(verifyRPCSource(page), 'RPC source fixture'));
     result.passed.push(...await timed(verifyBootstrap(page), 'Bootstrap message fixture'));

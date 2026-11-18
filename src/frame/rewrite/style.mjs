@@ -2,10 +2,14 @@ import {ctx} from '../context.mjs';
 import {parse_css} from './css.mjs';
 import {prepare_css, restore_css, edit_css_parts, css_references} from '../css.mjs';
 import {track_style_request} from '../style_requests.mjs';
+import {document_states} from '../document_identity.mjs';
 
-const states = new WeakMap();
-const node_markers = new WeakMap();
-const serialized_nodes=new WeakMap();
+const states = document_states('style-state');
+const node_markers = document_states('style-markers');
+const serialized_nodes=document_states('style-serialization');
+const mutators=document_states('style-mutators');
+const owner=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get;
+export function configure_style_mutations(){mutators.set(globalThis.document,{mutate:mutate_styles,update});}
 const data = globalThis.CharacterData && Object.getOwnPropertyDescriptor(CharacterData.prototype, 'data');
 const getAttribute = globalThis.Element?.prototype.getAttribute;
 const setAttribute = globalThis.Element?.prototype.setAttribute;
@@ -38,6 +42,10 @@ function fill_rules(sheet, replacements) {
 }
 
 function update(element) {
+  // The operation may have adopted the style into another document after
+  // mutate_styles grouped it. Use its current owner for the resulting fetches.
+  const remote=mutators.get(owner.call(element));
+  if(remote&&remote.update!==update)return remote.update(element);
   let state = states.get(element);
   if (!state) states.set(element, state = {generation: 0, markers: new Map()});
   const nodes = text_nodes(element);
@@ -118,6 +126,21 @@ export function mutate_styles(nodes, operation) {
   }
   nodes.forEach((node, index) => collect(node, index > 0));
   if (!elements.size) return operation();
+  const local=[],peers=new Map();
+  for(const element of elements){
+    const mutate=mutators.get(owner.call(element))?.mutate;
+    if(!mutate||mutate===mutate_styles)local.push(element);
+    else{let styles=peers.get(mutate);if(!styles)peers.set(mutate,styles=[]);styles.push(element);}
+  }
+  // A borrowed DOM method can touch another frame's styles. Its owner must
+  // supply the base URL, request context and resource markers for the edit.
+  let run=()=>mutate_local(local,operation);
+  for(const [mutate,styles] of peers){const next=run;run=()=>mutate(styles,next);}
+  return run();
+}
+
+function mutate_local(elements,operation){
+  if(!elements.length)return operation();
   active = true;
   try {
     return with_disabled([...elements], () => {

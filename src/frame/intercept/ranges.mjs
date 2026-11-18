@@ -1,8 +1,8 @@
-import {unwrap_document,wrap_document} from '../document_identity.mjs';
+import {unwrap_frame_document as unwrap_document,wrap_frame_document as wrap_document,document_states} from '../document_identity.mjs';
 import {unwrap_global_target} from '../global_functions.mjs';
 
 const NativeRange=globalThis.Range,NativeStaticRange=globalThis.StaticRange;
-const ranges=new WeakMap(),selections=new WeakMap();
+const ranges=document_states('ranges'),selections=document_states('selections');
 const owner=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get;
 const kind=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get;
 const parent=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'parentNode').get;
@@ -22,22 +22,42 @@ export function range_sources(range){
   return [common.call(range),...[start.call(range),end.call(range)].filter(node=>style(node)||style(parent.call(node)))];
 }
 const node_document=node=>kind.call(node)===9?node:owner.call(node);
-const mapped=(state,node)=>state&&node===globalThis.document?state.alias:node;
-function track(range,alias){
-  if(range&&!ranges.has(range)){const document=node_document(start.call(range));ranges.set(range,{owner:document,alias:alias||wrap_document(globalThis.document)});}
+const mapped=(state,node,name)=>{
+  const boundary=state?.boundaries?.get(name);
+  return boundary?.node===node?boundary.alias:state?(state.documents.has(node)?state.documents.get(node):wrap_document(node)):node;
+};
+function aliases(alias){
+  const documents=new WeakMap();if(alias)documents.set(unwrap_document(alias),alias);return {documents};
+}
+function copy_aliases(state,range){
+  const copy=aliases();
+  if(state)for(const node of [start.call(range),end.call(range)]){
+    const document=node_document(node);if(document&&state.documents.has(document))copy.documents.set(document,state.documents.get(document));
+  }
+  return copy;
+}
+function track(range,alias,state){
+  if(range&&!ranges.has(range)){
+    const document=node_document(start.call(range));state??=aliases();
+    if(alias&&unwrap_document(alias)===document)state.documents.set(document,alias);
+    if(document&&!state.documents.has(document))state.documents.set(document,wrap_document(document));
+    ranges.set(range,state);
+  }
   return range;
 }
 function update(range,args,positions){
   const state=ranges.get(range);if(!state)return;
-  const document=node_document(start.call(range));
-  if(state.owner!==document){state.owner=document;state.alias=wrap_document(document);}
-  for(const index of positions)if(unwrap_document(args[index])===document)state.alias=args[index];
+  for(const index of positions){const node=unwrap_document(args[index]);if(node&&kind.call(node)===9)state.documents.set(node,args[index]);}
 }
 function constructor(Native,convert){
   if(!Native)return undefined;
   const wrapped=new Proxy(Native,{construct(target,args,newTarget){
-    const state={alias:wrap_document(globalThis.document)},converted=convert?convert(args,state):args;
-    return track(Reflect.construct(target,converted,newTarget),state.alias);
+    const state=aliases();state.inputs=[];state.boundaries=new Map();
+    const converted=convert?convert(args,state):args,range=Reflect.construct(target,converted,newTarget);
+    // Native conversion has now validated the dictionary's node members.
+    for(const [name,node,alias] of state.inputs)if(kind.call(node)===9){state.documents.set(node,alias);state.boundaries.set(name,{node,alias});}
+    delete state.inputs;
+    return track(range,undefined,state);
   }});
   Object.defineProperty(Native.prototype,'constructor',{...Object.getOwnPropertyDescriptor(Native.prototype,'constructor'),value:wrapped});
   return wrapped;
@@ -52,7 +72,9 @@ export const StaticRange=constructor(NativeStaticRange,(args,state)=>{
   converted[0]=new Proxy({},{get(_target,key){
     const value=Reflect.get(source,key,source);
     if(key!=='startContainer'&&key!=='endContainer')return value;
-    const node=unwrap_document(value);if(node===globalThis.document)state.alias=value;
+    const node=unwrap_document(value);
+    // Do not probe authored values before native Web IDL validates them.
+    state.inputs.push([key,node,value]);
     return node;
   }});
   return converted;
@@ -61,14 +83,14 @@ const nativeCreate=globalThis.Document?.prototype.createRange,nativeSelection=gl
 export const createRange=nativeCreate&&new Proxy(nativeCreate,{apply(target,receiver,args){return track(Reflect.apply(target,unwrap_document(receiver),args),receiver);}});
 export const getSelection=nativeSelection&&new Proxy(nativeSelection,{apply(target,receiver,args){
   const selection=Reflect.apply(target,unwrap_document(receiver),args);
-  if(selection)selections.set(selection,{alias:receiver});return selection;
+  if(selection)selections.set(selection,aliases(receiver));return selection;
 }});
 if(NativeRange){
   Document.prototype.createRange=createRange;
   const patched=new Set();
   for(const Native of [NativeRange,NativeStaticRange])if(Native)for(const name of ['startContainer','endContainer','commonAncestorContainer']){
     const entry=descriptor(Native.prototype,name);if(!entry||patched.has(entry.property.get))continue;
-    const {prototype,property}=entry,get=function(){const node=property.get.call(this);return mapped(ranges.get(this),node);};
+    const {prototype,property}=entry,get=function(){const node=property.get.call(this);return mapped(ranges.get(this),node,name);};
     patched.add(property.get);patched.add(get);
     Object.defineProperty(prototype,name,{...property,get});
   }
@@ -85,25 +107,25 @@ if(NativeRange){
     NativeRange.prototype[name]=new Proxy(native,{apply(target,receiver,args){const converted=[...args];if(args.length)converted[0]=unwrap_document(args[0]);return Reflect.apply(target,receiver,converted);}});
   }
   const clone=NativeRange.prototype.cloneRange;
-  NativeRange.prototype.cloneRange=new Proxy(clone,{apply(target,receiver,args){const result=Reflect.apply(target,receiver,args),state=ranges.get(receiver);return state?track(result,state.alias):result;}});
+  NativeRange.prototype.cloneRange=new Proxy(clone,{apply(target,receiver,args){const result=Reflect.apply(target,receiver,args),state=ranges.get(receiver);return state?track(result,undefined,copy_aliases(state,receiver)):result;}});
 }
 if(globalThis.Selection){
   if(getSelection)Document.prototype.getSelection=getSelection;
   const windowSelection=globalThis.getSelection;
   if(windowSelection)globalThis.getSelection=new Proxy(windowSelection,{apply(target,receiver,args){
     const selection=Reflect.apply(target,unwrap_global_target(receiver),args);
-    if(selection)selections.set(selection,{alias:wrap_document(globalThis.document)});return selection;
+    if(selection)selections.set(selection,aliases(wrap_document(globalThis.document)));return selection;
   }});
   for(const name of ['anchorNode','focusNode']){
     const property=Object.getOwnPropertyDescriptor(Selection.prototype,name);
     Object.defineProperty(Selection.prototype,name,{...property,get(){const node=property.get.call(this);return mapped(selections.get(this),node);}});
   }
   const getRange=Selection.prototype.getRangeAt;
-  Selection.prototype.getRangeAt=new Proxy(getRange,{apply(target,receiver,args){const range=Reflect.apply(target,receiver,args);return track(range,selections.get(receiver)?.alias||wrap_document(globalThis.document));}});
+  Selection.prototype.getRangeAt=new Proxy(getRange,{apply(target,receiver,args){const range=Reflect.apply(target,receiver,args);return track(range,undefined,selections.get(receiver));}});
   const addRange=Selection.prototype.addRange;
   Selection.prototype.addRange=new Proxy(addRange,{apply(target,receiver,args){
     const result=Reflect.apply(target,receiver,args);
-    try{if(getRange.call(receiver,0)===args[0]&&ranges.has(args[0]))selections.set(receiver,{alias:ranges.get(args[0]).alias});}catch{}
+    try{if(getRange.call(receiver,0)===args[0]&&ranges.has(args[0]))selections.set(receiver,ranges.get(args[0]));}catch{}
     return result;
   }});
   const methods={collapse:[0],setPosition:[0],extend:[0],setBaseAndExtent:[0,2],selectAllChildren:[0],containsNode:[0]};
@@ -112,10 +134,12 @@ if(globalThis.Selection){
     Selection.prototype[name]=new Proxy(native,{apply(target,receiver,args){
       const converted=[...args];for(const index of positions)if(index<args.length)converted[index]=unwrap_document(args[index]);
       const result=Reflect.apply(target,receiver,converted);
-      if(name!=='containsNode')for(const index of positions)if(converted[index]===globalThis.document)selections.set(receiver,{alias:args[index]});
+      if(name!=='containsNode')for(const index of positions)if(converted[index]&&kind.call(converted[index])===9){
+        let state=selections.get(receiver);if(!state)selections.set(receiver,state=aliases());state.documents.set(converted[index],args[index]);
+      }
       return result;
     }});
   }
   const composed=Selection.prototype.getComposedRanges;
-  if(composed)Selection.prototype.getComposedRanges=new Proxy(composed,{apply(target,receiver,args){const list=Reflect.apply(target,receiver,args),alias=selections.get(receiver)?.alias||wrap_document(globalThis.document);for(const range of list)track(range,alias);return list;}});
+  if(composed)Selection.prototype.getComposedRanges=new Proxy(composed,{apply(target,receiver,args){const list=Reflect.apply(target,receiver,args);for(const range of list)track(range,undefined,copy_aliases(selections.get(receiver),range));return list;}});
 }
