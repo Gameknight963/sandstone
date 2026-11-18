@@ -41,14 +41,27 @@ export function rewrite_source(source, globals, {module = false, url, resolve, s
   function build(node, scope) {
     if (node.type === "FunctionDeclaration") bind(node.id, scope);
     if (["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(node.type)) {
-      scope = new Scope(scope, "function");
+      // Parameter initializers run outside the body's variable environment.
+      // Closures created there must not capture a later body var/function.
+      scope = new Scope(scope, "block");
       if (node.type === "FunctionExpression") bind(node.id, scope);
       node.params.forEach(param => bind(param, scope));
+      scopes.set(node,scope);
+      const bodyScope=new Scope(scope,"function");
+      children(node,(child,key)=>build(child,key==='body'?bodyScope:scope));
+      return;
+    } else if(node.type==='SwitchStatement'){
+      scopes.set(node,scope);
+      build(node.discriminant,scope);
+      // The discriminant precedes the shared lexical environment of all cases.
+      const caseScope=new Scope(scope,"block");
+      node.cases.forEach(branch=>build(branch,caseScope));
+      return;
     } else if (node.type === "ClassDeclaration" || node.type === "ClassExpression") {
       if (node.type === "ClassDeclaration") bind(node.id, scope);
       scope = new Scope(scope, "block");
       bind(node.id, scope);
-    } else if (["BlockStatement", "CatchClause", "ForStatement", "ForInStatement", "ForOfStatement", "SwitchStatement"].includes(node.type)) {
+    } else if (["BlockStatement", "CatchClause", "ForStatement", "ForInStatement", "ForOfStatement"].includes(node.type)) {
       scope = new Scope(scope, "block");
       if (node.type === "CatchClause") bind(node.param, scope);
     }

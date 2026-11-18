@@ -10,6 +10,20 @@ function compile(Constructor,args,context){
   return Function(output.contextName,output.thisName,output.scopeName,body)(context,value=>value===globalThis?context:value,create_global_scope(context,['location','globalThis','fetch']));
 }
 
+test('Default parameter expressions do not inherit function-body declarations',()=>{
+  const context={location:{href:'https://virtual.test/'}};
+  assert.deepEqual(compile(Function,['value=location.href','var location={href:"body"};return [value,location.href]'],context)(),[context.location.href,'body']);
+  assert.equal(compile(Function,['value=location.href','function location(){}return value'],context)(),context.location.href);
+  assert.equal(compile(Function,['value=()=>location.href','var location;return value()'],context)(),context.location.href);
+  assert.equal(compile(Function,['{[location.href]:value}','var location;return value'],context)({[context.location.href]:7}),7);
+});
+
+test('Switch discriminants use the outer scope while case expressions retain their lexical TDZ',()=>{
+  const context={location:{href:'https://virtual.test/'}};
+  assert.equal(compile(Function,['switch(location.href){case "https://virtual.test/":let location="body";return location;}'],context)(),'body');
+  assert.throws(()=>compile(Function,['switch("value"){case location:let location="body";}'],context)(),ReferenceError);
+});
+
 test('Dynamic template scopes retain local methods, assignments, unscopables and direct eval bindings',()=>{
   const context={location:{href:'https://virtual.test/'}};context.globalThis=context;
   const locals={location:'local',value:7,fetch(){return this.value;}};
@@ -35,9 +49,9 @@ test('Dynamic function rewriting keeps parameters and fresh helper bindings sepa
 test('Dynamic async and generator sources preserve native function kinds and parameter scope',async()=>{
   const context={location:{href:'https://virtual.test/'}};context.globalThis=context;
   const Async=Object.getPrototypeOf(async function(){}).constructor,Generator=Object.getPrototypeOf(function*(){}).constructor,AsyncGenerator=Object.getPrototypeOf(async function*(){}).constructor;
-  assert.equal(await compile(Async,['value=location.href','return value'],context)(),context.location.href);
+  assert.equal(await compile(Async,['value=location.href','var location;return value'],context)(),context.location.href);
   for(const Constructor of [Generator,AsyncGenerator]){
-    const iterator=compile(Constructor,['value=location.href','yield value;return this===globalThis'],context)();
+    const iterator=compile(Constructor,['value=location.href','var location;yield value;return this===globalThis'],context)();
     assert.deepEqual(await iterator.next(),{done:false,value:context.location.href});
     assert.deepEqual(await iterator.next(),{done:true,value:true});
   }

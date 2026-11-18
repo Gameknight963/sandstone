@@ -12,6 +12,12 @@ async page=>{
     const results=[],capture=operation=>{try{return {value:operation()??null};}catch(error){return {error:error.name};}},families=[Function,Object.getPrototypeOf(async function(){}).constructor,Object.getPrototypeOf(function*(){}).constructor,Object.getPrototypeOf(async function*(){}).constructor];
     results.push({global:Function('return this')()===globalThis,url:Function('return location.href')(),constructor:(()=>{}).constructor===Function,fromPrototype:(()=>{}).constructor('return location.href')()});
     results.push(capture(()=>Function('fetch','return fetch')('local')),capture(()=>Function('{location}','return location')({location:'local'})),capture(()=>Function('value=location.href','return value')()));
+    results.push(capture(()=>Function('value=location.href','var location={href:"body"};return [value,location.href]')()),capture(()=>Function('value=()=>location.href','var location;return value()')()));
+    results.push(capture(()=>Function('value=location.href','function location(){}return value')()),capture(()=>Function('{[location.hostname]:value}','var location;return value')({[location.hostname]:7})));
+    function parameterScope(value=location.href){var location={href:'body'};return [value,location.href];}
+    const arrowScope=(value=()=>location.href)=>{var location;return value();};
+    results.push(capture(()=>parameterScope()),capture(()=>arrowScope()));
+    results.push(capture(()=>Function('switch(location.href){default:let location="body";return location;}')()),capture(()=>Function('switch("value"){case location:let location="body";}')()));
     results.push(capture(()=>Function('__ctx__','return [__ctx__,location.href]')('local')),capture(()=>Function('__get_this__','return [__get_this__,this===globalThis]')('local')),capture(()=>Function('return typeof anonymous')()),capture(()=>Function('return typeof __sandstone_dynamic_context__')()));
     const locals={name:'local name',location:'local location',value:7,fetch(){return this.value;}};
     results.push(capture(()=>Function('data','with(data){return [name,location,fetch(),this===globalThis]}')(locals)));
@@ -24,7 +30,7 @@ async page=>{
     const target=Function('return new.target');results.push({newTarget:new target()===target,prototype:target.prototype.constructor===target});
     for(const operation of [()=>Function('a /*','return 1'),()=>Function('return )'),()=>Function(Symbol('body')),()=>Function('value=1','"use strict";return value')])results.push(capture(operation));
     for(let index=0;index<families.length;index++){
-      const Constructor=families[index],generator=index>=2,fn=Constructor('value=location.href',generator?'yield value;return this===globalThis':'return [value,this===globalThis]');
+      const Constructor=families[index],generator=index>=2,fn=Constructor('value=location.href',generator?'var location;yield value;return this===globalThis':'var location;return [value,this===globalThis]');
       let value;if(generator){const iterator=fn();value=[(await iterator.next()).value,(await iterator.next()).value];}else value=await fn();
       results.push({kind:index,value,name:fn.name,length:fn.length,constructor:fn.constructor===Constructor,tag:Object.prototype.toString.call(fn),parent:index===0?Object.getPrototypeOf(Constructor)===Function.prototype:Object.getPrototypeOf(Constructor)===Function,source:Function.prototype.toString.call(fn)});
     }
