@@ -31,8 +31,8 @@ export async function compile_worker_cycles(entry,records,loader,rollup){
         const rewritten=loader.rewrite(record.source,{
           module:true,url:record.url,importReferrer:{key:record.key},stripAttributes:true,
           contextName:names.contextAlias,thisName:names.contextAlias+'.__get_this__',
-          resolveNamespace:specifier=>loader.records.get(loader.map.resolve(specifier,record.url))?.namespaceBlob,
-          resolve(specifier){const dependency=loader.records.get(loader.map.resolve(specifier,record.url));return dependency.blob||dependency.nativeKey;}
+          resolveNamespace:(specifier,type)=>loader.get_record(loader.map.resolve(specifier,record.url),type)?.namespaceBlob,
+          resolve(specifier,type){const dependency=loader.get_record(loader.map.resolve(specifier,record.url),type);return dependency.blob||dependency.nativeKey;}
         });
         // Distinguish authored built-in references from helpers the compiler
         // will add later. Public Object.freeze must retain native semantics.

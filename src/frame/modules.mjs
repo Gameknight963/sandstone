@@ -3,6 +3,7 @@ import {parse_referrer_policy} from '../referrer.mjs';
 import {module_context_name} from './rewrite/module_context.mjs';
 import {mime_essence} from '../mime.mjs';
 import {javascript_mime_essence} from './script_types.mjs';
+import {static_module_type} from './module_attributes.mjs';
 const import_string=String;
 
 export function validate_module_response(response,type,url){
@@ -77,7 +78,7 @@ export function module_dependencies(source) {
   const ast = parse(source, {module: true, next: true});
   return ast.body.filter(node => ["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type) && node.source).map(node => ({
     specifier: node.source.value,
-    type: node.attributes?.find(attribute => (attribute.key.name || attribute.key.value) === "type")?.value.value || "javascript"
+    type: static_module_type(node)
   }));
 }
 
@@ -108,14 +109,17 @@ export class ModuleLoader {
     return this.contextModule?(this.contextModuleURL??=this.contextModule()):undefined;
   }
 
+  get_record(url,type='javascript'){
+    return this.records.get(JSON.stringify([url,type]));
+  }
+
   record(key, type = "javascript", credentials = "same-origin",context) {
     if (!this.types.has(type)) throw new TypeError(`Unsupported module type: ${type}`);
-    let record = this.records.get(key);
-    if (record && record.type !== type) throw new TypeError(`Conflicting module types for ${key}`);
+    let record = this.get_record(key,type);
     if (!record) {
       const request={...(typeof context==='function'?context():context||this.context())};
       record = {key, url: key, type, credentials,request,policy:parse_referrer_policy(request.referrerPolicy), source: undefined, blob: null, nativeKey: `sandstone:module:${++this.module_id}`, dependencies: []};
-      this.records.set(key, record);
+      this.records.set(JSON.stringify([key,type]), record);
     }
     return record;
   }
@@ -132,7 +136,7 @@ export class ModuleLoader {
       ...(options.referrer!==undefined?{referrer:options.referrer}:{}),
       ...(options.referrerPolicy!==undefined?{referrerPolicy:options.referrerPolicy}:{})
     });
-    return this.prepare_graph(this.record(this.map.resolve(specifier, base), options.with?.type || options.assert?.type || "javascript", options.credentials || this.records.get(base)?.credentials,context));
+    return this.prepare_graph(this.record(this.map.resolve(specifier, base), options.with?.type || options.assert?.type || "javascript", options.credentials || this.get_record(base)?.credentials,context));
   }
 
   prepare_inline(source, base, credentials,context) {
@@ -152,7 +156,7 @@ export class ModuleLoader {
           record.policy=parse_referrer_policy(response.headers.get('referrer-policy'),record.policy);
           validate_module_response(response,record.type,record.key);
           record.source = await response.text();
-          if (!this.records.has(record.url)) this.records.set(record.url, record);
+          if (!this.get_record(record.url,record.type)) this.records.set(JSON.stringify([record.url,record.type]), record);
         }
         if (record.type === "json") { JSON.parse(record.source); return; }
         if(record.type==='css')return;
@@ -188,9 +192,9 @@ export class ModuleLoader {
       let source = record.type === "json" ? `export default ${contextName}.__json_module__(${JSON.stringify(record.source)});` : record.type==='css'?`export default ${contextName}.__css_module__(${JSON.stringify(record.source)},${JSON.stringify(record.url)});`:this.rewrite(record.source, {
         module: true, url: record.url, sourceURL:record.url,importReferrer:{key:record.key}, stripAttributes: true,
         ...(contextURL?{contextName,thisName:contextName+'.__get_this__'}:{}),
-        resolveNamespace:specifier=>this.records.get(this.map.resolve(specifier,record.url))?.namespaceBlob,
-        resolve: specifier => {
-          const dependency = this.records.get(this.map.resolve(specifier, record.url));
+        resolveNamespace:(specifier,type)=>this.get_record(this.map.resolve(specifier,record.url),type)?.namespaceBlob,
+        resolve: (specifier,type) => {
+          const dependency = this.get_record(this.map.resolve(specifier, record.url),type);
           return dependency.blob || dependency.nativeKey;
         }
       });
@@ -246,7 +250,7 @@ export class ModuleLoader {
     // Inline modules can share a URL while retaining different fetch options.
     // Rewritten imports carry their record identity, separately from URL labels.
     const reference=base&&typeof base==='object';
-    const parent=reference&&Object.hasOwn(base,'key')?this.records.get(base.key):undefined;
+    const parent=reference&&Object.hasOwn(base,'key')?this.get_record(base.key):undefined;
     const script=!parent&&reference&&Object.hasOwn(base,'url')&&typeof base.url==='string'?base:undefined;
     if(parent)base=parent.url;
     else if(script)base=script.url;

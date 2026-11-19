@@ -42,7 +42,7 @@ test('A failed context factory cannot mark a module usable or poison later prepa
     register(){throw new Error('Unexpected import map')},execute(){throw new Error('Preparation executed code')}
   });
   await assert.rejects(loader.prepare_url('./main.js','https://private-retry.test/'),/Context unavailable/);
-  assert.equal(loader.records.get('https://private-retry.test/main.js').blob,null);assert.equal(sources.size,0);
+  assert.equal(loader.get_record('https://private-retry.test/main.js').blob,null);assert.equal(sources.size,0);
   fail=false;const record=await loader.prepare_url('./main.js','https://private-retry.test/');
   assert.ok(record.blob);assert.equal(fetches,1);assert.ok(sources.get(record.blob).includes('from "blob:private-context"'));
 });

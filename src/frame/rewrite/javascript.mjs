@@ -1,5 +1,6 @@
 import { parse } from "../javascript_parser.mjs";
 import {function_source_entries} from './function_sources.mjs';
+import {static_module_type} from '../module_attributes.mjs';
 const terminated_nodes=new Set(['ExpressionStatement','VariableDeclaration','ReturnStatement','ThrowStatement','BreakStatement','ContinueStatement','DebuggerStatement','DoWhileStatement','PropertyDefinition','FieldDefinition']);
 
 class Scope {
@@ -217,17 +218,17 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
     // on a preceding initializer, return value or field expression.
     if(!for_binding&&(terminated_nodes.has(node.type)||default_expression)&&source[node.end-1]!==';')edits.push([node.end,node.end,';',1]);
     if (resolve && ["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type) && node.source) {
-      const namespace=node.specifiers?.find(specifier=>specifier.type==='ImportNamespaceSpecifier');
-      const bridge=(namespace||node.type==='ExportAllDeclaration'&&node.exported)&&resolveNamespace?.(node.source.value);
+      const type=static_module_type(node),namespace=node.specifiers?.find(specifier=>specifier.type==='ImportNamespaceSpecifier');
+      const bridge=(namespace||node.type==='ExportAllDeclaration'&&node.exported)&&resolveNamespace?.(node.source.value,type);
       if(bridge){
         let replacement;
         if(namespace){
           const normal=node.specifiers.find(specifier=>specifier.type==='ImportDefaultSpecifier');
-          replacement=(normal?'import '+normal.local.name+' from '+JSON.stringify(resolve(node.source.value))+';':'')+'import {namespace as '+namespace.local.name+'} from '+JSON.stringify(bridge)+';';
+          replacement=(normal?'import '+normal.local.name+' from '+JSON.stringify(resolve(node.source.value,type))+';':'')+'import {namespace as '+namespace.local.name+'} from '+JSON.stringify(bridge)+';';
         }else replacement='export {namespace as '+(node.exported.name||JSON.stringify(node.exported.value))+'} from '+JSON.stringify(bridge)+';';
         edits.push([node.start,node.end,replacement]);return;
       }
-      edits.push([node.source.start, node.source.end, JSON.stringify(resolve(node.source.value))]);
+      edits.push([node.source.start, node.source.end, JSON.stringify(resolve(node.source.value,type))]);
       if (stripAttributes && node.attributes?.length) edits.push([node.source.end, node.end, ";"]);
     }
     if ((url||dynamicImport) && node.type === "ImportExpression") {
