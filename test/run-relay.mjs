@@ -14,6 +14,7 @@ import {cookie_fixture,verify_cookie_storage,verify_embedded_cookies} from './co
 import {module_requests_fixture,verify_module_requests} from './module-requests-fixture.mjs';
 import {empty_headers_fixture,empty_headers_script,verify_empty_headers} from './empty-headers-fixture.mjs';
 import {transport_fixture,verify_transport_entries} from './transport-fixture.mjs';
+import {upload_fixture,upload_script,verify_uploads,verify_relay_uploads} from './upload-fixture.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -38,6 +39,7 @@ const server=create_relay_server((request,response)=>{
   if(moduleRequests.handle(request,response,url))return;
   if(empty_headers_fixture(request,response,url))return;
   if(transport_fixture(request,response,url))return;
+  if(upload_fixture(request,response,url))return;
   if(cookie_fixture(request,response,url))return;
   if(url.pathname.startsWith('/css-context/')){
     const policy=url.searchParams.get('policy')||'';
@@ -401,6 +403,8 @@ try{
   const nativeEmptyHeaders=await nativePage.evaluate(source=>eval(source),empty_headers_script(origin,'empty-native'));
   verify_empty_headers(nativeEmptyHeaders);
   console.log(JSON.stringify({transportEntries:await verify_transport_entries(nativeContext,origin,nativeEmptyHeaders)}));
+  const nativeUploads=JSON.parse(await nativePage.evaluate(source=>eval(source),upload_script()));
+  verify_uploads(nativeUploads);
   await nativeContext.addCookies([{url:origin.replace('127.0.0.1','localhost')+'/fonts/',name:'font_session',value:'cross',sameSite:'Lax'}]);
   await nativePage.goto(origin+'/fonts/page?client=font-native');
   const nativeFonts=JSON.parse(await nativePage.evaluate(source=>eval(source),font_script('font-native')));
@@ -588,6 +592,7 @@ try{
   const emptyHeaders=await page.evaluate(source=>main_frame.eval_js(source),empty_headers_script(origin,'empty-'+storageDenied));
   verify_empty_headers(emptyHeaders);
   assert.deepEqual(emptyHeaders,nativeEmptyHeaders,'Explicit empty request headers differ from native Fetch/XHR');
+  await verify_relay_uploads(page,origin,nativeUploads);
   const fontClient='font-'+storageDenied;
   await page.evaluate(url=>main_frame.navigate_to(url),origin+'/fonts/page?client='+fontClient);
   const actualFonts=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),font_script(fontClient)));
@@ -736,7 +741,7 @@ try{
   assert.deepEqual(direct,[],'A relayed connection made a direct HTTP request');
   assert.deepEqual(errors,[],'A relayed connection produced a browser error');
   assert.ok(closed.some(value=>value.client===client&&value.count===3));
-    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','JavaScript/JSON/CSS module negotiation, redirects and Vary caching','explicit empty Fetch/XHR headers and request bodies','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','opaque iframe WebSocket Origin and SameSite cookie parity','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','synthetic lifecycle events preserve SSE reconnection','native iframe unload closes retained event streams','native request cleanup'],events:proxied,direct}));
+    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','JavaScript/JSON/CSS module negotiation, redirects and Vary caching','explicit empty Fetch/XHR headers and request bodies','large uploads and bounded transport metadata','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','opaque iframe WebSocket Origin and SameSite cookie parity','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','synthetic lifecycle events preserve SSE reconnection','native iframe unload closes retained event streams','native request cleanup'],events:proxied,direct}));
   await context.close();
   }
 }finally{

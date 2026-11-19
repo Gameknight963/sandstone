@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {streaming_http_session} from '../src/host/http_session.mjs';
 
 class Session {
@@ -11,6 +12,26 @@ class Session {
 }
 const HTTPSession=streaming_http_session(Session);
 const bytes=value=>new TextEncoder().encode(value);
+
+test('Binary uploads keep request option metadata bounded while retaining every body byte',async()=>{
+  class NativeSession extends Session {
+    static async create_options(params){
+      const request=new Request('https://test/upload',params);
+      params.headers=Object.fromEntries(request.headers);
+      return new Uint8Array(await request.arrayBuffer());
+    }
+  }
+  const Adapter=streaming_http_session(NativeSession),backing=new Uint8Array(1024*1024+16).fill(255),view=backing.subarray(7,backing.length-9);
+  view[0]=13;view[view.length-1]=29;
+  const params={method:'POST',headers:{'Content-Type':'application/octet-stream','X-Upload':'retained'},body:view};
+  const body=await Adapter.create_options(params);
+  assert.equal(body.byteLength,view.byteLength);
+  const hash=value=>createHash('sha256').update(value).digest('hex');
+  assert.equal(hash(body),hash(view));
+  const metadata=JSON.stringify(params);
+  assert.ok(metadata.length<512,'Body bytes expanded into request option JSON');
+  assert.deepEqual(JSON.parse(metadata),{method:'POST',headers:{'content-type':'application/octet-stream','x-upload':'retained'}});
+});
 
 test('Not Modified responses have null bodies even when libcurl supplies a stream',()=>{
   class NativeSession extends Session {static create_response(body,info){return new Response(body,info);}}

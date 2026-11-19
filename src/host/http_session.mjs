@@ -14,6 +14,9 @@ export function streaming_http_session(HTTPSession) {
       delete params.event_source_last_id;
       if (lastID !== undefined && (typeof lastID !== 'string' || /[\0\r\n]/.test(lastID))) throw new TypeError('Invalid Last-Event-ID');
       const body = await super.create_options(params);
+      // libcurl receives the bytes separately. Including them in its JSON
+      // options duplicates uploads and expands binary data into numeric keys.
+      delete params.body;
       // Headers/Request use ByteString, while SSE IDs are UTF-8. Add this header
       // after libcurl's Request normalization so its UTF-8 encoder handles it.
       if (lastID) params.headers['Last-Event-ID'] = lastID;
