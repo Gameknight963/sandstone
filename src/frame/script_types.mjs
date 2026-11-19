@@ -7,6 +7,7 @@ const javascript=new Set([
   'text/x-ecmascript','text/x-javascript'
 ]);
 const lower=value=>value.replace(/[A-Z]/g,letter=>letter.toLowerCase());
+export function javascript_mime_essence(value){return javascript.has(value);}
 export function script_kind(type,language=null){
   if(type===null){
     if(language===null||language==='')return 'classic';

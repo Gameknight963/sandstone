@@ -9,6 +9,7 @@ import { prefetch_worker_scripts } from "../worker_scripts.mjs";
 import {on_document_unload} from '../runtime_events.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {parse_referrer_policy,default_referrer_policy} from '../../referrer.mjs';
+import {validate_module_response} from '../modules.mjs';
 
 const NativeWorker = globalThis.Worker;
 const native_import_scripts = globalThis.importScripts?.bind(globalThis);
@@ -252,6 +253,7 @@ export class FakeWorker extends EventTarget {
     const credentials = this.#options.type === "classic" ? "same-origin" : this.#options.credentials;
     const response = await network.fetch(this.#url, {credentials,referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(this.#url)?{mode:'same-origin'}:{}), signal: this.#controller.signal});
     if (!response.ok) throw new TypeError(`Worker request failed: ${response.status}`);
+    if(this.#options.type==='module')validate_module_response(response,'javascript',this.#url);
     const network_script=/^https?:/.test(response.url||this.#url);
     this.#referrerPolicy=parse_referrer_policy(response.headers.get('referrer-policy'),network_script?default_referrer_policy:this.#referrerPolicy);
     const source = await response.text();

@@ -23,7 +23,7 @@ test('Cyclic worker compiler executes live exports, namespace bridges and later 
     'names-b.js':'import {open as parentOpen} from "./names-a.js";const __ctx__=null,__get_this__=null;export const early=parentOpen.name;export function open(){}export const render=function(){};export default class {static observed=this.name;}export function names(){switch(parentOpen.name){case open.name:function open(){};return [open.name,render.name,__ctx__,__get_this__];default:return ["wrong",open.name];}}'
   };
   const loader=new ModuleLoader({
-    fetch:async url=>new Response(sources[url.slice(base.length)]),
+    fetch:async url=>new Response(sources[url.slice(base.length)],{headers:{'Content-Type':'text/javascript'}}),
     rewrite:(source,options)=>rewrite_source(source,[],options),
     createURL:source=>'data:text/javascript;base64,'+Buffer.from(source).toString('base64'),
     register(){throw new Error('Worker graph attempted to register an import map')},
@@ -75,7 +75,7 @@ test('Worker compilation closes graphs with multiple cycles, shared dependencies
       sources.set(base+index+'.js',[...[...edges].map(target=>'import {id as value'+target+'} from "./'+target+'.js";'),'export const id='+index+';export function read(){return ['+names.join(',')+']}'].join('\n'));
     }
     const loader=new ModuleLoader({
-      fetch:async url=>{requests.set(url,(requests.get(url)||0)+1);return new Response(sources.get(url));},
+      fetch:async url=>{requests.set(url,(requests.get(url)||0)+1);return new Response(sources.get(url),{headers:{'Content-Type':'text/javascript'}});},
       rewrite:(source,options)=>rewrite_source(source,[],options),
       createURL(source){const url='blob:graph/'+seed+'/'+urls.size;urls.set(url,source);return url;},
       register(){throw new Error('Worker graph used an import map')},execute(){throw new Error('Preparation executed a module')},compileCycles:compile_worker_cycles

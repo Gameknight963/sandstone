@@ -15,7 +15,7 @@ test('Native module graphs isolate encoded helper aliases and share one trusted 
   };
   let contexts=0;const requests=[];
   const loader=new ModuleLoader({
-    fetch:async url=>{requests.push(url);return new Response(sources[url.slice(base.length)]);},
+    fetch:async url=>{requests.push(url);return new Response(sources[url.slice(base.length)],{headers:{'Content-Type':url.endsWith('.json')?'application/json':'text/javascript'}});},
     rewrite:(source,options)=>rewrite_source(source,['location'],{...options,globalName:options.contextName+'.__globals__'}),
     createURL:source=>'data:text/javascript;base64,'+Buffer.from(source).toString('base64'),
     contextModule(){contexts++;return 'data:text/javascript;base64,'+Buffer.from('export default __ctx__;\n//# sourceURL=private-unit-context').toString('base64');},
@@ -35,7 +35,7 @@ test('Native module graphs isolate encoded helper aliases and share one trusted 
 test('A failed context factory cannot mark a module usable or poison later preparation',async()=>{
   let fail=true,fetches=0;const sources=new Map();
   const loader=new ModuleLoader({
-    fetch:async()=>{fetches++;return new Response('export const value=1;');},
+    fetch:async()=>{fetches++;return new Response('export const value=1;',{headers:{'Content-Type':'text/javascript'}});},
     rewrite:(source,options)=>rewrite_source(source,[],options),
     createURL(source){const url='blob:prepared/'+sources.size;sources.set(url,source);return url;},
     contextModule(){if(fail)throw new Error('Context unavailable');return 'blob:private-context';},

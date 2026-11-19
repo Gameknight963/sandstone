@@ -62,7 +62,7 @@ function environment(sources,options={}) {
       requests.push({url, ...options});
       const fixture = sources[url];
       if (fixture === undefined) return new Response("missing", {status: 404});
-      const response = new Response(typeof fixture === "string" ? fixture : fixture.source,{headers:fixture.headers});
+      const response = new Response(typeof fixture === "string" ? fixture : fixture.source,{headers:fixture.headers??{'Content-Type':url.endsWith('.json')?'application/json':'text/javascript'}});
       if (typeof fixture === "object") Object.defineProperty(response, "url", {value: fixture.url});
       return response;
     },
@@ -107,8 +107,8 @@ test('Classic and module import references ignore inherited metadata properties'
 
 test('Module dependencies inherit response policies and final parent URLs, separately from the entry referrer',async()=>{
   const env=environment({
-    'https://example.com/start.js':{url:'https://cdn.test/modules/root.js',source:'import "./child.js";',headers:{'Referrer-Policy':'unsafe-url'}},
-    'https://cdn.test/modules/child.js':{source:'import "./grand.js";',headers:{'Referrer-Policy':'no-referrer'}},
+    'https://example.com/start.js':{url:'https://cdn.test/modules/root.js',source:'import "./child.js";',headers:{'Content-Type':'text/javascript','Referrer-Policy':'unsafe-url'}},
+    'https://cdn.test/modules/child.js':{source:'import "./grand.js";',headers:{'Content-Type':'text/javascript','Referrer-Policy':'no-referrer'}},
     'https://cdn.test/modules/grand.js':'export const value=1;'
   },{context:()=>({referrer:'https://example.com/page',referrerPolicy:'origin'})});
   await env.loader.prepare_url('./start.js','https://example.com/',{credentials:'include'});
@@ -122,7 +122,7 @@ test('Module dependencies inherit response policies and final parent URLs, separ
 test('Delayed imports retain their module record context without consulting changed document settings',async()=>{
   let unavailable=false;
   const env=environment({
-    'https://example.com/start.js':{url:'https://cdn.test/modules/root.js',source:'export const load=()=>import("./late.js");export const url=import.meta.url;',headers:{'Referrer-Policy':'no-referrer'}},
+    'https://example.com/start.js':{url:'https://cdn.test/modules/root.js',source:'export const load=()=>import("./late.js");export const url=import.meta.url;',headers:{'Content-Type':'text/javascript','Referrer-Policy':'no-referrer'}},
     'https://cdn.test/modules/late.js':'export default 1;'
   },{context:()=>{if(unavailable)throw new Error('Current document settings were read');return {referrer:'https://example.com/page',referrerPolicy:'unsafe-url'}}});
   const entry=await env.loader.prepare_url('./start.js','https://example.com/');
@@ -150,7 +150,7 @@ test('Inline modules sharing a base URL retain independent policies for delayed 
 
 test('Invalid response policies preserve inherited module policy and explicit entry options take precedence',async()=>{
   const env=environment({
-    'https://example.com/root.js':{source:'import "./child.js";',headers:{'Referrer-Policy':'invalid-policy'}},
+    'https://example.com/root.js':{source:'import "./child.js";',headers:{'Content-Type':'text/javascript','Referrer-Policy':'invalid-policy'}},
     'https://example.com/child.js':'export default 1;'
   },{context:()=>({referrer:'https://example.com/current',referrerPolicy:'no-referrer'})});
   await env.loader.prepare_url('./root.js','https://example.com/',{referrer:'https://example.com/chosen',referrerPolicy:'origin'});

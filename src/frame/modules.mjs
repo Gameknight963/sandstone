@@ -1,7 +1,18 @@
 import { parse } from "./javascript_parser.mjs";
 import {parse_referrer_policy} from '../referrer.mjs';
 import {module_context_name} from './rewrite/module_context.mjs';
+import {mime_essence} from '../mime.mjs';
+import {javascript_mime_essence} from './script_types.mjs';
 const import_string=String;
+
+export function validate_module_response(response,type,url){
+  const mime=mime_essence(response.headers.get('content-type'));
+  const valid=type==='javascript'?javascript_mime_essence(mime):type==='json'?mime==='application/json'||mime==='text/json'||!!mime?.endsWith('+json'):mime==='text/css';
+  if(!valid){
+    response.body?.cancel().catch(()=>{});
+    throw new TypeError(`Invalid ${type} module MIME type: ${url}`);
+  }
+}
 
 function url_like(value, base) {
   try {
@@ -139,9 +150,7 @@ export class ModuleLoader {
           if (!response.ok) throw new TypeError(`Module request failed (${response.status}): ${record.key}`);
           record.url = response.url || record.key;
           record.policy=parse_referrer_policy(response.headers.get('referrer-policy'),record.policy);
-          if(record.type==='css'){
-            if(response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()!=='text/css')throw new TypeError(`Invalid CSS module MIME type: ${record.key}`);
-          }
+          validate_module_response(response,record.type,record.key);
           record.source = await response.text();
           if (!this.records.has(record.url)) this.records.set(record.url, record);
         }
