@@ -148,7 +148,7 @@ export function rewrite_iframe(iframe_element) {
           if(active_request&&!active_request.signal.aborted){active_request.abort();generation++;}
           iframe_url=value;
         });
-      ready.catch(error=>{if(current())console.error(error);});
+      ready.catch(error=>{if(current()&&error?.name!=='AbortError')console.error(error);});
       blank_ready=true;
       loader.child_names.set(frame_id,value=>{window_name=value;});
       loader.child_urls.set(frame_id,(value,context)=>{if(!context||context===token)iframe_url=value;});

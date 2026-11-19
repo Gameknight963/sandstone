@@ -8,6 +8,7 @@ import {verifyHTMLInputStream} from './html-input-native.mjs';
 import {verifyDirectEval} from './direct-eval.playwright.mjs';
 import {verifyDocumentEncoding} from './document-encoding.playwright.mjs';
 import {verifyFormEncoding} from './form-encoding.playwright.mjs';
+import {verifyRetiredReadiness} from './iframe-retired-readiness.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -390,6 +391,7 @@ try {
     result.passed.push(...await timed(verifyLocks(page), 'Web Locks fixture'));
     result.passed.push(...await timed(verifyIframeRaces(page), 'Iframe race fixture'));
     result.passed.push(...await timed(verifyIframeLifecycle(page), 'Iframe lifecycle fixture'));
+    result.passed.push(...await timed(verifyRetiredReadiness(page), 'Retired iframe readiness fixture'));
     result.passed.push(...await timed(verifyNavigationTargets(page), 'Navigation targets fixture'));
     result.passed.push(...await timed(verifyNavigationLifetime(page), 'Navigation lifetime fixture'));
     result.passed.push(...await timed(verifyScriptLabels(page), 'Script filename fixture'));

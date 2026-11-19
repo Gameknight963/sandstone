@@ -89,6 +89,17 @@ test('Document-open URL updates require both the source frame and its current do
   assert.throws(()=>call('document_open',['child','child-document',snapshot]),{name:'SecurityError'});
 });
 
+test('Retirement cancels only readiness requests carrying their original source capability',()=>{
+  const {call,child,policy,port,contexts}=fixture(),nested={};policy.attach(port,nested,'child');child('child');
+  contexts.get('child-document').retired=true;
+  for(const procedure of ['storage_ready','cookies_ready']){
+    assert.throws(()=>call(procedure,['child','child-document'],nested),{name:'AbortError'});
+    for(const args of [['root','child-document'],['child','root-document'],['child','unknown']])assert.throws(()=>call(procedure,args,nested),{name:'SecurityError'});
+    assert.throws(()=>call(procedure,['child','child-document'],{}),{name:'SecurityError'});
+  }
+  assert.throws(()=>call('idb_databases',['child'],nested),{name:'SecurityError'});
+});
+
 test('Cookie snapshots require the calling frame current document capability',()=>{
   const {call,child,policy,port}=fixture(),nested={};policy.attach(port,nested,'child');child('child');
   assert.deepEqual(call('cookies_ready',['child','child-document'],nested),['child','child-document']);

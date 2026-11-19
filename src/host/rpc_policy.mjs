@@ -49,6 +49,12 @@ export class RPCSourcePolicy {
     if(procedure==='frame_unregister'){
       if(this.frames()[args[0]]&&!this.owns(scope,args[0]))denied();return args;
     }
+    if(procedure==='storage_ready'||procedure==='cookies_ready'){
+      if(args[0]!==scope.id||args[1]!==scope.context)denied();
+      // Retirement can precede the physical navigation of the old document.
+      // Cancel its own readiness requests without authorizing a snapshot.
+      if(scope.entry.retired)throw new DOMException('Document was retired','AbortError');
+    }
     this.active(scope);
     if(procedure==='fetch_worker_script'){
       if(args[0]!==scope.id||!this.owns(scope,args[1])||!this.frames()[args[1]]?.worker)denied();return args;
