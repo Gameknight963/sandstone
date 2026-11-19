@@ -17,6 +17,7 @@ const attribute=(node,name)=>node.attrs?.find(attribute=>!attribute.namespace&&a
 const qualified=attribute=>attribute.prefix?attribute.prefix+':'+attribute.name:attribute.name;
 const escaped=value=>value.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/\r/g,'&#13;');
 const query_document=globalThis.Document?.prototype.querySelectorAll,query_element=globalThis.Element?.prototype.querySelectorAll;
+const muted=globalThis.HTMLMediaElement&&Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'muted').set;
 
 // Materialize parser mutations through an inactive document. New subtrees must
 // receive resource interception before adoption can start image/media loads.
@@ -96,6 +97,9 @@ export class HTMLDOMStream {
         prime_inert_script(node);node.removeAttribute('type');node.__rewritten__=true;
       }
       for(const value of ast.attrs)this.#attribute(node,value);
+      // The HTML parser initializes mutedness from this attribute; ordinary
+      // setAttribute only changes defaultMuted and cannot perform that step.
+      if(ast.namespaceURI===html&&(ast.tagName==='audio'||ast.tagName==='video')&&attribute(ast,'muted')!==undefined)muted.call(node,true);
       if(ast.namespaceURI===html&&ast.tagName==='script')capture_script(node)(node);
       if(ast.content){
         const mode=attribute(ast,'shadowrootmode')?.toLowerCase();let root;
