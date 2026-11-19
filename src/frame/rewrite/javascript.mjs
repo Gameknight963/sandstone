@@ -377,7 +377,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
     if(node.type==='WithStatement'&&!preserveWith){
       const token=with_name(),runtime=withToken?withToken+'.context':withContext;
       withScopes.get(node).token=token;
-      const owner=eval_owner(scopes.get(node)),anchor=renameEval&&(owner!==root||evalContext&&!evalContext.global);
+      const anchor=renameEval;
       let aliasFallback='';
       if(renameEval){
         const lookup={name:'eval'};scopes.set(lookup,scopes.get(node.object));
@@ -391,7 +391,9 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
       edits.push([node.object.end,node.object.end,'),'+(withToken||'null')+aliasFallback+(anchor?',('+physical.slice(1)+')':'')+')']);
       const block=node.body.type==='BlockStatement',offset=block?node.body.start+1:node.body.start;
       if(anchor){
-        edits.push([node.body.start,node.body.start,'{const '+token+'='+withContext+'.__take_with__();const eval='+token+'.physicalEval;']);
+        // An object environment retains direct eval without adding a lexical
+        // eval binding that would reject otherwise valid var declarations.
+        edits.push([node.body.start,node.body.start,'{const '+token+'='+withContext+'.__take_with__();with({__proto__:null,eval:'+token+'.physicalEval})']);
         edits.push([node.body.end,node.body.end,'}',2]);
       }else{
         edits.push([offset,offset,(block?'':'{')+'const '+token+'='+withContext+'.__take_with__();']);

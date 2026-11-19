@@ -39,7 +39,7 @@ function evaluate(source,proxy){
   return runInContext(rewrite(source),realm);
 }
 
-for(const {name,source} of directEvalCases)test('Direct eval: '+name,()=>{
-  const wrapped='JSON.stringify((()=>{try{return {value:('+source+')}}catch(error){return {error:error.name}}})())';
+for(const {name,source,program} of directEvalCases)test('Direct eval: '+name,()=>{
+  const wrapped=program?'try{'+source+'}catch(error){window.result={error:error.name}};JSON.stringify(window.result)':'JSON.stringify((()=>{try{return {value:('+source+')}}catch(error){return {error:error.name}}})())';
   assert.equal(evaluate(wrapped,true),evaluate(wrapped,false));
 });

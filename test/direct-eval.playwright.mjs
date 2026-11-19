@@ -5,7 +5,7 @@ export async function verifyDirectEval(page,{batch=0,batches=1}={}){
   const origin='https://direct-eval.test',requests=[],direct=[];
   const cases=directEvalCases.filter((_,index)=>index%batches===batch);
   const pages=Object.fromEntries(cases.map((example,index)=>['/case-'+index,
-    '<!doctype html><script>try{window.result={value:('+example.source+')}}catch(error){window.result={error:error.name}}<\/script>']));
+    '<!doctype html><script>try{'+(example.program?example.source:'window.result={value:('+example.source+')}')+'}catch(error){window.result={error:error.name}}<\/script>']));
   const worker='onmessage=async({data:value})=>{try{postMessage(await eval("fetch(\'./data\').then(r=>r.json()).then(data=>[value,data.value,location.pathname])"))}catch(error){postMessage({error:error.name})}}';
   const aliasWorker='onmessage=async({data:value})=>{try{const read=Function("eval","value",\'return eval("fetch(\\\'./data\\\').then(r=>r.json()).then(data=>[value,data.value,location.pathname])")\');postMessage(await read(globalThis.eval,value))}catch(error){postMessage({error:error.name})}}';
   const resources={
@@ -20,7 +20,11 @@ export async function verifyDirectEval(page,{batch=0,batches=1}={}){
   page.on('request',record);
   await context.route(origin+'/**',route=>{
     const path=new URL(route.request().url()).pathname,[contentType,body]=resources[path]||['text/html',pages[path]||'<!doctype html>'];
-    return route.fulfill({contentType,body});
+    // Playwright itself evaluates through window.eval. A script-level eval
+    // declaration may replace it; restore it after recording the native result.
+    const nativeBody=cases[Number(path.slice('/case-'.length))]?.program&&path.startsWith('/case-')?
+      body.replace('<script>','<script>const __fixture_native_eval__=window.eval;').replace('<\/script>',';window.eval=__fixture_native_eval__;<\/script>'):body;
+    return route.fulfill({contentType,body:nativeBody});
   });
   try{
     await page.evaluate(({origin,pages,resources})=>{

@@ -1,4 +1,12 @@
 export const directEvalCases = [
+  {name:'global with eval ignores inherited private unscopables',program:true,source:'Object.prototype[Symbol.unscopables]={eval:true};try{with({eval:()=>9}){let value=7;window.result={value:eval("value")}}}finally{delete Object.prototype[Symbol.unscopables]}'},
+  {name:'global with eval function declarations retain native resolution',program:true,source:'with({eval:window.eval}){let value=7;window.result={value:eval("function eval(){return value};eval()")}}'},
+  {name:'global with eval sees block lexicals',program:true,source:'with({eval:window.eval}){let value=7;window.result={value:eval("value")}}'},
+  {name:'global nested with eval sees both objects',program:true,source:'with({eval:window.eval,value:7})with({next:9}){let local=11;window.result={value:eval("[value,next,local]")}}'},
+  {name:'global with eval declarations retain object assignments',program:true,source:'window.object={eval:window.eval};with(window.object){let value=7;window.result={value:eval("var eval=()=>value;eval()")}}window.result.objectEval=window.object.eval();'},
+  {name:'global with eval retains method receivers',program:true,source:'window.object={eval:window.eval,run(){return this===window.object}};with(window.object){window.result={value:eval("run()")}}'},
+  {name:'global with eval preserves var publication',program:true,source:'with({eval:window.eval}){let value=7;window.result={value:eval("var created=value;created")}}window.result.created=window.created;'},
+  {name:'nested eval with preserves global completion',program:true,source:'window.result={value:eval('+JSON.stringify('with({eval:window.eval}){let value=7;eval("value")}')+')};'},
   {"name":"authored eval helper property","source":"(function(value){Object.defineProperty(window,'__eval_prepare__',{configurable:true,value(){throw new Error('authored helper')}});try{return eval('value')}finally{delete window.__eval_prepare__}})(7)"},
   {"name":"authored with helper property","source":"(function(value){Object.defineProperty(window,'__take_with__',{configurable:true,value(){throw new Error('authored helper')}});try{with({eval:window.eval})return eval('value')}finally{delete window.__take_with__}})(7)"},
   {"name":"with supplied native eval","source":"(function(value){with({eval:window.eval})return eval(\"value\")})(7)"},
