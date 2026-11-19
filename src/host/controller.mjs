@@ -88,7 +88,7 @@ export class ProxyFrame {
     this.iframe = document.createElement("iframe");
     this.iframe.sandbox = "allow-scripts allow-same-origin allow-forms allow-modals allow-pointer-lock";
     this.iframe.allowFullscreen = true;
-    this.iframe.allow = 'focus-without-user-activation *';
+    this.iframe.allow = 'focus-without-user-activation *; autoplay *';
     this.iframe.setAttribute("frame-id", this.id);
 
     iframes[this.id] = this;

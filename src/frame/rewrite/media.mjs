@@ -6,11 +6,12 @@ import {on_dom_construction} from '../dom_operations.mjs';
 import {listen_runtime} from '../runtime_events.mjs';
 import {get_document_encoding} from '../document_encoding.mjs';
 import {encoding_parse_url} from '../../url_encoding.mjs';
-import {begin_media_playback,cancel_media_playback,finish_media_playback} from '../media_playback.mjs';
+import {begin_media_playback,cancel_media_playback,finish_media_playback,prepare_media_playback,pending_media_url,release_media_url,load_media_sources} from '../media_playback.mjs';
 
 const prepared = new WeakMap();
 const sessions = new WeakMap();
 const source_loads = new WeakMap();
+const source_error_events=new WeakSet();
 const owner=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get;
 const native_base=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'baseURI').get;
 const view=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get;
@@ -19,12 +20,24 @@ const attr_owner=globalThis.Attr&&Object.getOwnPropertyDescriptor(Attr.prototype
 const attr_value=globalThis.Attr&&Object.getOwnPropertyDescriptor(Attr.prototype,'value');
 const dispatch=globalThis.EventTarget?.prototype.dispatchEvent;
 const attribute=globalThis.Element?.prototype.getAttribute;
+const media_current=globalThis.HTMLMediaElement&&Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'currentSrc').get;
 let policy_observer;
 const image_prototype=globalThis.HTMLImageElement?.prototype;
 const image_properties=image_prototype&&Object.fromEntries(['src','srcset','currentSrc'].map(key=>[key,Object.getOwnPropertyDescriptor(image_prototype,key)]));
 const well_formed=String.prototype.toWellFormed;
 const native_media=[['HTMLImageElement',['src','srcset']],['HTMLVideoElement',['src','poster']],['HTMLAudioElement',['src']],['HTMLSourceElement',['src','srcset']],['HTMLInputElement',['src']],['HTMLTrackElement',['src']]].map(([name,keys])=>({prototype:globalThis[name]?.prototype,keys}));
 const is_prototype=Object.prototype.isPrototypeOf;
+function source_error(event){
+  if(!event.isTrusted||source_error_events.has(event)||!(event.target instanceof HTMLSourceElement))return;
+  const element=event.target,parent=element.parentElement,state=sessions.get(element)?.states.get('src');
+  if(!(parent instanceof HTMLMediaElement)||!state||raw_media_attribute(element,'src')===media_placeholder)return;
+  source_error_events.add(event);
+  // Internal reselection must not report an already rejected candidate again.
+  // Authored load() and source changes start a fresh native selection attempt.
+  if(state.sourceError?.parent===parent&&state.sourceError.generation===state.generation)event.stopImmediatePropagation();
+  else state.sourceError={parent,generation:state.generation};
+}
+listen_runtime(globalThis,'error',source_error,true);
 on_dom_construction(element=>{
   if(prepared.has(element))return;
   const type=native_media.find(({prototype})=>prototype&&is_prototype.call(prototype,element));
@@ -123,20 +136,35 @@ function observe_policy(element,options){
 }
 export function observe_media_container(element){
   if(element instanceof HTMLPictureElement||element instanceof HTMLMediaElement)observe_policy(element,{childList:true});
+  if(element instanceof HTMLMediaElement)prepare_media_playback(element,reason=>{
+    for(const source of element.children)if(source instanceof HTMLSourceElement){
+      refresh_source(source);
+      if(reason==='load'){
+        const state=sessions.get(source)?.states.get('src');
+        if(state){state.sourceError=null;state.resetPlaceholder?.();}
+      }
+    }
+  });
 }
 
-function source_pending(element) {
+function source_pending(element,placeholder) {
   const parent = element.parentElement;
-  if (!(element instanceof HTMLSourceElement) || !(parent instanceof HTMLMediaElement)) return () => {};
-  const state = source_loads.get(parent) || {pending: 0, revision: 0};
+  if (!(element instanceof HTMLSourceElement) || !(parent instanceof HTMLMediaElement)||sessions.get(parent)?.authored.get('src')!==null) return () => {};
+  const state = source_loads.get(parent) || {revision: 0,placeholders:new Map()};
   source_loads.set(parent, state);
-  state.pending++;
+  const token=begin_media_playback(parent,true);
+  if(placeholder)state.placeholders.set(placeholder,element);
   state.revision++;
   return () => {
-    state.pending--;
     const revision = ++state.revision;
     queueMicrotask(() => {
-      if (!state.pending && state.revision === revision && parent.isConnected) parent.load();
+      if(state.revision!==revision||sessions.get(parent)?.authored.get('src')!==null)return;
+      const current=media_current.call(parent),selected=state.placeholders.get(current);
+      if(selected&&selected.parentElement===parent&&sessions.get(selected)?.states.get('src')?.pending)return;
+      // A delivered, selected source can play without waiting for an unused
+      // fallback. Completing an unused candidate must not restart playback.
+      if(current&&!selected&&current!==media_placeholder){state.placeholders.clear();return;}
+      load_media_sources(parent,token);
     });
   };
 }
@@ -194,10 +222,11 @@ export function rewrite_media(element,initial_sources) {
   register_media_attributes(element,authored,(key,value)=>{
     const state=states.get(key);if(state)state.update(value);else authored.set(key,value);
   },key=>{
+    const previous=authored.get(key);
     authored.set(key,null);
-    if(key==='src')cancel_media_playback(element);
+    if(key==='src'&&previous!==null)cancel_media_playback(element);
     const state=states.get(key);
-    if(state){state.generation++;state.pending=false;state.controller?.abort();state.release(state.urls);state.urls=[];}
+    if(state){state.generation++;state.sourceError=null;state.pending=false;state.controller?.abort();state.release(state.urls);state.urls=[];}
     render_media_attribute(element,key,null);
   },key=>states.get(key)?.pending);
   if(element instanceof HTMLImageElement){
@@ -212,7 +241,7 @@ export function rewrite_media(element,initial_sources) {
     const state = {generation: 0, urls: [], controller: null,waiting:false,requestElement:null,pending:false};
     states.set(key, state);
     const release = urls => {
-      for (const url of urls) { URL.revokeObjectURL(url); delete network.known_urls[url]; }
+      for (const url of urls) { release_media_url(url); delete network.known_urls[url]; }
     };
     let descriptor;
     function update(value,intended_active) {
@@ -223,6 +252,7 @@ export function rewrite_media(element,initial_sources) {
       const request_encoding=get_document_encoding(active?globalThis.document:document);
       session.active=active;
       const generation = ++state.generation;
+      state.sourceError=null;
       state.pending=true;
       state.controller?.abort();
       const controller = state.controller = new AbortController();
@@ -244,10 +274,27 @@ export function rewrite_media(element,initial_sources) {
       const urls = [];
       const resources = new Map();
       let request_options;
-      const done=key==='src'?source_pending(element):()=>{};
       const source=element instanceof HTMLSourceElement;
       state.requestElement=request_element(element,key);
       state.waiting=active&&source&&!state.requestElement;
+      const media_parent=key==='src'&&source&&state.requestElement instanceof HTMLMediaElement?state.requestElement:null;
+      const remote=active&&value&&!/^(data|blob):/i.test(value);
+      const placeholders=[];
+      state.resetPlaceholder=null;
+      let placeholder;
+      if(media_parent&&remote){
+        const reset=()=>{
+          if(!state.pending)return;
+          const local=pending_media_url();if(!local)return;
+          placeholder=local;state.urls.push(local);placeholders.push(local);
+          let target;try{target=encoding_parse_url(value,request_base,request_encoding).href;}catch{target=value;}
+          sessions.get(media_parent)?.aliases.set(local,target);
+          source_loads.get(media_parent)?.placeholders.set(local,element);
+          render_media_attribute(element,key,local);
+        };
+        state.resetPlaceholder=reset;reset();
+      }
+      const done=media_parent&&remote?source_pending(element,placeholder):()=>{};
       // A source has no independent loader. Keep its authored URL virtual until
       // a picture image or media parent can supply the actual request context.
       if(state.waiting)return;
@@ -262,6 +309,7 @@ export function rewrite_media(element,initial_sources) {
           controller.signal.throwIfAborted();
           const local = network.create_blob_url(blob, url.href);
           aliases.set(local,url.href);
+          if(media_parent)sessions.get(media_parent)?.aliases.set(local,url.href);
           urls.push(local);
           return local;
         })());
@@ -303,9 +351,15 @@ export function rewrite_media(element,initial_sources) {
               const failed='data:application/octet-stream,failed';
               playback.onURL(failed);finish_media_playback(playback);descriptor.set.call(element,failed);
             }
-            else dispatch.call(element,new Event("error"));
+            else if(media_parent){
+              let target;
+              try{target=encoding_parse_url(value,request_base,request_encoding).href;}catch{target=value;}
+              const failed=network.create_blob_url(new Blob(['invalid media'],{type:'application/octet-stream'}),target);
+              state.urls=[failed];sessions.get(media_parent)?.aliases.set(failed,target);
+              descriptor.set.call(element,failed);
+            }else dispatch.call(element,new Event("error"));
           }
-        } finally { if(generation===state.generation)state.pending=false;done(); }
+        } finally { release(placeholders);if(generation===state.generation)state.pending=false;done(); }
       })();
     }
     descriptor = element instanceof HTMLImageElement?image_properties[key]:intercept_property(element, key, {
@@ -333,12 +387,17 @@ export function rewrite_media(element,initial_sources) {
   }
   // Removing a temporary source can produce a native empty-source error.
   listen_runtime(element,"error",event=>{
-    if (!event.isTrusted) return;
+    if (!event.isTrusted||event.target!==element) return;
+    source_error(event);
     if (!properties.every(key => authored.get(key)===null||placeholder_media_attribute(element,key))) return;
     // A picture source can be selected without an authored URL on the image.
     // Its real decode failure must still reach the page and document loader.
     if(element instanceof HTMLImageElement){
       const current=image_properties.currentSrc.get.call(element);
+      if(current&&current!==media_placeholder)return;
+    }
+    if(element instanceof HTMLMediaElement){
+      const current=media_current.call(element);
       if(current&&current!==media_placeholder)return;
     }
     event.stopImmediatePropagation();
