@@ -150,7 +150,7 @@ export class ModuleLoader {
     return record.loading??=Promise.resolve().then(async()=>{
       try{
         if (record.source === undefined) {
-          const response = await this.fetch(record.key, {credentials: record.credentials,...record.request});
+          const response = await this.fetch(record.key, {credentials: record.credentials,...record.request},record.type);
           if (!response.ok) throw new TypeError(`Module request failed (${response.status}): ${record.key}`);
           record.url = response.url || record.key;
           record.policy=parse_referrer_policy(response.headers.get('referrer-policy'),record.policy);

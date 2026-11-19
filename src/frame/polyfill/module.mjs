@@ -28,7 +28,7 @@ export const modules = new ModuleLoader({
   contextModule:()=>context_url??=network.create_blob_url(new Blob(['export default '+runtime_context_name+';'],{type:'text/javascript'}),'sandstone:module-context'),
   context:()=>({referrer:ctx.location.href,referrerPolicy:document_referrer_policy()}),
   types:globalThis.CSSStyleSheet?['javascript','json','css']:['javascript','json'],
-  fetch: (url, options) => network.fetch(url, {...options,mode:'cors',destination:'script'}),
+  fetch: (url, options,type) => network.fetch(url, {...options,mode:'cors',destination:type==='json'?'json':type==='css'?'style':'script'}),
   rewrite: (source, options) => parser.rewrite_js(source, options),
   createURL: (source, type, original) => network.create_blob_url(new Blob([source], {type}), original),
   register(imports) {

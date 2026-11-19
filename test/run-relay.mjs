@@ -11,6 +11,7 @@ import {keepalive_fixture,keepalive_quota_script,keepalive_finish_script,keepali
 import {cache_fixture,cache_script} from './cache-fixture.mjs';
 import {download_fixture,verify_downloads,prepare_downloads} from './download-fixture.mjs';
 import {cookie_fixture,verify_cookie_storage,verify_embedded_cookies} from './cookie-fixture.mjs';
+import {module_requests_fixture,verify_module_requests} from './module-requests-fixture.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -23,6 +24,7 @@ const fonts=font_fixture();
 const keepalive=keepalive_fixture();
 const cacheFixture=cache_fixture();
 const downloadFixture=download_fixture();
+const moduleRequests=module_requests_fixture();
 const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
 const server=create_relay_server((request,response)=>{
   const url=new URL(request.url,'http://localhost');
@@ -31,6 +33,7 @@ const server=create_relay_server((request,response)=>{
   if(keepalive.handle(request,response,url))return;
   if(cacheFixture.handle(request,response,url))return;
   if(downloadFixture.handle(request,response,url))return;
+  if(moduleRequests.handle(request,response,url))return;
   if(cookie_fixture(request,response,url))return;
   if(url.pathname.startsWith('/css-context/')){
     const policy=url.searchParams.get('policy')||'';
@@ -385,6 +388,8 @@ try{
   for(const name of ['accepted','unload','form'])keepalive.release('child-keep-native',name);
   await keepalive.wait('child-keep-native',['accepted','unload','form'],true);
   const nativeChildKeepalive=await keepalive.values('child-keep-native');
+  const nativeModules=await verify_module_requests(url=>nativePage.goto(url),source=>nativePage.evaluate(source=>eval(source),source),origin,'modules-native');
+  const nativeModuleHeaders=moduleRequests.profiles('modules-native');
   await nativeContext.addCookies([{url:origin.replace('127.0.0.1','localhost')+'/fonts/',name:'font_session',value:'cross',sameSite:'Lax'}]);
   await nativePage.goto(origin+'/fonts/page?client=font-native');
   const nativeFonts=JSON.parse(await nativePage.evaluate(source=>eval(source),font_script('font-native')));
@@ -565,6 +570,9 @@ try{
   await keepalive.wait(childKeepClient,['accepted','unload','form'],true);
   assert.deepEqual(await keepalive.values(childKeepClient),nativeChildKeepalive,'Nested keepalive requests lost their child document context during navigation');
   await page.evaluate(origin=>sandstone.controller.site_data.setCookie(origin.replace('127.0.0.1','localhost')+'/fonts/','font_session=cross; SameSite=Lax; Path=/fonts/'),origin);
+  const moduleClient='modules-'+storageDenied;
+  assert.deepEqual(await verify_module_requests(url=>page.evaluate(url=>main_frame.navigate_to(url),url),source=>page.evaluate(source=>main_frame.eval_js(source),source),origin,moduleClient),nativeModules,'Negotiated module representations differ from native Chromium');
+  assert.deepEqual(moduleRequests.profiles(moduleClient),nativeModuleHeaders,'JSON/CSS module Accept, Origin or referrer headers differ from native Chromium');
   const fontClient='font-'+storageDenied;
   await page.evaluate(url=>main_frame.navigate_to(url),origin+'/fonts/page?client='+fontClient);
   const actualFonts=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),font_script(fontClient)));
@@ -713,7 +721,7 @@ try{
   assert.deepEqual(direct,[],'A relayed connection made a direct HTTP request');
   assert.deepEqual(errors,[],'A relayed connection produced a browser error');
   assert.ok(closed.some(value=>value.client===client&&value.count===3));
-    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','opaque iframe WebSocket Origin and SameSite cookie parity','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','synthetic lifecycle events preserve SSE reconnection','native iframe unload closes retained event streams','native request cleanup'],events:proxied,direct}));
+    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','JavaScript/JSON/CSS module negotiation, redirects and Vary caching','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','opaque iframe WebSocket Origin and SameSite cookie parity','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','synthetic lifecycle events preserve SSE reconnection','native iframe unload closes retained event streams','native request cleanup'],events:proxied,direct}));
   await context.close();
   }
 }finally{

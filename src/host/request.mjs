@@ -28,6 +28,8 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
   for (let hop = 0; hop <= 20; hop++) {
     crossed_origin ||= source.origin!==url.origin;
     const headers = new Headers(options.headers);
+    const accept=destination==='json'?'application/json,*/*;q=0.5':destination==='style'?'text/css,*/*;q=0.1':undefined;
+    if(accept!==undefined&&!headers.has('accept'))headers.set('accept',accept);
     headers.delete("cookie");
     headers.delete('origin');headers.delete('referer');
     if (mode === 'same-origin' && (opaque||source.origin !== url.origin)) throw new TypeError('Cross-origin request with same-origin mode');
@@ -36,8 +38,9 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
     const allowed = credentials === "include" || (credentials === "same-origin" && !opaque && url.origin === source.origin && !cors);
     const safe_method = /^(GET|HEAD)$/i.test(options.method || "GET");
     const sameSiteContext = !opaque && !context.cross_site && same_site(top, source) && same_site(top, url) && !crossSiteRedirect ? "strict" : context.navigation && !context.nested && safe_method ? "lax" : "none";
-    // Font loads send their document Origin even for a same-origin URL.
-    const origin = request_origin(source.href,url.href,{method:options.method,mode,policy,tainted,cors: cors || destination === 'font'||destination==='script'&&mode==='cors'});
+    // CORS resource loads retain Origin even for same-origin URLs. This also
+    // applies to JSON and stylesheet modules, whose destinations differ from JS.
+    const origin = request_origin(source.href,url.href,{method:options.method,mode,policy,tainted,cors: cors || destination === 'font'||['script','json','style'].includes(destination)&&mode==='cors'});
     if (origin !== null) headers.set('origin',origin);
     referrer = request_referrer(referrer,url.href,policy);
     if (referrer) headers.set('referer',referrer);
