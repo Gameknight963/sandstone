@@ -15,6 +15,7 @@ import {verifyImageLoads} from './image-loads.playwright.mjs';
 import {verifyFrameFocus} from './frame-focus.playwright.mjs';
 import {verifyBodyHandlers} from './body-handlers.playwright.mjs';
 import {verifyMediaMuted} from './media-muted.playwright.mjs';
+import {verifyMediaPlayback} from './media-playback.playwright.mjs';
 import {verifyNodeDocuments} from './node-documents.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
@@ -430,6 +431,7 @@ try {
     result.passed.push(...await timed(verifyBodyHandlers(page), 'Body window handler fixture'));
     result.passed.push(...await timed(verifyNodeDocuments(page), 'Node document identity fixture'));
     result.passed.push(...await timed(verifyMediaMuted(page), 'Initial media mutedness fixture'));
+    result.passed.push(...await timed(verifyMediaPlayback(page), 'Pending media playback fixture'));
     result.passed.push(...await timed(verifyAudio(page), 'Audio constructor fixture'));
     result.passed.push(...await timed(verifyImageConstructor(page), 'Image constructor fixture'));
     result.passed.push(...await timed(verifyMediaAttributes(page), 'Media attribute fixture'));

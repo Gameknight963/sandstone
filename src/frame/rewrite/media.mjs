@@ -6,6 +6,7 @@ import {on_dom_construction} from '../dom_operations.mjs';
 import {listen_runtime} from '../runtime_events.mjs';
 import {get_document_encoding} from '../document_encoding.mjs';
 import {encoding_parse_url} from '../../url_encoding.mjs';
+import {begin_media_playback,cancel_media_playback,finish_media_playback} from '../media_playback.mjs';
 
 const prepared = new WeakMap();
 const sessions = new WeakMap();
@@ -194,6 +195,7 @@ export function rewrite_media(element,initial_sources) {
     const state=states.get(key);if(state)state.update(value);else authored.set(key,value);
   },key=>{
     authored.set(key,null);
+    if(key==='src')cancel_media_playback(element);
     const state=states.get(key);
     if(state){state.generation++;state.pending=false;state.controller?.abort();state.release(state.urls);state.urls=[];}
     render_media_attribute(element,key,null);
@@ -225,7 +227,18 @@ export function rewrite_media(element,initial_sources) {
       state.controller?.abort();
       const controller = state.controller = new AbortController();
       if(session.readCurrent)session.previousCurrentSrc=reflected_current(element,session.readCurrent());
-      render_media_attribute(element,key,key==='srcset'?'':media_placeholder);
+      let playback;
+      if(key==='src'&&element instanceof HTMLMediaElement){
+        if(active&&value&&!/^(data|blob):/i.test(value))playback=begin_media_playback(element);
+        else cancel_media_playback(element);
+      }
+      if(playback){
+        let target;
+        try{target=encoding_parse_url(value,request_base,request_encoding).href;}catch{target=value;}
+        playback.onURL=url=>aliases.set(url,target);
+        playback.onURL(playback.url);
+      }
+      render_media_attribute(element,key,playback?.url||(key==='srcset'?'':media_placeholder));
       release(state.urls);
       state.urls = [];
       const urls = [];
@@ -280,11 +293,18 @@ export function rewrite_media(element,initial_sources) {
           }) : await resource(value);
           if (generation !== state.generation) { release(urls); return; }
           state.urls = urls;
+          finish_media_playback(playback);
           descriptor.set.call(element, rewritten);
         } catch (error) {
           release(urls);
           if(generation===state.generation)state.pending=false;
-          if (generation === state.generation && !controller.signal.aborted) dispatch.call(element,new Event("error"));
+          if (generation === state.generation && !controller.signal.aborted){
+            if(playback){
+              const failed='data:application/octet-stream,failed';
+              playback.onURL(failed);finish_media_playback(playback);descriptor.set.call(element,failed);
+            }
+            else dispatch.call(element,new Event("error"));
+          }
         } finally { if(generation===state.generation)state.pending=false;done(); }
       })();
     }
