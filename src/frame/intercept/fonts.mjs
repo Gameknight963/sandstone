@@ -136,7 +136,7 @@ if (NativeFontFace && NativeFontFaceSet) {
       const sentinel = '__sandstone_font_' + Array.from(crypto.getRandomValues(new Uint32Array(4))).join('_');
       const face = Reflect.construct(target,[faceDescriptors.family.get.call(validated),`local("${sentinel}")`,metadata(validated)],newTarget);
       const state = {face,source,base:ctx.document?.baseURI || ctx.location.href,
-        request:{fontFace:true,referrer:ctx.location.href,referrerPolicy:document_referrer_policy()},
+        request:{fontFace:true,encoding:'UTF-8',referrer:ctx.location.href,referrerPolicy:document_referrer_policy()},
         phase:'unloaded',real:null,sets:new Set(),resolve:null,reject:null,promise:null};
       state.promise = new Promise((resolve,reject)=>{state.resolve=resolve;state.reject=reject;});
       // The native FontStatusPromise is internally handled even if the page

@@ -19,6 +19,7 @@ export const FakeCSSStyleSheet = NativeSheet && new Proxy(NativeSheet, {
   construct(target, args, constructor) {
     const sheet = Reflect.construct(target, args, constructor);
     sheet_bases.set(sheet, new URL(args[0]?.baseURL || ctx.document.baseURI, ctx.document.baseURI).href);
+    sheet_requests.set(sheet,{encoding:'UTF-8'});
     return sheet;
   }
 });
@@ -27,7 +28,7 @@ export function create_css_module(source,url){
   const sheet=new FakeCSSStyleSheet({baseURL:url});
   // CSS module URLs use the stylesheet base, while referrers retain the
   // creating document's URL and policy even after same-document navigation.
-  sheet_requests.set(sheet,{referrer:ctx.location.href,referrerPolicy:document_referrer_policy()});
+  sheet_requests.set(sheet,{encoding:'UTF-8',referrer:ctx.location.href,referrerPolicy:document_referrer_policy()});
   // Native replacement drops @import rules. Hydrate only the accepted rules,
   // using local placeholders until their images and fonts reach the relay.
   replace_module_sheet(sheet,source);
@@ -94,7 +95,7 @@ if (globalThis.CSSStyleDeclaration && NativeSheet) {
     if (expected.size) {
       const accepted = restore_css(text.get.call(declaration), prepared.markers);
       const rule = parent.get.call(declaration);
-      const request = sheet_request(rule?.parentStyleSheet);
+      const request = rule?sheet_request(rule.parentStyleSheet):{encoding:'UTF-8'};
       const fontFace = rule instanceof CSSFontFaceRule;
       const pending = parse_css(accepted, declaration_base(declaration), undefined,
         fontFace ? {...request, fontFace:true} : request);

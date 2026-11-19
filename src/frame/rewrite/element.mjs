@@ -45,7 +45,7 @@ function rewrite_element_single(element) {
     style.cssText = "";
     remember_inline_style(element,inline_style);
     const version=inline_style_version(element);
-    let new_css = parse_css(inline_style, ctx.document.baseURI)
+    let new_css = parse_css(inline_style, ctx.document.baseURI,undefined,{encoding:'UTF-8'})
     if (typeof new_css === "string") {
       style.cssText = new_css;
       remember_inline_style(element,inline_style,new_css);

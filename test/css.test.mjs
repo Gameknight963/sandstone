@@ -2,6 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { css_references, decode_css, rewrite_css, prepare_css, restore_css, edit_css_parts } from '../src/frame/css.mjs';
 
+test('CSS URL queries follow each stylesheet encoding across imports',async()=>{
+  const requested=[];
+  await rewrite_css('@import "/theme.css?q=Тест"; .local{background:url("/local?q=Тест#雪")}', 'https://site.test/main.css', {
+    encoding:'windows-1251',
+    async fetch(url){
+      requested.push(url);
+      return new Response(url.includes('/theme.css?')?String.raw`.imported{background:url("/asset?q=\65e5\672c")}`:'image', {headers:{'Content-Type':url.includes('/theme.css?')?'text/css;charset=Shift_JIS':'image/png'}});
+    },
+    createURL:(_,url)=>'blob:'+url
+  });
+  assert.deepEqual(requested.sort(),[
+    'https://site.test/theme.css?q=%D0%A2%D0%B5%D1%81%D1%82',
+    'https://site.test/local?q=%D2%E5%F1%F2',
+    'https://site.test/asset?q=%93%FA%96{'
+  ].sort());
+});
+
 test('CSS resource tokens respect comments, strings, escapes and image-set type hints', () => {
   const source = String.raw`/* url(ignore.png) */
     @import /* comment */ "theme.css" layer(theme) supports(display: grid) screen;

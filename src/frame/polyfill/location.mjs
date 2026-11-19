@@ -2,6 +2,7 @@ import * as loader from "../loader.mjs";
 import { ctx } from "../context.mjs";
 import {flush_document_base} from '../document_base.mjs';
 import {history_hash} from './history.mjs';
+import {encoding_parse_url} from '../../url_encoding.mjs';
 
 export let internal = null;
 export function set_location(value) { flush_document_base();internal = new URL(value); loader.set_url(internal.href); }
@@ -33,9 +34,10 @@ export class FakeLocation {
     }
   }
   #navigate(value, mode) {
-    const next = new URL(value, loader.inherited_base_url ? ctx.document.baseURI : internal);
+    const text=`${value}`;
+    const next = encoding_parse_url(text, ctx.document.baseURI,loader.character_encoding);
     const same_base = next.origin === internal.origin && next.pathname === internal.pathname && next.search === internal.search;
-    if (same_base && (next.hash !== internal.hash || next.hash || String(value).startsWith("#"))) {
+    if (same_base && (next.hash !== internal.hash || next.hash || text.startsWith("#"))) {
       history_hash(ctx.history,next.href, mode === "replace");
       return;
     }

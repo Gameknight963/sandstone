@@ -10,6 +10,7 @@ import {verifyDocumentEncoding} from './document-encoding.playwright.mjs';
 import {verifyFormEncoding} from './form-encoding.playwright.mjs';
 import {verifyRetiredReadiness} from './iframe-retired-readiness.playwright.mjs';
 import {verifyHTMLURLs} from './html-urls.playwright.mjs';
+import {verifyURLSurfaces} from './url-surfaces.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -404,7 +405,7 @@ try {
     // deadlines as the standalone runtime grows with compatibility support.
     for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyHTMLSetters(page,batch,3), 'HTML setters fixture '+(batch+1)));
     result.passed.push(...await timed(verifyHTMLPosition(page), 'Positional HTML fixture'));
-    result.passed.push(...await timed(verifyParsedDocuments(page), 'Parsed document fixture'));
+    for(let batch=0;batch<2;batch++)result.passed.push(...await timed(verifyParsedDocuments(page,{batch,batches:2}), 'Parsed document fixture '+(batch+1)));
     result.passed.push(...await timed(verifyLiveClone(page), 'Live clone fixture'));
     result.passed.push(...await timed(verifyServerShadow(page), 'Server shadow fixture'));
     result.passed.push(...await timed(verifyHTMLInputStream(page), 'HTML input stream fixture'));
@@ -434,6 +435,7 @@ try {
     for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyFormEncoding(page,{batch,batches:3}), 'Legacy form encoding fixture '+(batch+1)));
     result.passed.push(...await timed(verifyDocumentEncoding(page), 'Document and resource encoding fixture'));
     for(let batch=0;batch<5;batch++)result.passed.push(...await timed(verifyHTMLURLs(page,{batch,batches:5}), 'HTML URL encoding fixture '+(batch+1)));
+    for(let batch=0;batch<4;batch++)result.passed.push(...await timed(verifyURLSurfaces(page,{batch,batches:4}), 'CSS and Location URL encoding fixture '+(batch+1)));
     result.passed.push(...await timed(verifyXHR(page), "XHR fixture"));
     await page.evaluate(source => main_frame.eval_js(source), axiosSource);
     const axiosResult = JSON.parse(await timed(page.evaluate(() => main_frame.eval_js(`(async () => {

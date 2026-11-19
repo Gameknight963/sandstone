@@ -1,5 +1,6 @@
 import {parse_referrer_policy} from '../referrer.mjs';
 import {decode_stylesheet_response} from '../text_encoding.mjs';
+import {encoding_parse_url} from '../url_encoding.mjs';
 
 const whitespace = character => /[\t\n\f\r ]/.test(character || "\0");
 const name_character = character => /[\w\u0080-\uffff-]/.test(character || "\0");
@@ -243,7 +244,7 @@ export function rewrite_css(source, base, {fetch, createURL, supports, transform
       if (!reference.supported) return Promise.resolve(empty_stylesheet);
     }
     let url;
-    try { url = new URL(reference.url, base); } catch { return Promise.resolve(reference.imported ? empty_stylesheet : empty_resource); }
+    try { url = encoding_parse_url(reference.url, base,reference.imported?'UTF-8':encoding); } catch { return Promise.resolve(reference.imported ? empty_stylesheet : empty_resource); }
     const hash = url.hash;
     url.hash = "";
     const font = !!(reference.font || fontFace);

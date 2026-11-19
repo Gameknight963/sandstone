@@ -1,4 +1,4 @@
-async page=>{
+async (page,{batch=0,batches=1}={})=>{
   const origin='https://parsed-documents.test',html='<!doctype html><main id="fixture"></main>',native=await page.context().newPage();
   const direct=[],block=route=>{direct.push(route.request().url());return route.abort();};
   await native.route(origin+'/**',route=>route.fulfill({contentType:'text/html',body:html}));
@@ -32,21 +32,22 @@ async page=>{
       cases.push([method+' scoped registry import',`if(typeof CustomElementRegistry.prototype.initialize!=='function')return 'unsupported';const registry=new CustomElementRegistry(),events=[];class ScopedHost extends HTMLElement{constructor(){super();this.internals=this.attachInternals();events.push(['host',this.isConnected]);}}class ScopedChild extends HTMLElement{constructor(){super();events.push(['child',this.isConnected]);}}registry.define('x-parsed-scoped-host',ScopedHost);registry.define('x-parsed-scoped-child',ScopedChild);const doc=Document.${method}('<x-parsed-scoped-host><template shadowrootmode="closed" shadowrootclonable shadowrootserializable><x-parsed-scoped-child></x-parsed-scoped-child></template></x-parsed-scoped-host>',{sanitizer:{}});registry.initialize(doc);const host=document.importNode(doc.body.firstElementChild,true);events.push(['returned']);fixture.append(host);const root=host.internals.shadowRoot;return {events,host:host instanceof ScopedHost,child:root.firstElementChild instanceof ScopedChild,registry:root.customElementRegistry===registry,html:host.getHTML({serializableShadowRoots:true})};`]);
       for(const kind of ['host','document','template'])cases.push([method+' inert clone '+kind,`customElements.define('x-parsed-clone',class extends HTMLElement{constructor(){super();this.internals=this.attachInternals();}});const doc=Document.${method}('${kind==='template'?'<template>':''}<x-parsed-clone><template shadowrootmode="closed" shadowrootclonable shadowrootserializable><b>Shadow</b></template><i>Light</i></x-parsed-clone>${kind==='template'?'</template>':''}',{sanitizer:{}}),source=${kind==='template'?'doc.querySelector("template").content':'doc.body.firstElementChild'},copy=${kind==='document'?'doc.cloneNode(true).body.firstElementChild':'source.cloneNode(true)'};fixture.append(copy);const host=fixture.querySelector('x-parsed-clone');return {html:host.getHTML({serializableShadowRoots:true}),global:host.internals.shadowRoot.customElementRegistry===customElements,sourceKept:source.ownerDocument!==host.ownerDocument};`]);
     }
-    for(const [name,body] of cases){
+    for(const [name,body] of cases.filter((_,index)=>index%batches===batch)){
       await navigate();const source=`(()=>{const fixture=document.getElementById('fixture');return JSON.stringify((()=>{${body}})());})()`;
       const expected=await evaluate(false,source),actual=await evaluate(true,source);if(expected!==actual)throw new Error(name+' differs: '+actual+' expected '+expected);
     }
     // Setter-created inert roots must follow the same native adoption path.
-    for(const closed of [false,true]){
+    for(const closed of [false,true].filter((_,index)=>index%batches===batch)){
       await navigate();const body=`(()=>{customElements.define('x-inert-setter',class extends HTMLElement{constructor(){super();this.internals=this.attachInternals();}});const doc=document.implementation.createHTMLDocument('');doc.body.setHTMLUnsafe('<x-inert-setter><template shadowrootmode="${closed?'closed':'open'}" shadowrootserializable><b>Shadow</b></template></x-inert-setter>');const host=doc.body.firstElementChild;document.getElementById('fixture').append(host);return JSON.stringify({html:host.getHTML({serializableShadowRoots:true}),global:host.internals.shadowRoot.customElementRegistry===customElements});})()`;
       const expected=await evaluate(false,body),actual=await evaluate(true,body);if(expected!==actual)throw new Error('Inert setter adoption differs: '+actual+' expected '+expected);
     }
-    for(const method of methods){
+    for(const method of methods.filter((_,index)=>index%batches===batch)){
       await navigate();
       await evaluate(true,`(()=>{customElements.define('x-parsed-resource',class extends HTMLElement{constructor(){super();this.internals=this.attachInternals();}});const doc=Document.${method}('<x-parsed-resource><template shadowrootmode="closed"><img id="picture" src="${origin}/shadow-${method}.svg"><link rel="stylesheet" href="${origin}/shadow.css"><span class="paint">Paint</span></template><img src="${origin}/light-${method}.svg"></x-parsed-resource>',{sanitizer:{}});document.getElementById('fixture').append(...doc.body.childNodes);globalThis.parsedRoot=document.querySelector('x-parsed-resource').internals.shadowRoot;return true;})()`);
       const deadline=Date.now()+5000;while(!await evaluate(true,`parsedRoot.getElementById('picture').naturalWidth===11&&getComputedStyle(parsedRoot.querySelector('.paint')).color==='rgb(34, 56, 78)'`)){if(Date.now()>deadline)throw new Error('Parsed closed-root resources did not load through relay: '+method+' '+JSON.stringify(direct));await new Promise(resolve=>setTimeout(resolve,20));}
     }
-    for(const method of methods)for(const kind of ['import','clone','document','template']){
+    for(const method of methods)for(const [index,kind] of ['import','clone','document','template'].entries()){
+      if((methods.indexOf(method)*4+index)%batches!==batch)continue;
       const filename='/imported-'+method+'-'+kind+'.svg',markup=(kind==='template'?'<template>':'')+'<div id="imported-host" style="display:inline-block"><template shadowrootmode="closed" shadowrootclonable shadowrootserializable><img src="'+origin+filename+'"></template></div>'+(kind==='template'?'</template>':'');
       const operation=kind==='import'?'document.importNode(doc.body.firstElementChild,true)':kind==='clone'?'doc.body.firstElementChild.cloneNode(true)':kind==='document'?'doc.cloneNode(true).body.firstElementChild':'doc.querySelector("template").content.cloneNode(true)';
       await navigate();await evaluate(true,`(()=>{const doc=Document.${method}(${JSON.stringify(markup)},{sanitizer:{}});document.getElementById('fixture').append(${operation});return true;})()`);
