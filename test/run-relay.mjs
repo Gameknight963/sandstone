@@ -16,6 +16,7 @@ import {empty_headers_fixture,empty_headers_script,verify_empty_headers} from '.
 import {transport_fixture,verify_transport_entries} from './transport-fixture.mjs';
 import {upload_fixture,upload_script,verify_uploads,verify_relay_uploads} from './upload-fixture.mjs';
 import {metadata_fixture,verify_metadata,metadata_evaluate} from './metadata-fixture.mjs';
+import {verifyServiceWorkerEvents} from './service-worker-events.playwright.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -325,6 +326,7 @@ async function beaconBodies(client){
 }
 try{
   browser=await chromium.launch({channel:channel==='headless'?undefined:channel,headless:true});
+  console.log(JSON.stringify({fixture:'Service worker event controls',passed:await verifyServiceWorkerEvents(browser)}));
   const nativeContext=await browser.newContext(),nativePage=await nativeContext.newPage();
   const nativeMetadata=await verify_metadata({
     navigate:url=>nativePage.goto(url),evaluate:source=>metadata_evaluate(nativePage,false,source),
