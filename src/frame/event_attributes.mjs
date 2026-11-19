@@ -6,19 +6,36 @@ import * as loader from './loader.mjs';
 import {event_handler,event_handler_value,event_target} from './event_identity.mjs';
 import {with_event_scope} from '../event_scope.mjs';
 
-const states=new WeakMap(),supported=new Set(),nativeHandlers=new WeakMap();
+const states=new WeakMap(),supported=new Set(),forwarded=new Set(),nativeHandlers=new WeakMap();
 let assigning=0;
 const attributes=globalThis.Element&&Object.getOwnPropertyDescriptor(Element.prototype,'attributes').get;
 const attrValue=globalThis.Attr&&Object.getOwnPropertyDescriptor(Attr.prototype,'value').get;
+const ownerDocument=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get;
+const children=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'childNodes').get;
+const forwards_to_window=element=>element instanceof HTMLBodyElement||element instanceof HTMLFrameSetElement;
+const forwarding_document=(element,name)=>forwarded.has(name)&&forwards_to_window(element)?ownerDocument.call(element):undefined;
+// Parser-created bodies are prepared in a document with no Window. Install
+// their forwarded handlers once adoption gives them the live parser document.
+// Ordinary DOM adoption must retain native inactive-handler behavior.
+export function activate_parser_event_attributes(node){
+  if(!globalThis.Node||!(node instanceof Node))return;
+  const pending=[node];
+  while(pending.length){
+    const current=pending.pop();
+    if(current instanceof Element&&forwards_to_window(current))rewrite_event_attributes(current,true);
+    for(const child of children.call(current))pending.push(child);
+  }
+}
 function entries(element){let value=states.get(element);if(!value){value=new Map();states.set(element,value);}return value;}
-export function rewrite_event_attributes(element){
+export function rewrite_event_attributes(element,activate=false){
   if(!(element instanceof Element)||is_inert_node(element))return;
   const handlers=entries(element);
   for(const attribute of attributes.call(element)){
     const name=attribute.name;
     if(attribute.namespaceURI!==null||!supported.has(name))continue;
     const source=attrValue.call(attribute);
-    if(handlers.get(name)?.source===source)continue;
+    const forwardingDocument=forwarding_document(element,name),previous=handlers.get(name);
+    if(previous?.source===source&&(!activate||previous.forwardingDocument===forwardingDocument))continue;
     let compiled;
     const handler=function(...args){
       if(loader.site_settings.allow_js===false)return;
@@ -40,7 +57,7 @@ export function rewrite_event_attributes(element){
         if(setter){setter.call(element,handler);break;}
       }
     }finally{assigning--;}
-    handlers.set(name,{source,handler});
+    handlers.set(name,{source,handler,forwardingDocument});
   }
 }
 
@@ -57,12 +74,13 @@ if(globalThis.Element){
         const property=Object.getOwnPropertyDescriptor(owner,key);
         if(!key.startsWith('on')||!property?.get||!property.set||keys.has(key))continue;
         keys.add(key);supported.add(key);
+        if(owner===globalThis.HTMLBodyElement?.prototype||owner===globalThis.HTMLFrameSetElement?.prototype)forwarded.add(key);
         let setters=nativeHandlers.get(owner);if(!setters){setters=new Map();nativeHandlers.set(owner,setters);}setters.set(key,property.set);
         Object.defineProperty(owner,key,{...property,
           get(){if(!assigning&&this instanceof Element)rewrite_event_attributes(this);return event_handler_value(property.get.call(this));},
           set(value){
             const result=property.set.call(this,event_handler(value));
-            if(!assigning&&this instanceof Element)entries(this).set(key,{source:getAttribute.call(this,key),handler:value});
+            if(!assigning&&this instanceof Element)entries(this).set(key,{source:getAttribute.call(this,key),handler:value,forwardingDocument:forwarding_document(this,key)});
             return result;
           }
         });

@@ -3,6 +3,7 @@ import {parsing_context} from './scripting_html.mjs';
 import {native_dom as dom} from './dom_operations.mjs';
 import {shadow_root,remember_declarative_root} from './shadow_roots.mjs';
 import {prepare_resources} from './resource_nodes.mjs';
+import {activate_parser_event_attributes} from './event_attributes.mjs';
 import {rewrite_element} from './rewrite/element.mjs';
 import {reconcile_iframes} from './iframe_lifecycle.mjs';
 import {prime_inert_script,mark_parser_script,capture_script} from './rewrite/script.mjs';
@@ -148,6 +149,7 @@ export class HTMLDOMStream {
           const pending=this.#prepare(node);
           if(pending){const resource=Promise.resolve(pending);this.#pending.add(resource);resource.then(()=>this.#pending.delete(resource),()=>this.#pending.delete(resource));this.#resources.push(resource);}
           dom.adopt.call(document,node);
+          activate_parser_event_attributes(node);
         }
         let before=null;
         for(let index=position+1;index<siblings.length;index++){
