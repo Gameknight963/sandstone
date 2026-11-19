@@ -1,4 +1,6 @@
 import {getPublicSuffix} from 'tough-cookie';
+import {trustworthy_url as metadata_url} from '../trustworthy.mjs';
+export {metadata_url};
 
 export function same_site(a,b){
   const domain=hostname=>getPublicSuffix(hostname,{ignoreError:true})||hostname;
@@ -7,13 +9,6 @@ export function same_site(a,b){
 
 const destinations=new Set(['audio','audioworklet','document','embed','font','frame','iframe','image','json','manifest','object','paintworklet','report','script','serviceworker','sharedworker','style','track','video','webidentity','worker','xslt']);
 const modes=new Set(['cors','navigate','no-cors','same-origin','websocket']);
-
-export function metadata_url(url){
-  if(url.protocol==='https:')return true;
-  if(url.protocol!=='http:')return false;
-  const host=url.hostname.replace(/\.$/,'');
-  return host==='[::1]'||/^127(?:\.\d{1,3}){3}$/.test(host)||host==='localhost'||host.endsWith('.localhost');
-}
 
 // Redirects retain the least same-site relationship encountered in the URL
 // list. Cookie ancestor restrictions do not change the request's own origin.
