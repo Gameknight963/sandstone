@@ -432,7 +432,7 @@ try {
     result.passed.push(...await timed(verifyNodeDocuments(page), 'Node document identity fixture'));
     result.passed.push(...await timed(verifyMediaMuted(page), 'Initial media mutedness fixture'));
     result.passed.push(...await timed(verifyMediaPlayback(page), 'Pending media playback fixture'));
-    result.passed.push(...await timed(verifyMediaSources(page), 'Child-source media playback fixture'));
+    for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyMediaSources(page,{batch,batches:3}), 'Child-source media playback fixture '+(batch+1)));
     result.passed.push(...await timed(verifyAudio(page), 'Audio constructor fixture'));
     result.passed.push(...await timed(verifyImageConstructor(page), 'Image constructor fixture'));
     result.passed.push(...await timed(verifyMediaAttributes(page), 'Media attribute fixture'));

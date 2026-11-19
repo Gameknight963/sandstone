@@ -22,6 +22,7 @@ function playback_event(event){
   seen.add(event);
   const token=pending.get(event.target);if(!token)return;
   const type=event.type;
+  if(type==='loadstart')token.onLoadStart?.();
   if(token.swapping&&(type==='abort'||type==='emptied'||type==='play'&&token.plays||type==='loadstart'&&token.loads)){
     event.stopImmediatePropagation();return;
   }
@@ -60,6 +61,7 @@ export function load_media_sources(element,token){
   if(!token||pending.get(element)!==token)return;
   finish_media_playback(token);native.load.call(element);
 }
+export function load_native_media(element){native.load.call(element);}
 if(prototype){
   prototype.play=new Proxy(native.play,{apply(target,element,args){
     preparation.get(element)?.('play');

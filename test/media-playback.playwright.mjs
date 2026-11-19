@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 
-export async function verifyMediaSources(page){return verifyMediaPlayback(page,{children:true});}
+export async function verifyMediaSources(page,options={}){return verifyMediaPlayback(page,{...options,children:true});}
 
-export async function verifyMediaPlayback(page,{children=false}={}){
+export async function verifyMediaPlayback(page,{children=false,batch=0,batches=1}={}){
   const origin=children?'https://media-source-playback.test':'https://media-playback.test';
   const setup=children?`
     const add=(url,type)=>{const source=document.createElement('source');source.src=url;if(type)source.type=type;source.onerror=()=>sourceErrors.push(url);audio.append(source);};
     if(window.sourcePlan==='unsupported')add('/unsupported.wav','audio/x-unsupported-sandstone');
     if(window.sourcePlan==='direct-wins')audio.src='/slow.wav';else if(!window.sourcePlan?.startsWith('parser'))add('/slow.wav');
     if(window.sourcePlan?.startsWith('fallback-')||window.sourcePlan?.startsWith('all-'))add(window.sourcePlan.includes('delayed')?'/unused.wav':'/fast.wav');
+    if(window.sourcePlan?.startsWith('retain-fail')&&window.sourcePlan.includes('fallback'))add('/backup.wav');
     if(window.sourcePlan==='unused'||window.sourcePlan==='direct-wins')add('/unused.wav');
   `:"audio.src='/slow.wav';";
   const html=`<!doctype html><body><button id="start">Start</button><audio id="audio" muted></audio><script>
@@ -84,6 +85,26 @@ export async function verifyMediaPlayback(page,{children=false}={}){
     ...children?[
       ['source replacement and load','audio.firstElementChild.src="/fast.wav";audio.load()'],
       ['source replacement and replay','audio.firstElementChild.src="/fast.wav";audio.load();requestPlay()'],
+      ['selected source removal','audio.firstElementChild.remove()','retain-remove'],
+      ['selected source reset by null provider','audio.srcObject=null','retain-null-provider'],
+      ['removed source replaced by stream provider','audio.firstElementChild.remove();audio.srcObject=new MediaStream()','retain-stream-provider'],
+      ['selected source attribute removal','audio.firstElementChild.removeAttribute("src")','retain-attribute'],
+      ['selected source URL change','audio.firstElementChild.src="/fast.wav"','retain-change'],
+      ['selected source replacement','audio.replaceChildren(document.createElement("source"))','retain-replace'],
+      ['selected source moved to another player','window.otherMedia=document.createElement("audio");otherMedia.muted=true;document.body.append(otherMedia);otherMedia.append(audio.firstElementChild);window.otherResult="pending";otherMedia.play().then(()=>otherResult="fulfilled",error=>otherResult=error.name)','retain-move'],
+      ['paused removed source','audio.firstElementChild.remove();audio.pause()','retain-pause'],
+      ['removed source resumes after loading','audio.firstElementChild.remove();audio.pause()','retain-pause-replay'],
+      ['removed source explicit reload','audio.firstElementChild.remove();audio.load()','retain-reload'],
+      ['removed source reload and new candidate','audio.firstElementChild.remove();audio.load();const source=document.createElement("source");source.src="/fast.wav";audio.append(source);requestPlay()','retain-reload-new'],
+      ['removed source parent URL override','audio.firstElementChild.remove();audio.src="/fast.wav";requestPlay()','retain-parent-src'],
+      ['removed selected source HTTP failure','audio.firstElementChild.remove()','retain-fail-remove-http'],
+      ['removed selected source decode failure','audio.firstElementChild.remove()','retain-fail-remove-decode'],
+      ['changed selected source HTTP failure','audio.firstElementChild.src="/fast.wav"','retain-fail-change-http'],
+      ['removed failed source fallback','audio.firstElementChild.remove()','retain-fail-remove-fallback-http'],
+      ['changed failed source fallback','audio.firstElementChild.src="/fast.wav"','retain-fail-change-fallback-http'],
+      ['failed removed source recovers','audio.firstElementChild.remove()','retain-fail-remove-recover-http'],
+      ['failed removed source recovers with local data','audio.firstElementChild.remove()','retain-fail-remove-recover-data-http'],
+      ['failed changed source does not restart on insertion','audio.firstElementChild.src="/fast.wav"','retain-fail-change-recover-noresume-http'],
       ['parser source','','parser'],
       ['parser autoplay','','parser-autoplay'],
       ['HTTP fallback','','fallback-http'],
@@ -103,7 +124,7 @@ export async function verifyMediaPlayback(page,{children=false}={}){
   ];
   const passed=[];
   try{
-    for(const [name,action,mode] of cases){
+    for(const [name,action,mode] of cases.filter((_,index)=>index%batches===batch)){
       activeCase=name;
       const outcomes=[];
       for(const proxy of [false,true]){
@@ -128,15 +149,36 @@ export async function verifyMediaPlayback(page,{children=false}={}){
         assert.deepEqual(await read(proxy,snapshot),{results:['pending'],paused:mode==='parser-autoplay',ready:0,network:2,error:null,src:hasSrc?origin+'/slow.wav':'',current:origin+'/slow.wav',attribute:hasSrc?'/slow.wav':null},name+' pending '+proxy);
         if(action)await read(proxy,'(()=>{'+action+';return true})()');
         // Let explicit cancellation settle before installing the response.
-        if(action&&!['multiple calls','pause and replay','HTTP fallback with overridden src getter'].includes(name))await until(proxy,'results[0]!=="pending"');
+        if(action&&!mode?.startsWith('retain-')&&!['multiple calls','pause and replay','HTTP fallback with overridden src getter'].includes(name))await until(proxy,'results[0]!=="pending"');
+        const retainedCancel=mode&&['retain-pause','retain-pause-replay','retain-reload','retain-reload-new','retain-parent-src','retain-null-provider','retain-stream-provider'].includes(mode);
+        if(retainedCancel)await until(proxy,'results[0]!=="pending"');
+        if(mode?.startsWith('retain-')&&!retainedCancel){
+          await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+          assert.deepEqual(await read(proxy,'({results,paused:audio.paused,current:audio.currentSrc})'),{results:['pending'],paused:false,current:origin+'/slow.wav'},name+' retained selection '+proxy);
+        }
         if(proxy)await page.evaluate(()=>releaseMediaPlayback());else release();
+        if(mode?.startsWith('retain-fail')&&!mode.includes('fallback')){
+          await until(proxy,'audio.networkState===3');
+          await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+          assert.deepEqual(await read(proxy,'({results,paused:audio.paused,ready:audio.readyState,error:audio.error?.code||null,current:audio.currentSrc})'),
+            {results:['pending'],paused:false,ready:0,error:null,current:origin+'/slow.wav'},name+' failed retained selection '+proxy);
+          if(mode.includes('recover')){
+            const value=mode.includes('data')?'data:audio/wav;base64,'+Buffer.from(wav).toString('base64'):'/recovery.wav';
+            await read(proxy,'(()=>{const source=document.createElement("source");source.src='+JSON.stringify(value)+';audio.append(source);return true})()');
+            if(mode.includes('noresume')){
+              await page.waitForTimeout(300);
+              assert.deepEqual(await read(proxy,'({results,network:audio.networkState})'),{results:['pending'],network:3},name+' exhausted selection '+proxy);
+              await read(proxy,'(()=>{audio.pause();return true})()');
+            }
+          }else await read(proxy,'(()=>{audio.pause();return true})()');
+        }
         if(mode==='fallback-delayed-http'){
           await until(proxy,'sourceErrors.length===1&&audio.currentSrc==='+JSON.stringify(origin+'/unused.wav'));
           assert.deepEqual(await read(proxy,'({results,paused:audio.paused,ready:audio.readyState,network:audio.networkState})'),
             {results:['pending'],paused:false,ready:0,network:2},name+' pending fallback '+proxy);
           if(proxy)await page.evaluate(()=>releaseUnusedMediaPlayback());else releaseUnused();
         }
-        if(name==='pause then loaded replay'){
+        if(name==='pause then loaded replay'||mode==='retain-pause-replay'){
           await until(proxy,'audio.readyState===4');
           await read(proxy,'(()=>{requestPlay();return true})()');
         }
@@ -147,6 +189,8 @@ export async function verifyMediaPlayback(page,{children=false}={}){
           await read(proxy,'(()=>{audio.pause();return true})()');
         }
         await until(proxy,'results.every(value=>value!=="pending")');
+        if(mode==='retain-pause')await until(proxy,'audio.readyState===4');
+        if(mode==='retain-move')await until(proxy,'otherResult==="fulfilled"');
         if(mode?.startsWith('fallback-'))await until(proxy,'sourceErrors.length===1');
         if(['success','unmuted playback','detached playback','multiple calls','pause and replay'].includes(name))await until(proxy,'audio.readyState===4');
         if(mode==='unused'||mode==='direct-wins'){
@@ -157,7 +201,7 @@ export async function verifyMediaPlayback(page,{children=false}={}){
           }else releaseUnused();
           await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
         }
-        const result=await read(proxy,'({results,events,captured,sourceErrors,sourceCaptured,paused:audio.paused,error:audio.error?.code||null,current:audio.currentSrc})');
+        const result=await read(proxy,'({results,events,captured,sourceErrors,sourceCaptured,paused:audio.paused,error:audio.error?.code||null,current:audio.currentSrc,src:audio.src,srcAttribute:audio.getAttribute("src"),srcNode:audio.getAttributeNode("src")!==null,attributes:Array.from(audio.attributes,attribute=>attribute.name),names:audio.getAttributeNames()})');
         outcomes.push(result);
         // Paused media may finish loading asynchronously; do not let that leak
         // into the next test's request gate.
@@ -168,10 +212,11 @@ export async function verifyMediaPlayback(page,{children=false}={}){
       assert.equal(outcomes[1].paused,outcomes[0].paused,name+' paused parity');
       assert.equal(outcomes[1].error,outcomes[0].error,name+' error parity');
       assert.equal(outcomes[1].current,outcomes[0].current,name+' currentSrc parity');
+      for(const key of ['src','srcAttribute','srcNode','attributes','names'])assert.deepEqual(outcomes[1][key],outcomes[0][key],name+' '+key+' reflection parity');
       assert.deepEqual(outcomes[1].sourceErrors,outcomes[0].sourceErrors,name+' source error parity');
       assert.deepEqual(outcomes[1].sourceCaptured,outcomes[0].sourceCaptured,name+' captured source error parity');
       if(!action&&['fallback-http','fallback-delayed-http','fallback-decode','unused','unsupported','direct-wins'].includes(mode))assert.deepEqual(outcomes[0].results,['fulfilled'],name+' native playback');
-      if(['success','unmuted playback','detached playback','multiple calls','pause then loaded replay','parser source','parser autoplay','HTTP fallback','delayed fallback','decode fallback','unused stalled fallback','unsupported source type','direct source wins'].includes(name)){
+      if(mode?.startsWith('retain-')||['success','unmuted playback','detached playback','multiple calls','pause then loaded replay','parser source','parser autoplay','HTTP fallback','delayed fallback','decode fallback','unused stalled fallback','unsupported source type','direct source wins'].includes(name)){
         assert.deepEqual(outcomes[1].events,outcomes[0].events,name+' event parity');
         assert.deepEqual(outcomes[1].captured,outcomes[0].captured,name+' captured event parity');
       }

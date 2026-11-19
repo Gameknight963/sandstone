@@ -51,6 +51,12 @@ export function render_media_attribute(element,key,source,preserve=false){
     const node=attr(element,null,key);if(node)state.values.set(node,canonical);
   }
 }
+// A selected source may outlive its source node. Keep its temporary renderer
+// URL separate from the authored attribute map while resource selection starts.
+export function render_internal_media_attribute(element,key,source){
+  if(source===null)methods.removeAttributeNS.call(element,null,key);
+  else methods.setAttributeNS.call(element,null,key,source);
+}
 function refresh(state,key){
   const source=methods.getAttributeNS.call(state.mirror,null,key);
   if(source===null)state.remove(key);
@@ -98,7 +104,7 @@ if(E){
     const managed=resource(state,existing)||!existing&&(!ns||converted[0]===null||converted[0]==='')&&state.authored.has(local_name);
     if(!managed)return Reflect.apply(target,receiver,converted);
     // Node-returning accessors must return the actual attached native Attr.
-    if(key==='getAttributeNode'||key==='getAttributeNodeNS')return Reflect.apply(target,receiver,converted);
+    if(key==='getAttributeNode'||key==='getAttributeNodeNS')return state.authored.get(local_name)===null?null:Reflect.apply(target,receiver,converted);
     const previous=existing&&state.values.get(existing);
     const before=methods.getAttributeNS.call(state.mirror,null,local_name);
     const result=Reflect.apply(target,state.mirror,converted);
