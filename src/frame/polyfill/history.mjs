@@ -6,6 +6,7 @@ import { set_location } from "./location.mjs";
 import { history_url } from "../../history.mjs";
 import {document_states} from '../document_identity.mjs';
 import {cookie_document_active} from './cookie.mjs';
+import {navigation_activation} from '../user_activation.mjs';
 
 const views=document_states('history-views');
 const NativeHistory=globalThis.History,native=NativeHistory&&Object.getOwnPropertyDescriptors(NativeHistory.prototype);
@@ -97,7 +98,7 @@ export class FakeHistory {
   go(delta = 0) {
     delta = (+delta) >> 0;this.#validate();
     if (!delta) { ctx.location.reload(); return; }
-    traverse(loader.frame_id, delta, scroll()).then(snapshot => {
+    traverse(loader.frame_id, delta, scroll(),navigation_activation()).then(snapshot => {
       if (!snapshot) return;
       this.#state = structuredClone(snapshot.state);
       this.#index = snapshot.index;

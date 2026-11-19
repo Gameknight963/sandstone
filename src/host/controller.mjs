@@ -136,6 +136,7 @@ export class ProxyFrame {
     let download_response;
     let error = false;
     let referrer_policy = default_referrer_policy, document_referrer = '';
+    let request_metadata=navigation.traversed?this.history.current?.request_metadata:undefined;
 
     if (typeof this.special_pages[url] === "string") {
       html = this.special_pages[url];
@@ -152,7 +153,8 @@ export class ProxyFrame {
           }
         }
         if (navigation.history_mode === 'reload') options.cache = 'no-cache';
-        let response = await network.fetch(url, options, {url:source_url,top_url:navigation.source_context?.top_url||source_url,cross_site:navigation.source_context?.cross_site,broadcast_origin:navigation.source_context?.broadcast_origin,referrerPolicy:source_policy,navigation:true});
+        let response = await network.fetch(url, options, {url:source_url,top_url:navigation.source_context?.top_url||source_url,cross_site:navigation.source_context?.cross_site,broadcast_origin:navigation.source_context?.broadcast_origin,referrerPolicy:source_policy,navigation:true,request_metadata,metadata_source:navigation.history_mode==='reload'?this.url?.href:undefined,user_activation:!navigation.initiated&&!navigation.traversed||!!navigation.activation?.transient});
+        request_metadata=response.request_metadata;
         if(navigation_id!==this.navigation_id){await response.body?.cancel();return;}
         if(is_download(response.headers))download_response=response;
         else html = await response.text();
@@ -196,7 +198,7 @@ export class ProxyFrame {
     }
     this.referrer_policy = referrer_policy;
     this.document_referrer = document_referrer;
-    this.history.navigate(url, {mode: navigation.history_mode || "push"});
+    this.history.navigate(url, {mode: navigation.history_mode || "push",request_metadata});
     
     let settings = this.site_settings.find((item) => {
       return item.hostname.test(this.url.hostname);
@@ -280,12 +282,12 @@ rpc.rpc_handlers["navigate"] = async (frame_id, url, reload=true, form_data=null
 rpc.rpc_handlers["history_mutate"] = (id, kind, state, url, scroll) => {
   const frame = iframes[id];
   if (!frame?.history) throw new DOMException("Inactive history", "InvalidStateError");
-  frame.history.mutate(kind, state, url, scroll);
+  frame.history.mutate(kind, state, url, scroll,frame.broadcast_origin?.startsWith('opaque:')?'null':frame.origin||frame.url.origin);
   frame.url = new URL(url);
   frame.on_url_change();
 };
 
-rpc.rpc_handlers["history_go"] = (id, delta, scroll) => {
+rpc.rpc_handlers["history_go"] = (id, delta, scroll,activation) => {
   const frame = iframes[id];
   if (!frame?.history) return null;
   const snapshot = frame.history.go(delta, scroll);
@@ -295,7 +297,7 @@ rpc.rpc_handlers["history_go"] = (id, delta, scroll) => {
     frame.on_url_change();
     return snapshot;
   }
-  frame.navigate_to(snapshot.url, null, {history_mode: "traverse", traversed: true}).catch(console.error);
+  frame.navigate_to(snapshot.url, null, {history_mode: "traverse", traversed: true,activation}).catch(console.error);
   return null;
 };
 
@@ -364,7 +366,8 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
     }
   };
   iframes[child_id] = child;
-  child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push"});
+  child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push",
+    request_metadata:network.navigation_metadata.claim(options.request_metadata_token,parent_id,child_id,url)});
   child.document_context=network.beacons.register(child_id, {url:child.request_url||(child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href),cookie_url:child.cookie_url,referrer_url:child.referrer_url,top_url:root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id},options.beacon_context);
   root.rpc_policy.document(child_id,child.document_context,parent.document_context);
   return {

@@ -5,6 +5,22 @@ import {SiteDataStore} from '../src/host/site_data.mjs';
 import {ModuleLoader} from '../src/frame/modules.mjs';
 import {rewrite_source} from '../src/frame/rewrite/javascript.mjs';
 
+test('Worker static graphs retain their destination while dynamic imports start script graphs without changing module identity',async()=>{
+  const seen=[],sources={
+    root:'import "./static";export{};',static:'export{};',
+    dynamic:'import "./dynamic-child";export{};','dynamic-child':'export{};'
+  };
+  const loader=new ModuleLoader({
+    context:()=>({destination:'worker'}),
+    fetch:async(url,options)=>{seen.push([new URL(url).pathname,options.destination]);return new Response(sources[new URL(url).pathname.slice(1)],{headers:{'Content-Type':'text/javascript'}});},
+    rewrite:(source,options)=>rewrite_source(source,[],options),createURL:(_,__,url)=>'blob:'+url,register(){},execute:async()=>({})
+  });
+  const root=await loader.prepare_url('./root','https://site.test/');
+  await loader.import('./dynamic',{key:root.key});
+  assert.deepEqual(seen,[['/root','worker'],['/static','worker'],['/dynamic','script'],['/dynamic-child','script']]);
+  await loader.import('./static',{key:root.key});assert.equal(seen.length,4);
+});
+
 test('Module graph fetching retains declared types independently of names and request context',async()=>{
   const requests=[];
   const loader=new ModuleLoader({fetch:async(url,options,type)=>{

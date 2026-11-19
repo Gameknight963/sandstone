@@ -15,6 +15,7 @@ import {module_requests_fixture,verify_module_requests} from './module-requests-
 import {empty_headers_fixture,empty_headers_script,verify_empty_headers} from './empty-headers-fixture.mjs';
 import {transport_fixture,verify_transport_entries} from './transport-fixture.mjs';
 import {upload_fixture,upload_script,verify_uploads,verify_relay_uploads} from './upload-fixture.mjs';
+import {metadata_fixture,verify_metadata,metadata_evaluate} from './metadata-fixture.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -28,10 +29,12 @@ const keepalive=keepalive_fixture();
 const cacheFixture=cache_fixture();
 const downloadFixture=download_fixture();
 const moduleRequests=module_requests_fixture();
+const metadata=metadata_fixture();
 const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
 const server=create_relay_server((request,response)=>{
   const url=new URL(request.url,'http://localhost');
   const client=url.searchParams.get('client');
+  if(metadata.handle(request,response,url))return;
   if(fonts.handle(request,response,url))return;
   if(keepalive.handle(request,response,url))return;
   if(cacheFixture.handle(request,response,url))return;
@@ -165,8 +168,15 @@ server.on('upgrade',(request,socket,head)=>{
   else wisp.routeRequest(request,socket,head);
 });
 server.listen(0,'127.0.0.1');await once(server,'listening');
+const metadataServer=create_relay_server((request,response)=>{
+  if(!metadata.handle(request,response,new URL(request.url,'http://localhost'))){response.writeHead(404);response.end();}
+});
+metadataServer.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));});
+metadataServer.listen(0,'127.0.0.1');await once(metadataServer,'listening');
 const origin=`http://127.0.0.1:${server.address().port}`;
-wisp.options.allow_loopback_ips=true;wisp.options.port_whitelist=[server.address().port];
+const metadataOrigin='http://127.0.0.1:'+metadataServer.address().port;
+metadata.configure(origin,metadataOrigin);
+wisp.options.allow_loopback_ips=true;wisp.options.port_whitelist=[server.address().port,metadataServer.address().port];
 const channel=process.env.BROWSER_CHANNEL||'chrome';
 const opaqueSocketChild=`const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-context')});socket.onmessage=event=>{parent.postMessage({socketContext:JSON.parse(event.data)},'*');socket.close();};socket.onerror=()=>parent.postMessage({socketContextError:true},'*');`;
 const opaqueSocketScript=`new Promise((resolve,reject)=>{
@@ -316,6 +326,13 @@ async function beaconBodies(client){
 try{
   browser=await chromium.launch({channel:channel==='headless'?undefined:channel,headless:true});
   const nativeContext=await browser.newContext(),nativePage=await nativeContext.newPage();
+  const nativeMetadata=await verify_metadata({
+    navigate:url=>nativePage.goto(url),evaluate:source=>metadata_evaluate(nativePage,false,source),
+    click:selector=>nativePage.locator(selector).click(),
+    reload:()=>nativePage.reload(),
+    wait:async url=>{await nativePage.waitForURL(url);await nativePage.waitForLoadState('load');}
+  },metadata,origin,metadataOrigin,'metadata-native');
+  console.log(JSON.stringify({nativeMetadata}));
   await nativePage.goto(origin);
   const baseline=JSON.parse(await nativePage.evaluate(source=>eval(source),sourceScript('native')).catch(error=>{console.error(JSON.stringify({requests,held:[...held.keys()]}));throw error;}));
   const lifecycleBaseline=JSON.parse(await nativePage.evaluate(source=>eval(source),sourceScript('lifecycle-native',false,true)));
@@ -613,6 +630,15 @@ try{
   await page.evaluate(origin=>{
     for(const cookie of ['ctx_target_strict=s; SameSite=Strict; Path=/','ctx_target_lax=l; SameSite=Lax; Path=/'])sandstone.controller.site_data.setCookie(origin.replace('127.0.0.1','localhost')+'/',cookie);
   },origin);
+  const actualMetadata=await verify_metadata({
+    navigate:url=>page.evaluate(url=>main_frame.navigate_to(url),url),
+    evaluate:source=>metadata_evaluate(page,true,source),
+    click:selector=>page.frameLocator('iframe[frame-id]').first().locator(selector).click(),
+    reload:()=>page.evaluate(()=>main_frame.navigate_to(main_frame.url.href,null,{history_mode:'reload'})),
+    wait:url=>page.waitForFunction(url=>main_frame.url.href===url&&!main_frame.is_navigating,url)
+  },metadata,origin,metadataOrigin,'metadata-'+storageDenied);
+  console.log(JSON.stringify({storageDenied,actualMetadata}));
+  assert.deepEqual(actualMetadata,nativeMetadata,'Fetch Metadata differs from native Chromium');
   const formClient='forms-'+storageDenied;
   await page.evaluate(url=>main_frame.navigate_to(url),origin.replace('127.0.0.1','localhost')+'/request-context/source');
   for(const [label,method,cross,policy] of formCases){
@@ -741,10 +767,10 @@ try{
   assert.deepEqual(direct,[],'A relayed connection made a direct HTTP request');
   assert.deepEqual(errors,[],'A relayed connection produced a browser error');
   assert.ok(closed.some(value=>value.client===client&&value.count===3));
-    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','JavaScript/JSON/CSS module negotiation, redirects and Vary caching','explicit empty Fetch/XHR headers and request bodies','large uploads and bounded transport metadata','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','opaque iframe WebSocket Origin and SameSite cookie parity','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','synthetic lifecycle events preserve SSE reconnection','native iframe unload closes retained event streams','native request cleanup'],events:proxied,direct}));
+    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','native/relay Fetch Metadata, resource destinations and history','JavaScript/JSON/CSS module negotiation, redirects and Vary caching','explicit empty Fetch/XHR headers and request bodies','large uploads and bounded transport metadata','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','opaque iframe WebSocket Origin and SameSite cookie parity','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','synthetic lifecycle events preserve SSE reconnection','native iframe unload closes retained event streams','native request cleanup'],events:proxied,direct}));
   await context.close();
   }
 }finally{
   await browser?.close();for(const timer of timers)clearTimeout(timer);for(const socket of sockets)socket.destroy();
-  await new Promise(resolve=>server.close(resolve));
+  await Promise.all([new Promise(resolve=>server.close(resolve)),new Promise(resolve=>metadataServer.close(resolve))]);
 }

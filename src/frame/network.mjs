@@ -6,6 +6,8 @@ import { load_cookies } from "./polyfill/cookie.mjs";
 import {document_referrer_policy} from './intercept/document.mjs';
 import {reserve_keepalive} from './keepalive_budget.mjs';
 const native_fetch=globalThis.fetch;
+const navigation_data=new WeakMap(),metadata_get=WeakMap.prototype.get,metadata_set=WeakMap.prototype.set,apply=Reflect.apply;
+export function navigation_metadata(response){return apply(metadata_get,navigation_data,[response]);}
 
 export const rpc_fetch = rpc.create_rpc_wrapper(rpc.host, "fetch");
 const rpc_worker_script=rpc.create_rpc_wrapper(rpc.host,'fetch_worker_script');
@@ -113,6 +115,7 @@ function restore_response(data) {
   }
   if (data.request_referrer !== undefined) Object.defineProperty(response,'request_referrer',{value:data.request_referrer});
   if(data.request_cross_origin!==undefined)Object.defineProperty(response,'request_cross_origin',{value:data.request_cross_origin});
+  if(data.navigation_metadata)apply(metadata_set,navigation_data,[response,data.navigation_metadata]);
   const clone = response.clone.bind(response);
   Object.defineProperty(response, "clone", {value: () => {
     const copy = clone();

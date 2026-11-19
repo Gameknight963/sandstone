@@ -11,10 +11,11 @@ import {default_referrer_policy} from '../referrer.mjs';
 import {document_referrer_policy,reset_document_referrer_policy,set_current_script,get_current_script} from './intercept/document.mjs';
 import {configure_window_messages} from './window_messages.mjs';
 import {load_document_html,run_document_script,initialize_blank_document,on_document_complete} from './document_input.mjs';
+import {navigation_activation} from './user_activation.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
-  return navigate_rpc(id,url,reload,form_data,{referrerPolicy:document_referrer_policy(),...navigation}).then(result=>{
+  return navigate_rpc(id,url,reload,form_data,{referrerPolicy:document_referrer_policy(),activation:navigation_activation(),...navigation}).then(result=>{
     if(result?.download)load_cookies(result.cookies);return result;
   });
 }

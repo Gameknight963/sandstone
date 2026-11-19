@@ -11,6 +11,7 @@ import {KeepaliveRequests} from './keepalive.mjs';
 import {http_cache} from './http_cache.mjs';
 import {Downloads} from './download.mjs';
 import {frame_cross_site,navigation_request_context,worker_script_frame} from './frame_context.mjs';
+import {NavigationMetadata} from './navigation_metadata.mjs';
 import {broadcast_channels} from './broadcast.mjs';
 import {lock_service} from './locks.mjs';
 import {disconnect_storage} from './storage.mjs';
@@ -20,6 +21,7 @@ export {broadcast_channels};
 
 export const ws_connections = {};
 export let session = null;
+export const navigation_metadata=new NavigationMetadata(parent=>iframes[parent]?.document_context);
 const context_cookies=(url,context)=>site_data.documentCookies(url,{crossSite:!!context?.cross_site});
 export const beacons = new BeaconQueue({fetch: (...args) => fetch(...args), cookies: context_cookies});
 export const keepalives = new KeepaliveRequests({queue:beacons,fetch:(...args)=>fetch(...args),cookies:context_cookies});
@@ -57,19 +59,27 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
   const frame = iframes[frame_id];
   if (!frame) throw new TypeError("Unknown frame");
   if(navigation_source&&options?.mode!=='navigate')throw new TypeError('Navigation source requires navigation mode');
-  const source_context=navigation_source?navigation_request_context(beacons.contexts,navigation_source,frame.root_id):{
+  const source_context=navigation_source?{...navigation_request_context(beacons.contexts,navigation_source,frame.root_id),user_activation:!!options?.sandstone_navigation_activation}:{
     url: options?.mode === 'navigate' && frame.pending_navigation?.source_url || frame.request_url || (frame.url.origin === "null" && frame.origin && frame.origin !== "null" ? frame.origin + "/" : frame.url.href),
     top_url: iframes[frame.root_id]?.url?.href || frame.url.href,
     referrer_url:frame.referrer_url,
     broadcast_origin:frame.broadcast_origin,
-    navigation: options?.mode === 'navigate',nested:true,cross_site:frame_cross_site(frame,iframes)
+    navigation: options?.mode === 'navigate',request_metadata:options?.mode==='navigate'&&frame.pending_navigation?.traversed?frame.history.current?.request_metadata:undefined,
+    history_user_activation:options?.mode==='navigate'&&frame.pending_navigation?.traversed&&iframes[frame.root_id]?.history.current?.request_metadata?.user,
+    user_activation:!!options?.sandstone_navigation_activation,nested:true,cross_site:frame_cross_site(frame,iframes)
   };
   const key = request_key(frame_id, request_id);
+  const metadataTarget=options?.sandstone_navigation_target,metadataFrame=iframes[metadataTarget];
+  const metadataParent=metadataFrame
+    ?(!metadataFrame.worker&&(metadataFrame.id===frame_id||metadataFrame.parent_id===frame_id)?metadataFrame.parent_id:undefined)
+    :frame_id;
+  const metadataScope=source_context.navigation&&metadataTarget&&metadataParent?navigation_metadata.capture(metadataParent,metadataTarget):undefined;
   const request = {frame_id, controller: new AbortController(), reader: null};
   requests.set(key, request);
   let response;
   try {
-    response = await fetch(url, {...options, signal: request.controller.signal},source_context);
+    const {sandstone_navigation_activation,sandstone_navigation_target,...request_options}=options||{};
+    response = await fetch(url, {...request_options, signal: request.controller.signal},source_context);
     request.reader = response.body?.getReader();
   } catch (error) {
     requests.delete(key);
@@ -79,6 +89,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
   var payload = {
     request_referrer: response.request_referrer,
     request_cross_origin:response.request_cross_origin,
+    navigation_metadata:navigation_metadata.issue(metadataScope,response.url,response.request_metadata),
     has_body: !!request.reader,
     headers: [],
     items: {},

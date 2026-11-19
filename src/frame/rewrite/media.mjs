@@ -77,7 +77,8 @@ function request_element(element,key){
   return parent instanceof HTMLMediaElement&&key!=='srcset'?parent:null;
 }
 function cross_origin(element){
-  const target=request_element(element);
+  let target=request_element(element);
+  if(target instanceof HTMLTrackElement)target=target.parentElement;
   if(!(target instanceof HTMLImageElement||target instanceof HTMLMediaElement))return null;
   const value=attribute.call(target,'crossorigin');
   return value===null?null:value.toLowerCase()==='use-credentials'?'use-credentials':'anonymous';
@@ -266,7 +267,8 @@ export function rewrite_media(element,initial_sources) {
           const crossOrigin=cross_origin(element);
           session.crossOrigin=crossOrigin;
           request_options={signal:controller.signal,credentials:crossOrigin==='anonymous'?'same-origin':'include',
-            mode:crossOrigin===null?'no-cors':'cors',referrerPolicy:state.requestElement.referrerPolicy};
+            destination:key==='poster'||state.requestElement instanceof HTMLImageElement?'image':state.requestElement instanceof HTMLTrackElement?'track':state.requestElement instanceof HTMLVideoElement?'video':state.requestElement instanceof HTMLAudioElement?'audio':'image',
+            mode:crossOrigin===null?state.requestElement instanceof HTMLTrackElement?'same-origin':'no-cors':'cors',referrerPolicy:state.requestElement.referrerPolicy};
           const rewritten = key === "srcset" ? await rewrite_srcset(value, async source => {
             try { return await resource(source); }
             catch (error) { if (controller.signal.aborted) throw error; return "data:application/octet-stream,"; }

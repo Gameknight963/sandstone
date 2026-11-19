@@ -103,9 +103,9 @@ test('Imported CSS uses its final URL and delivered referrer policy for its reso
     },
     createURL(blob, url, context) { if (context) contexts.push({url,...context}); return 'blob:'+url; }
   });
-  assert.deepEqual(requests.find(value=>value.url.endsWith('/root.svg')), {url:'https://site.test/css/root.svg',...parent});
-  assert.deepEqual(requests.find(value=>value.url.endsWith('/child.svg')), {url:'https://cdn.test/final/child.svg',referrer:'https://cdn.test/final/child.css',referrerPolicy:'no-referrer'});
-  assert.deepEqual(requests.find(value=>value.url.endsWith('/nested.svg')), {url:'https://cdn.test/final/nested.svg',referrer:'https://cdn.test/final/nested.css',referrerPolicy:'strict-origin-when-cross-origin'});
+  assert.deepEqual(requests.find(value=>value.url.endsWith('/root.svg')), {url:'https://site.test/css/root.svg',...parent,destination:'image'});
+  assert.deepEqual(requests.find(value=>value.url.endsWith('/child.svg')), {url:'https://cdn.test/final/child.svg',referrer:'https://cdn.test/final/child.css',referrerPolicy:'no-referrer',destination:'image'});
+  assert.deepEqual(requests.find(value=>value.url.endsWith('/nested.svg')), {url:'https://cdn.test/final/nested.svg',referrer:'https://cdn.test/final/nested.css',referrerPolicy:'strict-origin-when-cross-origin',destination:'image'});
   assert.equal(requests.find(value=>value.url.endsWith('/nested.css')).referrerPolicy,'no-referrer');
   assert.ok(contexts.some(value=>value.url.endsWith('/child.css')&&value.referrerPolicy==='no-referrer'));
 });

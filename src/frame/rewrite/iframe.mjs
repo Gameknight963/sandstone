@@ -18,6 +18,7 @@ import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../../bootstra
 import {on_shadow_root} from '../shadow_roots.mjs';
 import {cookie_snapshot} from '../polyfill/cookie.mjs';
 import {storage_entries} from '../polyfill/storage.mjs';
+import {navigation_activation} from '../user_activation.mjs';
 
 const inline_frames=new WeakMap(),sandbox_lists=new WeakMap();
 const runtime_loads=new WeakMap();
@@ -166,6 +167,7 @@ export function rewrite_iframe(iframe_element) {
   };
 
   let fetch_src = async (value, form_data = null, navigation = {}) => {
+    navigation={activation:navigation_activation(),...navigation};
     if(!iframe_element.isConnected||iframe_element.ownerDocument!==document)return;
     const inline=navigation.srcdoc||new URL(value,ctx.document.baseURI).href.split('#')[0]==='about:srcdoc';
     if(inline&&authored.get('srcdoc')===null)return;
@@ -187,13 +189,15 @@ export function rewrite_iframe(iframe_element) {
     let final_url = target_url;
     let error; //possible network error
     let html;
-    let referrer_policy, document_referrer;
+    let referrer_policy, document_referrer,request_metadata_token;
     if(inline){html=authored.get('srcdoc');referrer_policy=document_referrer_policy();document_referrer=loader.document_referrer;}
     else try {
       let response = await network.fetch(target_url, {
         signal:controller.signal,
         mode:'navigate',sandstone_frame_id:navigation.from_child ? frame_id : loader.frame_id,
         sandstone_navigation_source:navigation.source_context,
+        sandstone_navigation_activation:!!navigation.activation?.transient,
+        sandstone_navigation_target:frame_id,
         cache:navigation.history_mode === 'reload' ? 'no-cache' : 'default',
         referrerPolicy:navigation.referrerPolicy || iframe_element.referrerPolicy || document_referrer_policy(),
         ...(form_data ? {
@@ -209,6 +213,7 @@ export function rewrite_iframe(iframe_element) {
       final_url = response.url;
       referrer_policy = parse_referrer_policy(response.headers.get('referrer-policy'));
       document_referrer = response.request_referrer || '';
+      request_metadata_token=network.navigation_metadata(response);
     }
     catch (e) {
       if(!current())return;
@@ -290,7 +295,7 @@ export function rewrite_iframe(iframe_element) {
 
       iframe_url=final_url;
       const sandbox=iframe_element.getAttribute('sandbox'),opaque=sandbox!==null&&!sandbox_tokens(sandbox).has('allow-same-origin');
-      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,sandbox,window_name:initial_name,srcdoc:inline});
+      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,sandbox,window_name:initial_name,srcdoc:inline,request_metadata_token});
       registered = true;
       window_name=state.window_name;opaque_origin=state.message_origin==='null';
       loader.child_names.set(frame_id,value=>{window_name=value;});

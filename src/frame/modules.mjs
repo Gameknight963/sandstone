@@ -133,6 +133,7 @@ export class ModuleLoader {
   async prepare_url(specifier, base, options = {}) {
     const context=()=>({
       ...(options.context||this.context()),
+      ...(options.destination!==undefined?{destination:options.destination}:{}),
       ...(options.referrer!==undefined?{referrer:options.referrer}:{}),
       ...(options.referrerPolicy!==undefined?{referrerPolicy:options.referrerPolicy}:{})
     });
@@ -163,7 +164,7 @@ export class ModuleLoader {
         record.dependencies = [];
         for (const dependency of module_dependencies(record.source)) {
           const key = this.map.resolve(dependency.specifier, record.url);
-          const target = this.record(key, dependency.type, record.credentials,{referrer:record.url,referrerPolicy:record.policy});
+          const target = this.record(key, dependency.type, record.credentials,{referrer:record.url,referrerPolicy:record.policy,...(record.request.destination!==undefined?{destination:record.request.destination}:{})});
           record.dependencies.push(target);
         }
       } catch (error) { record.error = error; throw error; }
@@ -256,7 +257,7 @@ export class ModuleLoader {
     else if(script)base=script.url;
     else if(typeof base==='function')base=base();
     const context=parent?{referrer:parent.url,referrerPolicy:parent.policy}:script?{referrer:script.url,referrerPolicy:script.referrerPolicy}:undefined;
-    const record = await this.prepare_url(specifier, base, {with:snapshot,credentials:credentials??parent?.credentials??script?.credentials,context});
+    const record = await this.prepare_url(specifier, base, {with:snapshot,credentials:credentials??parent?.credentials??script?.credentials,context,destination:'script'});
     return record.namespaceBlob?(await this.execute(record.namespaceBlob)).namespace:this.execute(record.blob);
   }
 

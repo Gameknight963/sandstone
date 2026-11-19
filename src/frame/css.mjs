@@ -250,7 +250,9 @@ export function rewrite_css(source, base, {fetch, createURL, supports, transform
     if (!pending.has(key)) pending.set(key, (async () => {
       try {
         if (reference.imported && ancestors.has(url.href)) return empty_stylesheet;
-        const options = font ? {...request, mode:'cors', credentials:'same-origin', destination:'font'} : reference.imported && importPolicy ? {...request, referrerPolicy: importPolicy} : request;
+        const options = {...request,destination:font?'font':reference.imported?'style':'image',
+          ...(font?{mode:'cors',credentials:'same-origin'}:{}),
+          ...(reference.imported&&importPolicy?{referrerPolicy:importPolicy}:{})};
         const response = await fetch(url.href, options);
         if (!response.ok) return reference.imported ? empty_stylesheet : empty_resource;
         const final = response.url || url.href;

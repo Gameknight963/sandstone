@@ -99,7 +99,8 @@ main_frame.on_load = async () => {
   url_box.value = main_frame.url.href;
   let favicon_url = await main_frame.get_favicon();
   if (!favicon_url.startsWith("data:")) {
-    let response = await sandstone.network.fetch(favicon_url);
+    let response = await sandstone.network.fetch(favicon_url,{mode:'no-cors',destination:'image',referrerPolicy:main_frame.referrer_policy},
+      {url:main_frame.url.href,top_url:main_frame.url.href,broadcast_origin:main_frame.broadcast_origin});
     if (!response.ok) return;
     let favicon = await response.blob();
     if (favicon_blob_url) URL.revokeObjectURL(favicon_blob_url);

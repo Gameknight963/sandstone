@@ -2,6 +2,7 @@ import { ctx, convert_url } from "../context.mjs";
 import { serialize_request } from "../polyfill/request.mjs";
 import {navigate_target,navigation_target} from '../navigation_targets.mjs';
 import {document_states} from '../document_identity.mjs';
+import {navigation_activation} from '../user_activation.mjs';
 
 const form_prototype = globalThis.HTMLFormElement?.prototype;
 const method_descriptor = form_prototype && Object.getOwnPropertyDescriptor(form_prototype, "method");
@@ -45,6 +46,7 @@ export async function submit(form, submitter) {
   let data;constructing.add(form);
   try{data=associated?new FormData(form,submitter):new FormData(form);}finally{constructing.delete(form);}
   if(!connected.call(form)||owner.call(form)!==document)return;
+  navigation.activation=navigation_activation();
   const params = new URLSearchParams();
   for (const [key, value] of data) params.append(key, typeof value === "string" ? value : value.name);
   if (method === "get") {

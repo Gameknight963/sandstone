@@ -5,6 +5,7 @@ import {document_referrer_policy} from './intercept/document.mjs';
 import {find_frame_target,navigate_frame_target} from './iframe_window.mjs';
 import {load_cookies} from './polyfill/cookie.mjs';
 import {history_hash} from './polyfill/history.mjs';
+import {navigation_activation} from './user_activation.mjs';
 
 const attribute=globalThis.Element?.prototype.getAttribute;
 export function navigation_target(element,override=null){
@@ -23,7 +24,7 @@ export function navigate_target(url,target='',form_data=null,navigation={}){
     }
     return loader.navigate(loader.frame_id,url,true,form_data,navigation);
   }
-  const activation={transient:!!navigator.userActivation?.isActive,sticky:!!navigator.userActivation?.hasBeenActive};
+  const activation=navigation.activation||navigation_activation();
   return rpc.call_procedure(rpc.host,'navigate_target',[loader.frame_id,loader.beacon_context,target,url,form_data,{referrerPolicy:document_referrer_policy(),...navigation,activation}]).then(result=>{
     if(result?.download)load_cookies(result.cookies);return result;
   });

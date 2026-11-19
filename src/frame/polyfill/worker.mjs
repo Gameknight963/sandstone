@@ -251,7 +251,7 @@ export class FakeWorker extends EventTarget {
 
   async #start() {
     const credentials = this.#options.type === "classic" ? "same-origin" : this.#options.credentials;
-    const response = await network.fetch(this.#url, {credentials,referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(this.#url)?{mode:'same-origin'}:{}), signal: this.#controller.signal});
+    const response = await network.fetch(this.#url, {credentials,destination:'worker',referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(this.#url)?{mode:'same-origin'}:{}), signal: this.#controller.signal});
     if (!response.ok) throw new TypeError(`Worker request failed: ${response.status}`);
     if(this.#options.type==='module')validate_module_response(response,'javascript',this.#url);
     const network_script=/^https?:/.test(response.url||this.#url);

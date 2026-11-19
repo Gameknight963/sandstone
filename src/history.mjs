@@ -22,11 +22,12 @@ export class NavigationHistory {
   save_scroll(scroll) {
     if (this.current && Array.isArray(scroll) && scroll.length === 2) this.current.scroll = scroll.map(value => Number.isFinite(value) ? value : 0);
   }
-  navigate(url, {mode = "push", document_id, scroll = [0, 0]} = {}) {
+  navigate(url, {mode = "push", document_id, scroll = [0, 0],request_metadata} = {}) {
     document_id ||= "document:" + ++this.sequence;
     const previous = this.current;
     const entry = {url: new URL(url).href, state: previous && (mode === "reload" || mode === "traverse") ? structuredClone(previous.state) : null,
       document_id, scroll: mode === "reload" || mode === "traverse" ? previous?.scroll || scroll : scroll};
+    if(request_metadata)entry.request_metadata=Object.freeze({...request_metadata});
     if (previous && (mode === "traverse" || mode === "reload")) {
       const old_document = previous.document_id;
       for (const item of this.entries) if (item.document_id === old_document) item.document_id = document_id;
@@ -35,12 +36,16 @@ export class NavigationHistory {
     else { this.entries.splice(this.index + 1); this.entries.push(entry); this.index = this.entries.length - 1; }
     return this.snapshot();
   }
-  mutate(kind, state, url, scroll) {
+  mutate(kind, state, url, scroll,origin) {
     if (!this.current) throw new DOMException("Document is not active", "InvalidStateError");
     const copy = structuredClone(state);
     url = history_url(url, this.current.url);
     this.save_scroll(scroll);
     const entry = {...this.current, state: copy, url, scroll: [...this.current.scroll]};
+    if(entry.request_metadata){
+      origin??=new URL(url).origin;
+      entry.request_metadata=Object.freeze({...entry.request_metadata,source:origin==='null'?'about:blank':origin+'/',site:origin==='null'?'cross-site':'same-origin',opaque:origin==='null'});
+    }
     if (kind === "replace") this.entries[this.index] = entry;
     else if (kind === "push") { this.entries.splice(this.index + 1); this.entries.push(entry); this.index++; }
     else throw new TypeError("Invalid history operation");

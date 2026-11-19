@@ -60,6 +60,7 @@ export function rewrite_stylesheet(element,initialHref) {
       pending = (async () => {
         const inherited_policy = document_referrer_policy();
         const response = await network.fetch(url, {
+          destination:'style',
           mode:element.crossOrigin === null ? 'no-cors' : 'cors',
           credentials:element.crossOrigin === 'anonymous' ? 'same-origin' : 'include',
           referrerPolicy:element.referrerPolicy || inherited_policy

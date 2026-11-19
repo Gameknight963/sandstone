@@ -83,8 +83,8 @@ test('Classic import contexts freeze base URLs, policies and credentials without
   await env.loader.import('./one.js',{url:'https://cdn.test/scripts/classic.js',credentials:'include',referrerPolicy:'origin'});
   await env.loader.import('./two.js',{url:'https://cdn.test/scripts/classic.js',credentials:'same-origin',referrerPolicy:'no-referrer'});
   assert.deepEqual(env.requests,[
-    {url:'https://cdn.test/scripts/one.js',credentials:'include',referrer:'https://cdn.test/scripts/classic.js',referrerPolicy:'origin'},
-    {url:'https://cdn.test/scripts/two.js',credentials:'same-origin',referrer:'https://cdn.test/scripts/classic.js',referrerPolicy:'no-referrer'}
+    {url:'https://cdn.test/scripts/one.js',credentials:'include',referrer:'https://cdn.test/scripts/classic.js',referrerPolicy:'origin',destination:'script'},
+    {url:'https://cdn.test/scripts/two.js',credentials:'same-origin',referrer:'https://cdn.test/scripts/classic.js',referrerPolicy:'no-referrer',destination:'script'}
   ]);
 });
 
@@ -131,7 +131,7 @@ test('Delayed imports retain their module record context without consulting chan
   assert.ok(code.includes('__module_meta__("https://cdn.test/modules/root.js")'));
   unavailable=true;
   await env.loader.import('./late.js',{key:entry.key});
-  assert.deepEqual(env.requests[1],{url:'https://cdn.test/modules/late.js',credentials:'same-origin',referrer:'https://cdn.test/modules/root.js',referrerPolicy:'no-referrer'});
+  assert.deepEqual(env.requests[1],{url:'https://cdn.test/modules/late.js',credentials:'same-origin',referrer:'https://cdn.test/modules/root.js',referrerPolicy:'no-referrer',destination:'script'});
   await env.loader.prepare_url('./start.js','https://example.com/');
   assert.equal(env.requests.length,2);
 });
