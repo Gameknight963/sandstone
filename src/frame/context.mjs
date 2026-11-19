@@ -17,6 +17,7 @@ import {worker_module_intrinsics} from './module_namespace.mjs';
 import {install_runtime_context} from './runtime_context.mjs';
 import {create_direct_eval} from './direct_eval.mjs';
 import {create_runtime_helpers} from './runtime_helpers.mjs';
+import {install_node_documents} from './node_documents.mjs';
 export {get_runtime_context} from './runtime_context.mjs';
 const parse_json = JSON.parse;
 const realm_global=globalThis,evaluate_global=globalThis.eval,describe_global=Reflect.getOwnPropertyDescriptor,define_global=Reflect.defineProperty;
@@ -256,6 +257,7 @@ export function update_ctx(options = {}) {
   // Register the History view after storage selects the same-origin document
   // registry, so borrowed methods can recognize accessible peer histories.
   internal.history = is_worker ? undefined : new polyfill.FakeHistory(options.history);
+  if(!is_worker)install_node_documents(intercept.document);
   // Native Navigation targets the physical sandbox document. Hide its feature
   // flags until it can use virtual history, so routers use their History fallback.
   // Native network APIs without relay adapters must not connect directly.

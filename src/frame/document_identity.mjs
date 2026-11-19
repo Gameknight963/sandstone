@@ -11,6 +11,12 @@ export function register_document(group,alias){
   active.targets.set(alias,globalThis.document);
   active.aliases.set(globalThis.document,alias);
 }
+export function register_document_metadata(alias,getters){
+  active.metadata??=new WeakMap();active.metadata.set(alias,getters);
+}
+export function document_metadata_getter(alias,name){
+  for(const registry of registries){const getters=registry.metadata?.get(alias);if(getters)return getters[name];}
+}
 export function document_states(name,{weak=true}={}){
   const map=registry=>{let result=registry.states.get(name);if(!result)registry.states.set(name,result=weak?new WeakMap():new Map());return result;};
   // Retain earlier registries for objects kept after navigation or removal.

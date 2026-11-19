@@ -82,6 +82,7 @@ class CustomDocument {
   get cookie() {return Reflect.get(this.__target__,'cookie',this.__proxy__)}
   set cookie(value) {Reflect.set(this.__target__,'cookie',value,this.__proxy__)}
   get body() {return this.__target__.body}
+  get defaultView() {return ctx.window}
   get addEventListener(){return this.__target__.addEventListener;}
   set addEventListener(value){this.__target__.addEventListener=value;}
   get removeEventListener(){return this.__target__.removeEventListener;}
@@ -93,6 +94,7 @@ class CustomDocument {
   get getSelection(){return Object.hasOwn(internal,'getSelection')?internal.getSelection:ranges.getSelection;}
   set getSelection(value){internal.getSelection=value;}
   get location() {return ctx.location}
+  set location(value) {ctx.location.href=value}
   get URL() {return ctx.location.href}
   get baseURI() {
     return document_base_url();

@@ -20,6 +20,7 @@ import {cookie_snapshot} from '../polyfill/cookie.mjs';
 import {storage_entries} from '../polyfill/storage.mjs';
 import {navigation_activation} from '../user_activation.mjs';
 import {decode_document_response} from '../../text_encoding.mjs';
+import {native_dom} from '../dom_operations.mjs';
 
 const inline_frames=new WeakMap(),sandbox_lists=new WeakMap();
 const runtime_loads=new WeakMap();
@@ -169,7 +170,7 @@ export function rewrite_iframe(iframe_element) {
 
   let fetch_src = async (value, form_data = null, navigation = {}) => {
     navigation={activation:navigation_activation(),...navigation};
-    if(!iframe_element.isConnected||iframe_element.ownerDocument!==document)return;
+    if(!iframe_element.isConnected||native_dom.owner.call(iframe_element)!==document)return;
     const inline=navigation.srcdoc||new URL(value,ctx.document.baseURI).href.split('#')[0]==='about:srcdoc';
     if(inline&&authored.get('srcdoc')===null)return;
     if(!navigation.srcdoc&&active_target&&inline&&iframe_url.split('#')[0]==='about:srcdoc'&&String(value).includes('#')&&navigation.history_mode!=='reload'){
@@ -182,7 +183,7 @@ export function rewrite_iframe(iframe_element) {
     const revision=++generation;
     active_request?.abort();
     const controller=active_request=new AbortController();
-    const current=()=>revision===generation&&iframe_element.isConnected&&iframe_element.ownerDocument===document;
+    const current=()=>revision===generation&&iframe_element.isConnected&&native_dom.owner.call(iframe_element)===document;
     const previous_url=iframe_url;
     //download the proxied html
     iframe_element.setAttribute("__src", value);
