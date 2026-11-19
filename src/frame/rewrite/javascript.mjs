@@ -1,4 +1,5 @@
 import { parse } from "../javascript_parser.mjs";
+import {function_source_entries} from './function_sources.mjs';
 const terminated_nodes=new Set(['ExpressionStatement','VariableDeclaration','ReturnStatement','ThrowStatement','BreakStatement','ContinueStatement','DebuggerStatement','DoWhileStatement','PropertyDefinition','FieldDefinition']);
 
 class Scope {
@@ -17,7 +18,7 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false, url,importReferrer=url, resolve, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false} = {}) {
+export function rewrite_source(source, globals, {module = false, url,importReferrer=url, resolve, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false,functionSources} = {}) {
   let named=false;
   const onComment=sourceURL?(type,text)=>{
     if(type==='SingleLine'&&/^[#@]\s+sourceURL=\s*\S+\s*$/.test(text))named=true;
@@ -26,7 +27,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
   const scopes = new WeakMap();
   const bindings = new WeakSet();
   const names = new Set(globals);
-  const edits = [];
+  const edits = functionSources?functionSources.register(source,function_source_entries(ast,source)):[];
   const functionBodies=new WeakSet(),legacyFunctions=[],globalFunctions=new Set(),globalVariables=new Set(),declarations=[],identifiers=new Set();
   const strictBody=node=>Array.isArray(node?.body)&&node.body.some(statement=>statement.directive==='use strict');
 

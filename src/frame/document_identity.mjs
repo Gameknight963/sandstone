@@ -11,11 +11,17 @@ export function register_document(group,alias){
   active.targets.set(alias,globalThis.document);
   active.aliases.set(globalThis.document,alias);
 }
-export function document_states(name){
-  const map=registry=>{let result=registry.states.get(name);if(!result)registry.states.set(name,result=new WeakMap());return result;};
+export function document_states(name,{weak=true}={}){
+  const map=registry=>{let result=registry.states.get(name);if(!result)registry.states.set(name,result=weak?new WeakMap():new Map());return result;};
   // Retain earlier registries for objects kept after navigation or removal.
   return {
     get(key){for(const registry of registries){const values=map(registry);if(values.has(key))return values.get(key);}},
+    next(key){
+      // Order source records across both shared realms and retained documents.
+      // A newly selected group may have a lower counter than an older group.
+      let value=0;for(const registry of registries)value=Math.max(value,map(registry).get(key)||0);
+      map(active).set(key,++value);return value;
+    },
     has(key){for(const registry of registries)if(map(registry).has(key))return true;return false;},
     delete(key){let removed=false;for(const registry of registries)removed=map(registry).delete(key)||removed;return removed;},
     set(key,value){map(active).set(key,value);}

@@ -34,6 +34,8 @@ const javascriptASITest=await readFile(new URL('javascript-asi.playwright.js',im
 const verifyJavascriptASI=runInThisContext(`(${javascriptASITest})`);
 const functionConstructorTest=await readFile(new URL('function-constructor.playwright.js',import.meta.url),'utf8');
 const verifyFunctionConstructor=runInThisContext(`(${functionConstructorTest})`);
+const functionSourcesTest=await readFile(new URL('function-sources.playwright.js',import.meta.url),'utf8');
+const verifyFunctionSources=runInThisContext(`(${functionSourcesTest})`);
 const blockFunctionTest=await readFile(new URL('javascript-block-functions.playwright.js',import.meta.url),'utf8');
 const verifyBlockFunctions=runInThisContext(`(${blockFunctionTest})`);
 const globalFunctionTest=await readFile(new URL('javascript-global-functions.playwright.js',import.meta.url),'utf8');
@@ -295,6 +297,7 @@ try {
     result.passed.push(...await timed(verifyClassicContext(page), 'Classic script context fixture'));
     result.passed.push(...await timed(verifyJavascriptASI(page), 'JavaScript ASI fixture'));
     result.passed.push(...await timed(verifyFunctionConstructor(page), 'Function constructor fixture'));
+    result.passed.push(...await timed(verifyFunctionSources(page), 'Function source fixture'));
     result.passed.push(...await timed(verifyBlockFunctions(page,blockFunctionCases,globalBlockFunctionCases), 'Block function scope fixture'));
     result.passed.push(...await timed(verifyGlobalFunctions(page,globalFunctionCases), 'Global function declaration fixture'));
     result.passed.push(...await timed(verifyGlobalVars(page), 'Global var declaration fixture'));
