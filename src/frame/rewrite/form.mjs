@@ -17,6 +17,7 @@ const button_value=globalThis.HTMLButtonElement&&Object.getOwnPropertyDescriptor
 const input_value=globalThis.HTMLInputElement&&Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').get;
 const close_dialog=globalThis.HTMLDialogElement?.prototype.close;
 const submitters=document_states('form-submitters');
+const normalize_newlines=value=>value.replace(/\r\n|\r|\n/g,'\r\n');
 export function configure_form_submissions(){submitters.set(globalThis.document,submit);}
 function submitter_property(submitter,button,input){
   try{return button.call(submitter);}catch{return input.call(submitter);}
@@ -48,7 +49,7 @@ export async function submit(form, submitter) {
   if(!connected.call(form)||owner.call(form)!==document)return;
   navigation.activation=navigation_activation();
   const params = new URLSearchParams();
-  for (const [key, value] of data) params.append(key, typeof value === "string" ? value : value.name);
+  for (const [key, value] of data) params.append(normalize_newlines(key), normalize_newlines(typeof value === "string" ? value : value.name));
   if (method === "get") {
     url.search = params.toString();
     return navigate_target(url.href,target,null,navigation);

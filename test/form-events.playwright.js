@@ -10,7 +10,19 @@ async page=>{
       form.addEventListener('submit',event=>{submission=event;events.push(['submit',event.isTrusted,event.defaultPrevented,event.submitter===button]);});
       form.addEventListener('formdata',event=>events.push(['data',Array.from(event.formData)]));
     <\/script>`;
+  const multiline='('+function(){
+    const text=document.createElement('textarea');
+    text.name='text\nname';text.value='first\r\nsecond\rthird\nfourth';form.append(text);
+    form.addEventListener('formdata',event=>{
+      event.formData.append('added\rkey\nline','value\rnext\nlast\r\nend');
+      event.formData.append('file\nkey',new File(['bytes'],'file\rname\n.txt'));
+      event.formData.append('duplicate',String.fromCodePoint(0x96ea));event.formData.append('duplicate','second');
+    });
+  }.toString()+')();';
   const cases=[
+    ...[["get","application/x-www-form-urlencoded"],["post","application/x-www-form-urlencoded"],["post","text/plain"]].map(([method,enctype])=>({
+      name:method+" "+enctype+" multiline encoding",setup:"form.acceptCharset=\"utf-8\";form.method="+JSON.stringify(method)+";form.enctype="+JSON.stringify(enctype)+";"+multiline
+    })),
     {name:'stop propagation',setup:"form.addEventListener('submit',e=>e.stopPropagation())"},
     {name:'stop immediate propagation',setup:"form.addEventListener('submit',e=>e.stopImmediatePropagation());form.addEventListener('submit',()=>events.push('unexpected'))"},
     {name:'cancel stopped submit',setup:"form.addEventListener('submit',e=>{e.preventDefault();e.stopPropagation();events.push(['cancelled',e.defaultPrevented,e.returnValue]);})",count:0},
@@ -60,7 +72,7 @@ async page=>{
   const native=await page.context().newPage(),requests=[];
   await native.route(origin+'/**',async route=>{
     const request=route.request();
-    if(new URL(request.url()).pathname!==prefix+'start'&&new URL(request.url()).pathname!=='/favicon.ico')requests.push({path:new URL(request.url()).pathname,method:request.method(),body:request.postData()||''});
+    if(new URL(request.url()).pathname!==prefix+'start'&&new URL(request.url()).pathname!=='/favicon.ico')requests.push({path:new URL(request.url()).pathname+new URL(request.url()).search,method:request.method(),body:request.postData()||''});
     await route.fulfill({contentType:'text/html',body:new URL(request.url()).pathname===prefix+'start'?html:'<!doctype html><body>Received'});
   });
   const direct=[],routePattern=/^https?:/,block=route=>{direct.push(route.request().url());return route.abort();};
@@ -71,7 +83,7 @@ async page=>{
       sandstone.network.session.fetch=(url,options)=>{
         if(new URL(url).origin!==origin)return previous(url,options);
         const path=new URL(url).pathname;
-        if(path!==prefix+'start'&&path!=='/favicon.ico')formEventRequests.push({path,method:options.method||'GET',body:options.body?new TextDecoder().decode(options.body):''});
+        if(path!==prefix+'start'&&path!=='/favicon.ico')formEventRequests.push({path:path+new URL(url).search,method:options.method||'GET',body:options.body?new TextDecoder().decode(options.body):''});
         return Promise.resolve(new Response(path===prefix+'start'?html:'<!doctype html><body>Received',{headers:{'Content-Type':'text/html'}}));
       };
     },{origin,prefix,html});
@@ -107,6 +119,6 @@ async page=>{
       if(JSON.stringify(expected)!==JSON.stringify(actual))throw new Error('Form event parity '+test.name+': '+JSON.stringify({expected,actual}));
     }
     if(direct.length)throw new Error('Forms bypassed relay: '+JSON.stringify(direct));
-    return ['Stopped form submissions stay on the relay and preserve native cancellation','Submit listeners, inline handlers and synthetic events match native defaults','Form snapshots, detached controls, recursive formdata and dialog submissions'];
+    return ['Stopped form submissions stay on the relay and preserve native cancellation','Submit listeners, inline handlers and synthetic events match native defaults','Form snapshots, detached controls, recursive formdata and dialog submissions','GET, URL-encoded and plain-text forms normalize multiline names, values and filenames without changing FormData events'];
   }finally{await native.close();await page.unroute(routePattern,block);}
 }
