@@ -18,7 +18,7 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false, url,importReferrer=url, resolve,resolveNamespace, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false,functionSources,rewriteThis=true} = {}) {
+export function rewrite_source(source, globals, {module = false, url,importReferrer=url, resolve,resolveNamespace, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',withContext='(function(){return this})().__ctx__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false,functionSources,rewriteThis=true} = {}) {
   let named=false;
   const onComment=sourceURL?(type,text)=>{
     if(type==='SingleLine'&&/^[#@]\s+sourceURL=\s*\S+\s*$/.test(text))named=true;
@@ -202,7 +202,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
     const legacy=legacy_publications.get(node);
     if(legacy&&withToken)legacy.publication[2]=`;var {}=(${globalName===contextName?withToken+'.context.'+legacy.name+'='+legacy.name:withToken+'.context.__publish_legacy_function__('+JSON.stringify(legacy.name)+','+legacy.name+')'});${legacy.implicit?'}':''}`;
     if(node.type==='WithStatement'&&!preserveWith){
-      const token=with_name(),runtime='(function(){return this})().__ctx__';
+      const token=with_name(),runtime=withContext;
       edits.push([node.object.start,node.object.start,runtime+'.__enter_with__((']);
       edits.push([node.object.end,node.object.end,'),'+(withToken||'null')+')']);
       const block=node.body.type==='BlockStatement',offset=block?node.body.start+1:node.body.start;

@@ -1,3 +1,4 @@
+import {window_runtime_context} from './runtime_context.mjs';
 import {ctx} from './context.mjs';
 import {create_obj_proxy} from './global_functions.mjs';
 import {register_message_peer,window_post_message} from './window_messages.mjs';
@@ -9,14 +10,14 @@ const windows=new WeakMap();
 const descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentWindow');
 const document_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentDocument');
 function context_value(target,key){
-  let context;try{context=target.__ctx__;}catch{}
+  const context=window_runtime_context(target);
   return context?context[key]:target[key];
 }
 if(document_descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentDocument',{...document_descriptor,get(){
   const value=document_descriptor.get.call(this),state=frames.get(this);if(!value||!state)return value;
   state.prepare?.(descriptor.get.call(this));
   if(!state.url()||state.opaque()||state.origin()!==ctx.origin)return null;
-  try{if(!descriptor.get.call(this).__ctx__)return null;}catch{return null;}
+  try{if(!window_runtime_context(descriptor.get.call(this)))return null;}catch{return null;}
   return context_value(descriptor.get.call(this),'document');
 }});
 export function native_frame_window(element){return descriptor?.get.call(element);}
@@ -85,7 +86,7 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
       if(state.origin()!==ctx.origin)throw new DOMException('Blocked access to a cross-origin frame','SecurityError');
       // Same-document History changes are synchronous in the child. Its host
       // URL notification arrives later, so prefer the accessible live view.
-      let context;try{context=target.__ctx__;}catch{}
+      const context=window_runtime_context(target);
       if(context)return context.location.href;
       return url;
     };
@@ -128,7 +129,7 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
         // Initial blank documents have not installed resource interception.
         // Keep them unavailable until their runtime is prepared; exposing raw
         // documents here would let ordinary iframe writers bypass the relay.
-        if(!state.url()||!target.__ctx__)throw new DOMException('The frame runtime is not ready','SecurityError');
+        if(!state.url()||!window_runtime_context(target))throw new DOMException('The frame runtime is not ready','SecurityError');
         return context_value(target,'document');
       }},
       postMessage:{value:(...args)=>window_post_message(target,state.token,args)},

@@ -13,6 +13,8 @@ import * as rpc from '../rpc.mjs';
 import {create_with_scope} from './with_scope.mjs';
 import {create_global_bindings} from './global_bindings.mjs';
 import {worker_module_intrinsics} from './module_namespace.mjs';
+import {install_runtime_context} from './runtime_context.mjs';
+export {get_runtime_context} from './runtime_context.mjs';
 const parse_json = JSON.parse;
 const realm_global=globalThis,evaluate_global=globalThis.eval,describe_global=Reflect.getOwnPropertyDescriptor,define_global=Reflect.defineProperty;
 const with_entries=[];
@@ -249,9 +251,7 @@ export function update_ctx(options = {}) {
     try { if(!Reflect.deleteProperty(globalThis,key))Object.defineProperty(globalThis,key,{value:undefined,configurable:true}); } catch {}
   }
 
-  globalThis.__ctx__ = ctx.__proxy__;
-  globalThis.__get_this__ = ctx.__get_this__;
-  globalThis.__get_var__ = ctx.__get_var__;
+  install_runtime_context(ctx.__proxy__);
   return storageReady;
 }
 

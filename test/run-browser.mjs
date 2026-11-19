@@ -16,6 +16,8 @@ const moduleTest = await readFile(new URL("modules.playwright.js", import.meta.u
 const verifyModules = runInThisContext(`(${moduleTest})`);
 const privateModuleTest=await readFile(new URL('module-private-context.playwright.js',import.meta.url),'utf8');
 const verifyPrivateModules=runInThisContext(`(${privateModuleTest})`);
+const privateClassicTest=await readFile(new URL('classic-private-context.playwright.js',import.meta.url),'utf8');
+const verifyPrivateClassic=runInThisContext(`(${privateClassicTest})`);
 const cssModuleTest=await readFile(new URL('css-modules.playwright.js',import.meta.url),'utf8');
 const verifyCSSModules=runInThisContext(`(${cssModuleTest})`);
 const moduleContextTest=await readFile(new URL('module-context.playwright.js',import.meta.url),'utf8');
@@ -302,6 +304,7 @@ try {
     result.passed.push(...await timed(verifyCSSModules(page), 'CSS module fixture'));
     result.passed.push(...await timed(verifyModuleContext(page), 'Module request context fixture'));
     result.passed.push(...await timed(verifyClassicContext(page), 'Classic script context fixture'));
+    result.passed.push(...await timed(verifyPrivateClassic(page), 'Private classic script context fixture'));
     result.passed.push(...await timed(verifyJavascriptASI(page), 'JavaScript ASI fixture'));
     result.passed.push(...await timed(verifyFunctionConstructor(page), 'Function constructor fixture'));
     result.passed.push(...await timed(verifyFunctionSources(page), 'Function source fixture'));
