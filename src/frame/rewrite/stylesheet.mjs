@@ -6,6 +6,8 @@ import {document_referrer_policy} from '../intercept/document.mjs';
 import {schedule_resource_event} from '../resource_events.mjs';
 import {resource_attribute} from '../resource_attributes.mjs';
 import {track_style_request} from '../style_requests.mjs';
+import * as loader from '../loader.mjs';
+import {decode_stylesheet_response} from '../../text_encoding.mjs';
 
 export function is_style_link(element){
   return Element.prototype.matches.call(element,'[rel~="stylesheet" i], [rel~="preload" i][as="style" i]');
@@ -59,6 +61,7 @@ export function rewrite_stylesheet(element,initialHref) {
       }
       pending = (async () => {
         const inherited_policy = document_referrer_policy();
+        const inherited_encoding=loader.character_encoding;
         const response = await network.fetch(url, {
           destination:'style',
           mode:element.crossOrigin === null ? 'no-cors' : 'cors',
@@ -67,15 +70,16 @@ export function rewrite_stylesheet(element,initialHref) {
         });
         if (!response.ok) throw new TypeError(`Stylesheet request failed: ${response.status}`);
         const policy = response.headers.get('referrer-policy');
+        const decoded=await decode_stylesheet_response(response,inherited_encoding);
         // Chromium inherits the document policy for @import requests, while
         // image/font resources use the default unless the CSS delivers a policy.
         const request_context = {referrer: response.url || url,
           referrerPolicy: parse_referrer_policy(policy),
-          importPolicy: parse_referrer_policy(policy, inherited_policy)};
-        const css = await parse_css(await response.text(), response.url || url, undefined, request_context);
+          importPolicy: parse_referrer_policy(policy, inherited_policy),encoding:decoded.encoding};
+        const css = await parse_css(decoded.text, response.url || url, undefined, request_context);
         if (current !== generation) return;
         if (blob_url) { URL.revokeObjectURL(blob_url); delete network.known_urls[blob_url]; delete network.stylesheet_contexts[blob_url]; }
-        blob_url = network.create_blob_url(new Blob([css], {type: "text/css"}), response.url || url, request_context);
+        blob_url = network.create_blob_url(new Blob([css], {type: "text/css;charset=utf-8"}), response.url || url, request_context);
         descriptor.set.call(element, blob_url);
       })().catch(error=>failed(error,current));
       track_style_request(element,pending);

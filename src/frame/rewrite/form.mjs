@@ -3,6 +3,9 @@ import { serialize_request } from "../polyfill/request.mjs";
 import {navigate_target,navigation_target} from '../navigation_targets.mjs';
 import {document_states} from '../document_identity.mjs';
 import {navigation_activation} from '../user_activation.mjs';
+import * as loader from '../loader.mjs';
+import {form_encoding,form_pairs,form_urlencoded,form_plaintext,form_multipart} from '../../form_encoding.mjs';
+import {submission_form_data} from '../form_charset.mjs';
 
 const form_prototype = globalThis.HTMLFormElement?.prototype;
 const method_descriptor = form_prototype && Object.getOwnPropertyDescriptor(form_prototype, "method");
@@ -17,7 +20,6 @@ const button_value=globalThis.HTMLButtonElement&&Object.getOwnPropertyDescriptor
 const input_value=globalThis.HTMLInputElement&&Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').get;
 const close_dialog=globalThis.HTMLDialogElement?.prototype.close;
 const submitters=document_states('form-submitters');
-const normalize_newlines=value=>value.replace(/\r\n|\r|\n/g,'\r\n');
 export function configure_form_submissions(){submitters.set(globalThis.document,submit);}
 function submitter_property(submitter,button,input){
   try{return button.call(submitter);}catch{return input.call(submitter);}
@@ -44,24 +46,27 @@ export async function submit(form, submitter) {
   }
   const url = new URL(convert_url(action || ctx.location.href, ctx.document.baseURI));
   const associated=submitter&&submitter_property(submitter,button_form,input_form)===form;
+  const encoding=form_encoding(attribute(form,'accept-charset'),loader.character_encoding);
   let data;constructing.add(form);
-  try{data=associated?new FormData(form,submitter):new FormData(form);}finally{constructing.delete(form);}
+  try{data=submission_form_data(form,associated?submitter:undefined,encoding);}finally{constructing.delete(form);}
   if(!connected.call(form)||owner.call(form)!==document)return;
   navigation.activation=navigation_activation();
-  const params = new URLSearchParams();
-  for (const [key, value] of data) params.append(normalize_newlines(key), normalize_newlines(typeof value === "string" ? value : value.name));
+  const pairs=form_pairs(data);
   if (method === "get") {
-    url.search = params.toString();
+    url.search = form_urlencoded(pairs,encoding);
     return navigate_target(url.href,target,null,navigation);
   }
   const enctype = attribute(submitter, "formenctype") !== null ? submitter.formEnctype || "application/x-www-form-urlencoded" : enctype_descriptor.get.call(form);
-  let body = data;
+  let body;
   let headers;
-  if (enctype === "application/x-www-form-urlencoded") body = params;
+  if (enctype === "application/x-www-form-urlencoded") {
+    body=form_urlencoded(pairs,encoding);headers={"Content-Type":"application/x-www-form-urlencoded"};
+  }
   else if (enctype === "text/plain") {
-    body = [...params].map(([key, value]) => `${key}=${value}\r\n`).join("");
+    body = form_plaintext(pairs,encoding);
     headers = {"Content-Type": "text/plain"};
   }
+  else body=form_multipart(data,encoding);
   const request = await serialize_request(url.href, {method: "POST", body, headers}, ctx.location.href);
   return navigate_target(url.href,target, {
     method: "POST", headers: request.options.headers, body: request.options.body

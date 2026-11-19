@@ -1,4 +1,5 @@
 import {parse_referrer_policy} from '../referrer.mjs';
+import {decode_stylesheet_response} from '../text_encoding.mjs';
 
 const whitespace = character => /[\t\n\f\r ]/.test(character || "\0");
 const name_character = character => /[\w\u0080-\uffff-]/.test(character || "\0");
@@ -231,7 +232,7 @@ export function edit_css_parts(parts, edits) {
   return output;
 }
 
-export function rewrite_css(source, base, {fetch, createURL, supports, transform, request, importPolicy, fontFace}, ancestors = new Set()) {
+export function rewrite_css(source, base, {fetch, createURL, supports, transform, request, importPolicy, fontFace,encoding='UTF-8'}, ancestors = new Set()) {
   source = String(source);
   const references = css_resource_references(source);
   if (!references.length) return transform ? transform(source, []) : source;
@@ -263,9 +264,10 @@ export function rewrite_css(source, base, {fetch, createURL, supports, transform
           const policy = response.headers.get('referrer-policy');
           const child_request = {...request, referrer: final, referrerPolicy: parse_referrer_policy(policy)};
           const child_import_policy = parse_referrer_policy(policy, importPolicy || request?.referrerPolicy);
-          const css = await rewrite_css(await response.text(), final, {fetch, createURL, supports, request: child_request, importPolicy: child_import_policy}, next);
-          blob = new Blob([css], {type: "text/css"});
-          return createURL(blob, final, {...child_request, importPolicy: child_import_policy});
+          const decoded=await decode_stylesheet_response(response,encoding);
+          const css = await rewrite_css(decoded.text, final, {fetch, createURL, supports, request: child_request, importPolicy: child_import_policy,encoding:decoded.encoding}, next);
+          blob = new Blob([css], {type: "text/css;charset=utf-8"});
+          return createURL(blob, final, {...child_request, importPolicy: child_import_policy,encoding:decoded.encoding});
         } else blob = await response.blob();
         return createURL(blob, final);
       } catch { return reference.imported ? empty_stylesheet : empty_resource; }

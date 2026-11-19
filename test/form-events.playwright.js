@@ -1,4 +1,4 @@
-async page=>{
+async(page,{batch=0,batches=1}={})=>{
   const origin='https://form-events.test',prefix='/form-events/';
   const html=`<!doctype html><body><iframe name="sink"></iframe>
     <dialog id="dialog" open><form id="subject" method="post" target="sink" action="${prefix}received">
@@ -114,7 +114,8 @@ async page=>{
       if(result.requests.length!==expected)throw new Error(test.name+' unexpected request count; proxy='+proxy+' '+JSON.stringify(result));
       return result;
     };
-    for(const test of cases){
+    for(const [index,test] of cases.entries()){
+      if(index%batches!==batch)continue;
       const expected=await run(false,test),actual=await run(true,test);
       if(JSON.stringify(expected)!==JSON.stringify(actual))throw new Error('Form event parity '+test.name+': '+JSON.stringify({expected,actual}));
     }

@@ -14,6 +14,7 @@ import './navigation_targets.mjs';
 import {navigation_sandbox} from '../navigation_policy.mjs';
 import {RPCSourcePolicy} from './rpc_policy.mjs';
 import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../bootstrap.mjs';
+import {decode_document_response} from '../text_encoding.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 export {cache_storage} from './cache.mjs';
@@ -133,6 +134,7 @@ export class ProxyFrame {
     const source_url = navigation.source_context?.url||(navigation.initiated ? this.url?.href : undefined);
     const source_policy = navigation.referrerPolicy || this.referrer_policy || default_referrer_policy;
     let html = null;
+    let character_encoding = 'UTF-8';
     let download_response;
     let error = false;
     let referrer_policy = default_referrer_policy, document_referrer = '';
@@ -157,7 +159,7 @@ export class ProxyFrame {
         request_metadata=response.request_metadata;
         if(navigation_id!==this.navigation_id){await response.body?.cancel();return;}
         if(is_download(response.headers))download_response=response;
-        else html = await response.text();
+        else {const decoded=await decode_document_response(response);html=decoded.text;character_encoding=decoded.encoding;}
         url = response.url;
         referrer_policy = parse_referrer_policy(response.headers.get('referrer-policy'));
         document_referrer = response.request_referrer || '';
@@ -226,7 +228,7 @@ export class ProxyFrame {
     try {
       await this.send_page({
         url: this.url.href,
-        html: html, 
+        html: html, character_encoding,
         frame_id: this.id,
         beacon_context,
         crypto_available: crypto_service.methods,

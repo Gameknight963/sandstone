@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 import {createHmac} from 'node:crypto';
 import {verifyHTMLInputStream} from './html-input-native.mjs';
 import {verifyDirectEval} from './direct-eval.playwright.mjs';
+import {verifyDocumentEncoding} from './document-encoding.playwright.mjs';
+import {verifyFormEncoding} from './form-encoding.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -251,9 +253,11 @@ async function timed(operation, label) {
   finally { clearTimeout(timer); }
 }
 const browserChannel = process.env.BROWSER_CHANNEL || "chrome";
+const storageMode=process.env.BROWSER_STORAGE_MODE||'both';
+if(!['both','normal','denied'].includes(storageMode))throw new Error('Invalid BROWSER_STORAGE_MODE: '+storageMode);
 let browser;
 try {
-  for (const storageDenied of [false, true]) {
+  for (const storageDenied of storageMode==='both'?[false,true]:[storageMode==='denied']) {
     activeStorageMode=storageDenied;
     // Keep each storage mode in a separate browser process. Closing a context
     // with many navigated cross-process frames must not affect the next run.
@@ -423,7 +427,9 @@ try {
     result.passed.push(...await timed(verifySVGScripts(page), 'SVG script fixture'));
     result.passed.push(...await timed(verifySVGUse(page), 'SVG symbol fixture'));
     result.passed.push(...await timed(verifyForms(page), "Form fixture"));
-    result.passed.push(...await timed(verifyFormEvents(page), 'Form event fixture'));
+    for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyFormEvents(page,{batch,batches:3}), 'Form event fixture '+(batch+1)));
+    for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyFormEncoding(page,{batch,batches:3}), 'Legacy form encoding fixture '+(batch+1)));
+    result.passed.push(...await timed(verifyDocumentEncoding(page), 'Document and resource encoding fixture'));
     result.passed.push(...await timed(verifyXHR(page), "XHR fixture"));
     await page.evaluate(source => main_frame.eval_js(source), axiosSource);
     const axiosResult = JSON.parse(await timed(page.evaluate(() => main_frame.eval_js(`(async () => {

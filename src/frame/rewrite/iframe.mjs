@@ -19,6 +19,7 @@ import {on_shadow_root} from '../shadow_roots.mjs';
 import {cookie_snapshot} from '../polyfill/cookie.mjs';
 import {storage_entries} from '../polyfill/storage.mjs';
 import {navigation_activation} from '../user_activation.mjs';
+import {decode_document_response} from '../../text_encoding.mjs';
 
 const inline_frames=new WeakMap(),sandbox_lists=new WeakMap();
 const runtime_loads=new WeakMap();
@@ -188,7 +189,7 @@ export function rewrite_iframe(iframe_element) {
     console.log("navigating iframe to", target_url);
     let final_url = target_url;
     let error; //possible network error
-    let html;
+    let html,character_encoding='UTF-8';
     let referrer_policy, document_referrer,request_metadata_token;
     if(inline){html=authored.get('srcdoc');referrer_policy=document_referrer_policy();document_referrer=loader.document_referrer;}
     else try {
@@ -209,7 +210,9 @@ export function rewrite_iframe(iframe_element) {
         catch(error){if(!current())return;console.error(error);return {download:true};}
         finally{if(current()){iframe_element.setAttribute('__src',previous_url);release_load();}}
       }
-      html = await response.text();
+      const inherited=new URL(response.url||target_url).origin===ctx.origin?loader.character_encoding:undefined;
+      const decoded=await decode_document_response(response,{fallbackEncoding:inherited});
+      html=decoded.text;character_encoding=decoded.encoding;
       final_url = response.url;
       referrer_policy = parse_referrer_policy(response.headers.get('referrer-policy'));
       document_referrer = response.request_referrer || '';
@@ -306,6 +309,7 @@ export function rewrite_iframe(iframe_element) {
         await send_page({
           url: final_url,
           html: html,
+          character_encoding,
           frame_id: frame_id,
           error: error,
           ...state,

@@ -41,7 +41,7 @@ test('CSS imports resolve against redirected stylesheet URLs and preserve condit
   assert.match(imported, /url\("blob:https:\/\/cdn.test\/images\/icon.svg#mark"\)/);
   assert.deepEqual(requested.sort(), ['https://site.test/css/theme.css','https://site.test/css/a.png',
     'https://cdn.test/styles/nested.css','https://cdn.test/images/icon.svg'].sort());
-  assert.equal(blobs.get('blob:https://cdn.test/styles/theme.css').type,'text/css');
+  assert.equal(blobs.get('blob:https://cdn.test/styles/theme.css').type,'text/css;charset=utf-8');
 });
 
 test('CSS import cycles terminate and failed resources cannot fall through to remote URLs', async () => {

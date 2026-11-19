@@ -17,6 +17,7 @@ import {capture_range_copy,perform_range_copy,clone_range_contents} from '../ran
 import {install_serialization} from '../dom_serialization.mjs';
 import {is_svg_script,notify_svg_script} from '../svg_scripts.mjs';
 import {notify_script_preparation} from '../script_preparation.mjs';
+import {copy_document_encoding} from '../document_encoding.mjs';
 const mutate_styles=(nodes,operation)=>{
   const scripts=new Set();
   for(const node of nodes)if(node instanceof Node){const parent=parent_element.call(node);if(is_svg_script(node)||node instanceof HTMLScriptElement)scripts.add(node);if(is_svg_script(parent)||parent instanceof HTMLScriptElement)scripts.add(parent);}
@@ -70,7 +71,7 @@ if (globalThis.Node) {
     const restore=capture_resources(receiver,!args[0]);
     // Source attributes may temporarily be absent or contain local blobs.
     // Restore their virtual values without ever assigning remote native URLs.
-    return perform_node_copy(receiver,()=>Reflect.apply(target,receiver,args),copy=>{restore(copy,!active_document(node_document(copy)));return copy;});
+    return perform_node_copy(receiver,()=>Reflect.apply(target,receiver,args),copy=>{copy_document_encoding(receiver,copy);restore(copy,!active_document(node_document(copy)));return copy;});
   }});
   const import_node=Document.prototype.importNode,adopt_node=Document.prototype.adoptNode;
   const document_view=Object.getOwnPropertyDescriptor(Document.prototype,'defaultView').get;

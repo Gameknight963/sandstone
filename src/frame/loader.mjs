@@ -12,6 +12,7 @@ import {document_referrer_policy,reset_document_referrer_policy,set_current_scri
 import {configure_window_messages} from './window_messages.mjs';
 import {load_document_html,run_document_script,initialize_blank_document,on_document_complete} from './document_input.mjs';
 import {navigation_activation} from './user_activation.mjs';
+import {configure_document_encoding} from './document_encoding.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -32,6 +33,7 @@ export let beacon_context;
 export let crypto_available = false;
 export let referrer_policy = default_referrer_policy;
 export let document_referrer = '';
+export let character_encoding = 'UTF-8';
 export let frame_html; //the html for the frame runtime
 export let version; //the sandstone version
 export let is_loaded = false;
@@ -61,7 +63,7 @@ export function document_sources(){
     try{
       if(window!==globalThis&&window.sandstone_frame?.context.ctx.origin===ctx.origin){
         const source=window.sandstone_frame.loader;
-        if(!sources.has(window.location.href))sources.set(window.location.href,{url:source.url,cookie_url:source.cookie_url,inherited_base_url:source.inherited_base_url});
+        if(!sources.has(window.location.href))sources.set(window.location.href,{url:source.url,cookie_url:source.cookie_url,inherited_base_url:source.inherited_base_url,character_encoding:source.character_encoding});
       }
       for(let index=0;index<window.length;index++)visit(window[index]);
     }catch{}
@@ -73,6 +75,7 @@ export function document_opened(before,after,sources){
   if(before===after){opened_url?.(ctx.location.href);return;}
   const source=sources.get(after);if(!source){opened_url?.(ctx.location.href);return;}
   document_origin=ctx.origin;
+  character_encoding=source.character_encoding||'UTF-8';configure_document_encoding(document,ctx.document,character_encoding);
   inherited_base_url=source.inherited_base_url;cookie_url=new URL(source.url).protocol==='about:'?source.cookie_url||source.url:undefined;base_url=inherited_base_url||source.url;
   network.known_urls[after]=source.url;
   set_location(source.url);opened_url?.(source.url);
@@ -131,6 +134,7 @@ function get_frame_html() {
 }
 
 function prepare_html(options) {
+  character_encoding=options.character_encoding||'UTF-8';
   referrer_policy = options.referrer_policy || default_referrer_policy;
   reset_document_referrer_policy(referrer_policy);
   document_referrer = options.document_referrer || '';
@@ -154,6 +158,7 @@ function prepare_html(options) {
   if(options.window_name!==undefined)globalThis.name=options.window_name;
   get_frame_html();
   const ready=update_ctx(options);
+  configure_document_encoding(document,ctx.document,character_encoding);
   configure_window_messages(options);
   return Promise.all([ready,configure_cookies(options.cookies,ctx.document)]);
 }

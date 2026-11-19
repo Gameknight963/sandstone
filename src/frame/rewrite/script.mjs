@@ -10,6 +10,8 @@ import {defer_script,deferred_script} from '../script_preparation.mjs';
 import {ordered_script,ordered_classic} from '../script_schedule.mjs';
 import {delay_script_load} from '../script_lifetime.mjs';
 import {script_text} from '../script_text.mjs';
+import {decode_classic_response} from '../../text_encoding.mjs';
+import {labelToName} from '@exodus/bytes/encoding.js';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {parse_referrer_policy} from '../../referrer.mjs';
 
@@ -203,7 +205,7 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
         referrerPolicy:classic_context.referrerPolicy,destination:'script',signal
       });
       if (!response.ok) throw new TypeError(`Script request failed: ${response.status}`);
-      text = await response.text();
+      text = await decode_classic_response(response,classic_context.encoding);
       element.__sandstone_url__ = response.url || convert_url(script_url, ctx.document.baseURI);
       classic_context.url=element.__sandstone_url__;
       classic_context.muted=classic_context.mode==='no-cors'&&(response.request_cross_origin??response.type==='opaque');
@@ -217,7 +219,7 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
 
   function classic_request_context(){
     const crossOrigin=element.crossOrigin;
-    return {url:script_url===null?ctx.document.baseURI:undefined,credentials:crossOrigin==='use-credentials'?'include':'same-origin',mode:crossOrigin===null?'no-cors':'cors',networkCredentials:crossOrigin==='anonymous'?'same-origin':'include',referrerPolicy:parse_referrer_policy(element.referrerPolicy,document_referrer_policy())};
+    return {url:script_url===null?ctx.document.baseURI:undefined,encoding:labelToName(element.charset)||loader.character_encoding,credentials:crossOrigin==='use-credentials'?'include':'same-origin',mode:crossOrigin===null?'no-cors':'cors',networkCredentials:crossOrigin==='anonymous'?'same-origin':'include',referrerPolicy:parse_referrer_policy(element.referrerPolicy,document_referrer_policy())};
   }
 
   intercept_property(element, "src", {
