@@ -1,6 +1,35 @@
 import assert from 'node:assert/strict';
 
 export async function interact_editor(page,proxy,site,{surface,read,wait}){
+  if(site.id==='photopea'){
+    await surface.getByRole('button',{name:'Start using Photopea',exact:true}).first().click();
+    await surface.getByText('New Project',{exact:true}).click();
+    await surface.getByLabel('Name',{exact:true}).fill('Sandstone');
+    await surface.getByLabel('Width',{exact:true}).fill('128');await surface.getByLabel('Height',{exact:true}).fill('128');
+    await surface.getByText('Create',{exact:true}).click();
+    await surface.getByTitle('Brush Tool (B)',{exact:true}).click();
+    const dimensions=await read(page,proxy,'Array.from(document.querySelectorAll("canvas"),canvas=>({width:canvas.width,height:canvas.height}))');
+    const index=dimensions.reduce((best,size,index)=>size.width*size.height>dimensions[best].width*dimensions[best].height?index:best,0);
+    const canvas=surface.locator('canvas').nth(index),box=await canvas.boundingBox(),x=box.x+box.width/2,y=box.y+box.height/2;
+    const snapshot=async()=>{
+      // Compare document pixels without clipping the browser's iframe capture.
+      const png=await page.screenshot();
+      const pixels=await page.evaluate(async({bytes,x,y})=>{
+        const image=await createImageBitmap(new Blob([Uint8Array.from(bytes)],{type:'image/png'}));
+        const crop=new OffscreenCanvas(96,64),context=crop.getContext('2d');
+        context.drawImage(image,x-48,y-32,96,64,0,0,96,64);image.close();
+        return Array.from(context.getImageData(0,0,96,64).data);
+      },{bytes:[...png],x,y});
+      return Buffer.from(pixels);
+    };
+    await page.mouse.move(box.x+5,box.y+5);const before=await snapshot();
+    await page.mouse.move(x-25,y);await page.mouse.down();await page.mouse.move(x+25,y,{steps:8});await page.mouse.up();await page.mouse.move(box.x+5,box.y+5);
+    const modified='document.body.innerText.includes("Sandstone.psd *")';
+    await wait(page,proxy,modified);const drawn=await snapshot();assert.notDeepEqual(drawn,before,'Photopea brush did not change the document pixels');
+    await page.keyboard.press('Control+z');await wait(page,proxy,'!('+modified+')');assert.deepEqual(await snapshot(),before,'Photopea undo did not restore the blank pixels');
+    await page.keyboard.press('Control+Shift+z');await wait(page,proxy,modified);assert.deepEqual(await snapshot(),drawn,'Photopea redo did not restore the brush pixels');
+    return {created:true,drawn:true,undo:true,redo:true};
+  }
   if(site.id==='desmos'){
     await surface.locator('.dcg-mq-editable-field').first().click();
     await page.keyboard.type('y=x^2');await page.keyboard.press('Enter');

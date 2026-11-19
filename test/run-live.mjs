@@ -11,6 +11,7 @@ import {track_client_sockets} from './client-sockets.mjs';
 import {interact_editor} from './live-editors.mjs';
 
 const sites=[
+  {id:'photopea',url:'https://www.photopea.com/',editor:true},
   {id:'desmos',url:'https://www.desmos.com/calculator',editor:true},
   {id:'jspaint',url:'https://jspaint.app/',editor:true},
   {id:'mermaid',url:'https://mermaid.live/',editor:true},
