@@ -330,6 +330,8 @@ try{
     navigate:url=>nativePage.goto(url),evaluate:source=>metadata_evaluate(nativePage,false,source),
     click:selector=>nativePage.locator(selector).click(),
     reload:()=>nativePage.reload(),
+    // A same-URL wait can still match the document preceding a scripted reload.
+    scriptReload:()=>Promise.all([nativePage.waitForNavigation({waitUntil:'load'}),metadata_evaluate(nativePage,false,'location.reload()')]),
     wait:async url=>{await nativePage.waitForURL(url);await nativePage.waitForLoadState('load');}
   },metadata,origin,metadataOrigin,'metadata-native');
   console.log(JSON.stringify({nativeMetadata}));

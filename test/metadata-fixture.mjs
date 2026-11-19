@@ -152,7 +152,8 @@ export async function verify_metadata(driver,fixture,origin,other,client){
     if(initial==='ui')await driver.navigate(target);
     else{await driver.navigate(url('reset-reload-script'));await driver.evaluate('location.assign('+JSON.stringify(target)+')');await driver.wait(target);}
     const count=()=>fixture.profiles(client).filter(value=>value.id==='reload-'+initial).length;
-    const before=count();await driver.evaluate('location.reload()');
+    const before=count();
+    if(driver.scriptReload)await driver.scriptReload();else await driver.evaluate('location.reload()');
     for(let tries=0;tries<500&&count()===before;tries++)await new Promise(resolve=>setTimeout(resolve,10));
     assert.ok(count()>before,'Script reload did not request '+initial+' metadata');
     await driver.wait(target);await driver.reload();await driver.wait(target);
