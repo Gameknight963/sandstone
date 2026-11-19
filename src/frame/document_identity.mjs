@@ -21,6 +21,7 @@ export function document_states(name,{weak=true}={}){
   const map=registry=>{let result=registry.states.get(name);if(!result)registry.states.set(name,result=weak?new WeakMap():new Map());return result;};
   // Retain earlier registries for objects kept after navigation or removal.
   return {
+    ...(weak?{}:{forEach(callback){for(const registry of registries)map(registry).forEach(callback);}}),
     get(key){for(const registry of registries){const values=map(registry);if(values.has(key))return values.get(key);}},
     next(key){
       // Order source records across both shared realms and retained documents.

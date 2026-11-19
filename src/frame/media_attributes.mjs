@@ -1,4 +1,6 @@
 // Keep native Attr and NamedNodeMap objects while the renderer sees local URLs.
+import {internal_attribute_mutation} from './intercept/mutation_observer.mjs';
+import './media_reactions.mjs';
 const E=globalThis.Element?.prototype,A=globalThis.Attr?.prototype,N=globalThis.Node?.prototype;
 const states=new WeakMap(),maps=new WeakMap();
 const methods=Object.fromEntries(['getAttribute','getAttributeNS','getAttributeNode','getAttributeNodeNS','hasAttribute','hasAttributeNS','setAttribute','setAttributeNS','removeAttribute','removeAttributeNS','toggleAttribute','setAttributeNode','setAttributeNodeNS','removeAttributeNode'].map(key=>[key,E?.[key]]));
@@ -54,8 +56,10 @@ export function render_media_attribute(element,key,source,preserve=false){
 // A selected source may outlive its source node. Keep its temporary renderer
 // URL separate from the authored attribute map while resource selection starts.
 export function render_internal_media_attribute(element,key,source){
-  if(source===null)methods.removeAttributeNS.call(element,null,key);
-  else methods.setAttributeNS.call(element,null,key,source);
+  return internal_attribute_mutation(element,key,()=>{
+    if(source===null)methods.removeAttributeNS.call(element,null,key);
+    else methods.setAttributeNS.call(element,null,key,source);
+  });
 }
 function refresh(state,key){
   const source=methods.getAttributeNS.call(state.mirror,null,key);

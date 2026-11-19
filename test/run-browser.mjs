@@ -16,6 +16,7 @@ import {verifyFrameFocus} from './frame-focus.playwright.mjs';
 import {verifyBodyHandlers} from './body-handlers.playwright.mjs';
 import {verifyMediaMuted} from './media-muted.playwright.mjs';
 import {verifyMediaPlayback,verifyMediaSources} from './media-playback.playwright.mjs';
+import {verifyMutationQueues} from './mutation-observer.playwright.mjs';
 import {verifyNodeDocuments} from './node-documents.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
@@ -432,6 +433,7 @@ try {
     result.passed.push(...await timed(verifyNodeDocuments(page), 'Node document identity fixture'));
     result.passed.push(...await timed(verifyMediaMuted(page), 'Initial media mutedness fixture'));
     result.passed.push(...await timed(verifyMediaPlayback(page), 'Pending media playback fixture'));
+    result.passed.push(...await timed(verifyMutationQueues(page), 'Mutation observer queue fixture'));
     for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyMediaSources(page,{batch,batches:3}), 'Child-source media playback fixture '+(batch+1)));
     result.passed.push(...await timed(verifyAudio(page), 'Audio constructor fixture'));
     result.passed.push(...await timed(verifyImageConstructor(page), 'Image constructor fixture'));

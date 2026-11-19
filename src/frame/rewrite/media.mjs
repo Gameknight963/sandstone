@@ -244,7 +244,7 @@ function install_retained_url(job,url){
   token.onLoadStart=()=>{
     if(raw_media_attribute(parent,'src')===session.internalSource&&media_src.get.call(parent)===media_current.call(parent))render_internal_media_attribute(parent,'src',null);
   };
-  finish_media_playback(token);media_src.set.call(parent,url);
+  finish_media_playback(token);render_internal_media_attribute(parent,'src',url);
 }
 function fail_retained_source(job){
   const session=sessions.get(job.parent);

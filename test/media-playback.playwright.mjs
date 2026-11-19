@@ -14,6 +14,16 @@ export async function verifyMediaPlayback(page,{children=false,batch=0,batches=1
   `:"audio.src='/slow.wav';";
   const html=`<!doctype html><body><button id="start">Start</button><audio id="audio" muted></audio><script>
     window.results=[];window.events=[];window.captured=[];window.sourceErrors=[];window.sourceCaptured=[];const audio=document.getElementById('audio');
+    window.mediaReactions=[];window.mediaCallbackStable=true;
+    if(audio.hasAttribute('is')){
+      class ObservedMedia extends HTMLAudioElement{
+        static get observedAttributes(){mediaCallbackStable=this.prototype.attributeChangedCallback===callback;return ['src','data-authored'];}
+        attributeChangedCallback(name,old,value){mediaReactions.push([name,old,value,this===audio]);}
+      }
+      const callback=ObservedMedia.prototype.attributeChangedCallback;
+      customElements.define('observed-media',ObservedMedia,{extends:'audio'});
+      mediaCallbackStable&&=ObservedMedia.prototype.attributeChangedCallback===callback&&customElements.get('observed-media')===ObservedMedia;
+    }
     window.requestPlay=()=>{const index=results.length;results.push('pending');audio.play().then(()=>results[index]='fulfilled',error=>results[index]=error.name);};
     for(const type of ['play','playing','pause','abort','error','loadstart','emptied'])audio.addEventListener(type,()=>events.push(type));
     for(const type of ['play','playing','abort','loadstart','emptied'])window.addEventListener(type,event=>{if(event.target===audio)captured.push(type)},true);
@@ -31,7 +41,10 @@ export async function verifyMediaPlayback(page,{children=false,batch=0,batches=1
   let release,releaseUnused,started,gate,unusedGate,request,failure;
   await native.route(origin+'/**',async route=>{
     const path=new URL(route.request().url()).pathname;
-    if(path==='/page')return route.fulfill({contentType:'text/html',body:failure?.startsWith('parser')?html.replace('<audio id="audio" muted></audio>','<audio id="audio" muted'+(failure==='parser-autoplay'?' autoplay':'')+'><source src="/slow.wav"></audio>'):html});
+    if(path==='/page'){
+      const body=failure?.includes('custom')?html.replace('<audio id="audio" muted>','<audio id="audio" is="observed-media" muted>'):html;
+      return route.fulfill({contentType:'text/html',body:failure?.startsWith('parser')?body.replace('<audio id="audio" muted></audio>','<audio id="audio" muted'+(failure==='parser-autoplay'?' autoplay':'')+'><source src="/slow.wav"></audio>'):body});
+    }
     if(path==='/slow.wav'){started();await gate;}
     if(path==='/unused.wav')await unusedGate;
     const failed=path==='/slow.wav'||failure?.startsWith('all-')&&path==='/fast.wav';
@@ -44,7 +57,8 @@ export async function verifyMediaPlayback(page,{children=false,batch=0,batches=1
       const path=new URL(url).pathname;
       if(path==='/page'){
         const mode=globalThis.mediaPlaybackFailure;
-        return new Response(mode?.startsWith('parser')?html.replace('<audio id="audio" muted></audio>','<audio id="audio" muted'+(mode==='parser-autoplay'?' autoplay':'')+'><source src="/slow.wav"></audio>'):html,{headers:{'Content-Type':'text/html'}});
+        const body=mode?.includes('custom')?html.replace('<audio id="audio" muted>','<audio id="audio" is="observed-media" muted>'):html;
+        return new Response(mode?.startsWith('parser')?body.replace('<audio id="audio" muted></audio>','<audio id="audio" muted'+(mode==='parser-autoplay'?' autoplay':'')+'><source src="/slow.wav"></audio>'):body,{headers:{'Content-Type':'text/html'}});
       }
       if(path==='/slow.wav'){
         globalThis.mediaPlaybackStarted=true;
@@ -86,6 +100,8 @@ export async function verifyMediaPlayback(page,{children=false,batch=0,batches=1
       ['source replacement and load','audio.firstElementChild.src="/fast.wav";audio.load()'],
       ['source replacement and replay','audio.firstElementChild.src="/fast.wav";audio.load();requestPlay()'],
       ['selected source removal','audio.firstElementChild.remove()','retain-remove'],
+      ['custom media selected source removal','audio.firstElementChild.remove()','retain-custom-remove'],
+      ['custom media failed source fallback','audio.firstElementChild.remove()','retain-fail-custom-remove-fallback-http'],
       ['selected source reset by null provider','audio.srcObject=null','retain-null-provider'],
       ['removed source replaced by stream provider','audio.firstElementChild.remove();audio.srcObject=new MediaStream()','retain-stream-provider'],
       ['selected source attribute removal','audio.firstElementChild.removeAttribute("src")','retain-attribute'],
@@ -147,6 +163,8 @@ export async function verifyMediaPlayback(page,{children=false,batch=0,batches=1
         await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
         const hasSrc=!children||mode==='direct-wins';
         assert.deepEqual(await read(proxy,snapshot),{results:['pending'],paused:mode==='parser-autoplay',ready:0,network:2,error:null,src:hasSrc?origin+'/slow.wav':'',current:origin+'/slow.wav',attribute:hasSrc?'/slow.wav':null},name+' pending '+proxy);
+        if(mode?.startsWith('retain-'))await read(proxy,'(()=>{window.attributeChanges=[];new MutationObserver(list=>attributeChanges.push(...list.map(record=>({name:record.attributeName,old:record.oldValue})))).observe(audio,{attributes:true,attributeOldValue:true,attributeFilter:["src"]});return true})()');
+        if(mode?.includes('custom'))await read(proxy,'(()=>{audio.setAttribute("data-authored","before");return true})()');
         if(action)await read(proxy,'(()=>{'+action+';return true})()');
         // Let explicit cancellation settle before installing the response.
         if(action&&!mode?.startsWith('retain-')&&!['multiple calls','pause and replay','HTTP fallback with overridden src getter'].includes(name))await until(proxy,'results[0]!=="pending"');
@@ -201,8 +219,10 @@ export async function verifyMediaPlayback(page,{children=false,batch=0,batches=1
           }else releaseUnused();
           await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
         }
-        const result=await read(proxy,'({results,events,captured,sourceErrors,sourceCaptured,paused:audio.paused,error:audio.error?.code||null,current:audio.currentSrc,src:audio.src,srcAttribute:audio.getAttribute("src"),srcNode:audio.getAttributeNode("src")!==null,attributes:Array.from(audio.attributes,attribute=>attribute.name),names:audio.getAttributeNames()})');
+        if(mode?.includes('custom'))await read(proxy,'(()=>{audio.setAttribute("data-authored","after");return true})()');
+        const result=await read(proxy,'({results,events,captured,sourceErrors,sourceCaptured,mediaReactions,mediaCallbackStable,paused:audio.paused,error:audio.error?.code||null,current:audio.currentSrc,src:audio.src,srcAttribute:audio.getAttribute("src"),srcNode:audio.getAttributeNode("src")!==null,attributes:Array.from(audio.attributes,attribute=>attribute.name),names:audio.getAttributeNames()})');
         outcomes.push(result);
+        if(mode?.startsWith('retain-'))result.attributeChanges=await read(proxy,'attributeChanges');
         // Paused media may finish loading asynchronously; do not let that leak
         // into the next test's request gate.
         await read(proxy,'(()=>{audio.pause();return true})()');
@@ -215,6 +235,9 @@ export async function verifyMediaPlayback(page,{children=false,batch=0,batches=1
       for(const key of ['src','srcAttribute','srcNode','attributes','names'])assert.deepEqual(outcomes[1][key],outcomes[0][key],name+' '+key+' reflection parity');
       assert.deepEqual(outcomes[1].sourceErrors,outcomes[0].sourceErrors,name+' source error parity');
       assert.deepEqual(outcomes[1].sourceCaptured,outcomes[0].sourceCaptured,name+' captured source error parity');
+      assert.deepEqual(outcomes[1].mediaReactions,outcomes[0].mediaReactions,name+' custom element reaction parity');
+      assert.equal(outcomes[1].mediaCallbackStable,true,name+' authored callback identity');
+      if(mode?.startsWith('retain-')&&mode!=='retain-parent-src')assert.deepEqual(outcomes[1].attributeChanges,outcomes[0].attributeChanges,name+' parent attribute observer parity');
       if(!action&&['fallback-http','fallback-delayed-http','fallback-decode','unused','unsupported','direct-wins'].includes(mode))assert.deepEqual(outcomes[0].results,['fulfilled'],name+' native playback');
       if(mode?.startsWith('retain-')||['success','unmuted playback','detached playback','multiple calls','pause then loaded replay','parser source','parser autoplay','HTTP fallback','delayed fallback','decode fallback','unused stalled fallback','unsupported source type','direct source wins'].includes(name)){
         assert.deepEqual(outcomes[1].events,outcomes[0].events,name+' event parity');
