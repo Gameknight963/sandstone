@@ -351,7 +351,7 @@ try {
     result.passed.push(...await timed(verifyScriptRetirement(page), 'Script retirement fixture'));
     try{result.passed.push(...await timed(verifyScriptLoad(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Dynamic script load fixture'));}
     finally{expectedDiagnostics.clear();}
-    result.passed.push(...await timed(verifyScriptBodies(page), 'Script body fixture'));
+    for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyScriptBodies(page,{batch,batches:3}), 'Script body fixture '+(batch+1)));
     result.passed.push(...await timed(verifyCacheStorage(page), 'CacheStorage fixture'));
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
     finally{expectedDiagnostics.clear();}

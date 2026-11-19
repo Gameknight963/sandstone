@@ -1,4 +1,4 @@
-async page=>{
+async (page,{batch=0,batches=1}={})=>{
   const origin='https://script-bodies.test',context=await page.context().browser().newContext(),native=await context.newPage(),direct=[];
   const html='<!doctype html><body><script>globalThis.bodyLog=[];globalThis.bodyEvents=[];</script>';
   const cases=[['empty',`script.textContent='';`],['space','script.textContent='+JSON.stringify(' \t\r\n')+';'],['unicode space','script.textContent='+JSON.stringify('\u00a0\uFEFF')+';'],['comment',`script.textContent='/* comment */';`],['code',`script.textContent=code;`],['comment node',`script.append(document.createComment(code));`],['descendant text',`const child=document.createElement('span');child.textContent=code;script.append(child);`],['mixed children',`const child=document.createElement('span');child.textContent='bodyLog.push("descendant");';script.append(child,document.createTextNode(code));`],['CDATA',`script.append(document.implementation.createDocument(null,'root').createCDATASection(code));`]];
@@ -21,10 +21,15 @@ async page=>{
     await native.route(origin+'/**',route=>route.fulfill({contentType:route.request().url().endsWith('.js')?'text/javascript':'text/html',body:route.request().url().endsWith('.js')?'bodyLog.push("external:"+location.origin);':html}));
     await page.route(/^https?:/,block);
     await page.evaluate(({origin,html})=>{const previous=sandstone.network.session.fetch;sandstone.network.session.fetch=(url,options)=>{if(new URL(url).origin!==origin)return previous(url,options);const script=String(url).endsWith('.js');if(script)bodyRequests.push(url);return Promise.resolve(new Response(script?'bodyLog.push("external:"+location.origin);':html,{headers:{'Content-Type':script?'text/javascript':'text/html'}}));};},{origin,html});
-    const differences=[];
-    for(const namespace of ['html','svg'])for(const module of [false,true])for(const [name,operation] of cases){const expected=await run(false,namespace,module,name,operation),actual=await run(true,namespace,module,name,operation);if(JSON.stringify(actual)!==JSON.stringify(expected))differences.push({namespace,module,name,expected,actual});}
+    const differences=[],passed=[];let index=0;
+    for(const namespace of ['html','svg'])for(const module of [false,true])for(const [name,operation] of cases){
+      if(index++%batches!==batch)continue;
+      const expected=await run(false,namespace,module,name,operation),actual=await run(true,namespace,module,name,operation);
+      if(JSON.stringify(actual)!==JSON.stringify(expected))differences.push({namespace,module,name,expected,actual});
+      passed.push(namespace+' '+(module?'module':'classic')+' script body: '+name);
+    }
     if(differences.length)throw new Error('Script body semantics differ: '+JSON.stringify(differences));
     if(direct.length)throw new Error('Script bodies attempted direct HTTP: '+JSON.stringify(direct));
-    return ['Whitespace/comment scripts prepare once and retain native load events','HTML/SVG script bodies use direct Text and CDATA children without executing descendant elements','Empty scripts remain preparable while started bodies ignore later source and text changes'];
+    return passed;
   }finally{await context.close();await page.unroute(/^https?:/,block);}
 }
