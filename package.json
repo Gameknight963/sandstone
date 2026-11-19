@@ -24,7 +24,7 @@
     "acorn": "8.14.0",
     "astray": "^1.1.1",
     "fake-indexeddb": "^6.2.8",
-    "libcurl.js": "^0.7.5",
+    "libcurl.js": "file:vendor/libcurl/libcurl.js-0.7.5-sandstone.1.tgz",
     "meriyah": "^6.0.3",
     "parse5": "8.1.1",
     "tough-cookie": "^6.1.0"
@@ -40,6 +40,7 @@
   },
   "files": [
     "src",
-    "dist"
+    "dist",
+    "vendor/libcurl"
   ]
 }

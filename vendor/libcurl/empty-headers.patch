@@ -1,0 +1,109 @@
+diff --git a/client/libcurl/http.c b/client/libcurl/http.c
+--- a/client/libcurl/http.c
++++ b/client/libcurl/http.c
+@@ -21,6 +21,7 @@
+   cJSON* request_json = cJSON_Parse(json_params);
+   cJSON* item = NULL;
+   struct curl_slist* headers_list = NULL;
++  int content_type_set = 0;
+ 
+   cJSON_ArrayForEach(item, request_json) {
+     char* key = item->string;
+@@ -51,16 +52,20 @@
+ 
+       cJSON_ArrayForEach(header, item) {
+         if (!cJSON_IsString(header)) continue;
++        if (curl_strequal(header->string, "Content-Type")) content_type_set = 1;
+         int header_length = strlen(header->string) + strlen(header->valuestring) + 2;
+         char* header_str = malloc(header_length+1);
+         header_str[header_length] = 0;
+ 
+-        sprintf(header_str, "%s: %s", header->string, header->valuestring);
++        if (header->valuestring[0] == '\0') {
++          sprintf(header_str, "%s;", header->string);
++        } else {
++          sprintf(header_str, "%s: %s", header->string, header->valuestring);
++        }
+         headers_list = curl_slist_append(headers_list, header_str);
+         free(header_str);
+       }
+ 
+-      curl_easy_setopt(http_handle, CURLOPT_HTTPHEADER, headers_list);
+     }
+ 
+     if (strcmp(key, "redirect") == 0 && cJSON_IsString(item)) {
+@@ -77,6 +82,11 @@
+     curl_easy_setopt(http_handle, CURLOPT_POSTFIELDSIZE, body_length);
+   }
+ 
++  // Suppress curl's form Content-Type default for bodies without a type.
++  if (body != NULL && !content_type_set) {
++    headers_list = curl_slist_append(headers_list, "Content-Type:");
++  }
++  curl_easy_setopt(http_handle, CURLOPT_HTTPHEADER, headers_list);
+   request_info->headers_list = headers_list;
+ }
+ 
+diff --git a/client/javascript/websocket.js b/client/javascript/websocket.js
+--- a/client/javascript/websocket.js
++++ b/client/javascript/websocket.js
+@@ -49,7 +49,7 @@
+     let request_options = {
+       headers: this.options.headers || {}
+     };
+-    if (this.protocols) {
++    if (this.protocols && this.protocols.length) {
+       if (typeof this.protocols === "string")
+         this.protocols = [this.protocols];
+       request_options.headers["Sec-Websocket-Protocol"] = this.protocols.join(", ");
+diff --git a/client/javascript/http.js b/client/javascript/http.js
+--- a/client/javascript/http.js
++++ b/client/javascript/http.js
+@@ -196,8 +196,9 @@
+     if (!params.headers["User-Agent"]) {
+       params.headers["User-Agent"] = navigator.userAgent;
+     }
+-    if (body && !params.headers["Content-Type"]) {
+-      params.headers["Content-Type"] = request_obj.headers.get("Content-Type") || "";
++    if (body && params.headers["Content-Type"] === undefined) {
++      const content_type = request_obj.headers.get("Content-Type");
++      if (content_type !== null) params.headers["Content-Type"] = content_type;
+     }
+ 
+     return body;
+diff --git a/client/libcurl/request.c b/client/libcurl/request.c
+--- a/client/libcurl/request.c
++++ b/client/libcurl/request.c
+@@ -42,7 +42,8 @@
+ 
+   curl_easy_setopt(http_handle, CURLOPT_PRIVATE, request_info);
+   curl_easy_setopt(http_handle, CURLOPT_URL, url);
+-  curl_easy_setopt(http_handle, CURLOPT_CAINFO_BLOB, cacert_blob);
++  curl_easy_setopt(http_handle, CURLOPT_CAINFO_BLOB, &cacert_blob);
++  curl_easy_setopt(http_handle, CURLOPT_CAPATH, NULL);
+   curl_easy_setopt(http_handle, CURLOPT_BUFFERSIZE, 512*1024);
+ 
+   //emscripten doesn't support tcp nodelay anyways
+diff --git a/client/fragments/force_wsproxy.js b/client/fragments/force_wsproxy.js
+--- a/client/fragments/force_wsproxy.js
++++ b/client/fragments/force_wsproxy.js
+@@ -6,7 +6,7 @@
+ url += parts[0] + ":" + port;
+ 
+ /* REPLACE
+-url ?= ?SOCKFS\.websocketArgs\[['"]url['"]\];
++url ?= ?SOCKFS\.websocketArgs\[['"]url['"]\];?
+ */
+ var parts = addr.split("/");
+ url = Module.websocket.url;
+diff --git a/client/fragments/load_later.js b/client/fragments/load_later.js
+--- a/client/fragments/load_later.js
++++ b/client/fragments/load_later.js
+@@ -7,6 +7,7 @@
+ /* REPLACE
+ var wasmExports ?= ?createWasm\(\);
+ */
++if (!wasmBinaryFile && typeof findWasmBinary === "function") wasmBinaryFile = findWasmBinary();
+ if (wasmBinaryFile && isDataURI(wasmBinaryFile)) var wasmExports = createWasm();
+ else var wasmExports = null;
+ 

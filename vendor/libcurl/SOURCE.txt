@@ -1,0 +1,31 @@
+This is libcurl.js 0.7.5 with a local empty-request-header patch.
+
+empty-headers.patch changes the HTTP encoder to use curl's documented "Name;"
+syntax for explicitly empty header fields. It also omits the WebSocket protocol
+header when no subprotocols were requested, and keeps an absent upload
+Content-Type distinct from an explicitly empty Content-Type.
+The Emscripten 3.1.72 build also needs its socket URL and bundled-WASM startup
+rewrites to accept that compiler's output. The curl CA blob is passed by
+pointer, as required by CURLOPT_CAINFO_BLOB. The build machine's default CA
+directory is cleared; TLS certificate checks use the embedded root bundle.
+
+source-lock.json identifies the upstream sources, Emscripten version and CA
+bundle used for this build. The library and its dependencies retain their
+upstream licenses. libcurl.js is LGPL-3.0-or-later; the prebuilt package
+includes its LICENSE, upstream documentation, patch and source revision list.
+Dependency license notices are included under licenses/ in the package.
+
+To rebuild, use Linux/WSL with Emscripten 3.1.72 activated and the ordinary
+upstream build prerequisites (git, Python 3, make, autoconf, automake, libtool,
+cmake, pkg-config, jq and wget). Run:
+
+  node vendor/libcurl/rebuild.mjs
+
+The optional first argument selects a fresh build directory without spaces.
+SANDSTONE_BUILD_JOBS defaults to 2. Rebuilding downloads the locked source
+revisions and writes the prebuilt tarball next to this file. Native compiler
+tools are needed only to regenerate that tarball; normal npm ci/build and the
+standalone HTML use the prebuilt package.
+
+Upstream source: https://github.com/ading2210/libcurl.js
+curl header format: https://curl.se/libcurl/c/CURLOPT_HTTPHEADER.html

@@ -1,0 +1,47 @@
+{
+  "version": "0.7.5+sandstone.1",
+  "archive": "libcurl.js-0.7.5-sandstone.1.tgz",
+  "emscripten": "3.1.72",
+  "upstream": {
+    "url": "https://github.com/ading2210/libcurl.js",
+    "commit": "2b6cff872414dd248437a9a9fe5cf84d62ecd64c"
+  },
+  "wisp": {
+    "url": "https://github.com/MercuryWorkshop/wisp-client-js",
+    "commit": "455b9186bfbd0915ed7082c9d356af2157ab014f"
+  },
+  "dependencies": [
+    {
+      "name": "mbedtls",
+      "url": "https://github.com/Mbed-TLS/mbedtls",
+      "commit": "068ff080b369adfac81509f9b57b2afabaf82dc5",
+      "recursive": true
+    },
+    {
+      "name": "cjson",
+      "url": "https://github.com/DaveGamble/cJSON",
+      "commit": "c859b25da02955fef659d658b8f324b5cde87be3"
+    },
+    {
+      "name": "zlib",
+      "url": "https://github.com/madler/zlib",
+      "commit": "da607da739fa6047df13e66a2af6b8bec7c2a498"
+    },
+    {
+      "name": "brotli",
+      "url": "https://github.com/google/brotli",
+      "commit": "028fb5a23661f123017c060daa546b55cf4bde29"
+    },
+    {
+      "name": "nghttp2",
+      "url": "https://github.com/nghttp2/nghttp2",
+      "commit": "85e300c79fb6dbcfa9c1013215c8710c1c2cd3d2"
+    },
+    {
+      "name": "curl",
+      "url": "https://github.com/ading2210/curl",
+      "commit": "84863ad3e7945770e721e473c0c70a83783ac9c6"
+    }
+  ],
+  "caBundleSHA256": "427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285"
+}
