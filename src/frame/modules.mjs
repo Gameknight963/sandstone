@@ -1,5 +1,6 @@
 import { parse } from "./javascript_parser.mjs";
 import {parse_referrer_policy} from '../referrer.mjs';
+import {module_context_name} from './rewrite/module_context.mjs';
 const import_string=String;
 
 function url_like(value, base) {
@@ -72,13 +73,14 @@ export function module_dependencies(source) {
 // The browser executes the graph. We provide local blobs and a complete import map
 // before it resolves any dependencies, retaining native cycles and live bindings.
 export class ModuleLoader {
-  constructor({fetch, rewrite, createURL, register, execute, compileCycles,types=['javascript','json','css'],context=()=>({})}) {
+  constructor({fetch, rewrite, createURL, register, execute, compileCycles,contextModule,types=['javascript','json','css'],context=()=>({})}) {
     this.fetch = fetch;
     this.rewrite = rewrite;
     this.createURL = createURL;
     this.register = register;
     this.execute = execute;
     this.compileCycles=compileCycles;
+    this.contextModule=contextModule;
     this.types=new Set(types);
     this.context=context;
     this.map = new ImportMap();
@@ -89,6 +91,10 @@ export class ModuleLoader {
     this.inline_id = 0;
     this.module_id = 0;
     this.preamble = "";
+  }
+
+  context_url(){
+    return this.contextModule?(this.contextModuleURL??=this.contextModule()):undefined;
   }
 
   record(key, type = "javascript", credentials = "same-origin",context) {
@@ -168,17 +174,21 @@ export class ModuleLoader {
 
   compile_graph(entry,graph){
     const compile = record => {
-      let source = record.type === "json" ? `export default __ctx__.__json_module__(${JSON.stringify(record.source)});` : record.type==='css'?`export default __ctx__.__css_module__(${JSON.stringify(record.source)},${JSON.stringify(record.url)});`:this.rewrite(record.source, {
+      const contextURL=this.context_url();
+      const contextName=contextURL?(record.type==='javascript'?module_context_name(record.source):'__sandstone_module_context__'):'__ctx__';
+      let source = record.type === "json" ? `export default ${contextName}.__json_module__(${JSON.stringify(record.source)});` : record.type==='css'?`export default ${contextName}.__css_module__(${JSON.stringify(record.source)},${JSON.stringify(record.url)});`:this.rewrite(record.source, {
         module: true, url: record.url, sourceURL:record.url,importReferrer:{key:record.key}, stripAttributes: true,
+        ...(contextURL?{contextName,thisName:contextName+'.__get_this__'}:{}),
         resolveNamespace:specifier=>this.records.get(this.map.resolve(specifier,record.url))?.namespaceBlob,
         resolve: specifier => {
           const dependency = this.records.get(this.map.resolve(specifier, record.url));
           return dependency.blob || dependency.nativeKey;
         }
       });
-      if (this.preamble) {
+      const prefix=(contextURL?'import '+contextName+' from '+JSON.stringify(contextURL)+';\n':'')+this.preamble.replaceAll('__ctx__',contextName);
+      if (prefix) {
         const offset = source.startsWith("#!") ? source.indexOf("\n") + 1 || source.length : 0;
-        source = source.slice(0, offset) + "\n" + this.preamble + source.slice(offset);
+        source = source.slice(0, offset) + "\n" + prefix + source.slice(offset);
       }
       record.blob = this.createURL(source, "text/javascript", record.url);
     };

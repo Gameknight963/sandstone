@@ -46,7 +46,7 @@ export async function compile_worker_cycles(entry,records,loader,rollup){
     if(chunks.size!==output.length)throw new TypeError('Unexpected worker module asset');
     // A separate trusted module cannot be shadowed by a binding in an authored
     // module. Every chunk imports the same context before its body executes.
-    const contextURL=loader.createURL('export default __ctx__;\n//# sourceURL='+entry.url.replace(/[\r\n\u2028\u2029]/g,'')+'\n','text/javascript',entry.url);
+    const contextURL=loader.context_url()||loader.createURL('export default __ctx__;\n//# sourceURL='+entry.url.replace(/[\r\n\u2028\u2029]/g,'')+'\n','text/javascript',entry.url);
     const urls=new Map(),pending=new Set(chunks.keys());
     while(pending.size){
       let progressed=false;

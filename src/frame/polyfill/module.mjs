@@ -9,6 +9,7 @@ import {compile_worker_cycles} from '../worker_module_compiler.mjs';
 // Keep native import out of webpack's chunk loader; every URL here is a prepared blob.
 const native_import = Function("url", "options", "return import(url, options)");
 let pending_imports = Object.create(null);
+let context_url;
 
 export function flush_import_map() {
   if (!Object.keys(pending_imports).length) return;
@@ -23,6 +24,7 @@ export function flush_import_map() {
 }
 
 export const modules = new ModuleLoader({
+  contextModule:()=>context_url??=network.create_blob_url(new Blob(['export default __ctx__;'],{type:'text/javascript'}),'sandstone:module-context'),
   context:()=>({referrer:ctx.location.href,referrerPolicy:document_referrer_policy()}),
   types:globalThis.CSSStyleSheet?['javascript','json','css']:['javascript','json'],
   fetch: (url, options) => network.fetch(url, {...options,mode:'cors',destination:'script'}),
