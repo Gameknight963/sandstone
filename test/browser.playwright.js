@@ -11,10 +11,11 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
   await page.goto(url);
   await page.waitForFunction(() => globalThis.main_frame && sandstone.libcurl.ready && !main_frame.is_navigating);
   await page.evaluate(async () => {
-    const fixture = `<!doctype html><title>Compatibility fixture</title><body>
+    const fixture = `<!doctype html><title>Compatibility fixture</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'/%3E"><body>
       <form action="/upload" method="post" enctype="multipart/form-data"><input name="field" value="value"><button name="send" value="yes">Send</button></form>
       <script>
         window.fixtureResult = [];
+        window.initialViewportHeight = innerHeight;
         localStorage.empty = '';
         localStorage.value = 'persisted';
         sessionStorage.value = 'session';
@@ -59,6 +60,8 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
     };
     await main_frame.navigate_to('https://fixture.test/');
   });
+  await page.waitForFunction(()=>document.getElementById('favicon_img').style.display==='initial');
+  assert.equal(await page.evaluate(()=>main_frame.eval_js('innerHeight === initialViewportHeight')),true);
   const uuids=JSON.parse(await page.evaluate(()=>main_frame.eval_js(`JSON.stringify(Array.from({length:32},()=>crypto.randomUUID()))`)));
   assert.equal(new Set(uuids).size,32);
   for(const uuid of uuids)assert.match(uuid,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
@@ -206,5 +209,5 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
   await page.locator('#show_ui_button').evaluate(button => button.click());
   assert.equal(await page.locator('#address_bar').isVisible(), true);
   assert.deepEqual(errors, []);
-  return {url, passed: ['dynamic scripts', 'fragments', 'inert innerHTML', 'cookies', 'localStorage', 'sessionStorage', 'streaming', 'response cloning', 'multipart forms', 'IndexedDB indexes/cursors/binary data', 'IndexedDB navigation persistence', 'dark mode', 'per-site database clearing', 'hide/show UI', 'WebRTC disabled', 'secure random UUIDs in opaque sandbox origins']};
+  return {url, passed: ['dynamic scripts', 'fragments', 'inert innerHTML', 'cookies', 'localStorage', 'sessionStorage', 'streaming', 'response cloning', 'multipart forms', 'IndexedDB indexes/cursors/binary data', 'IndexedDB navigation persistence', 'dark mode', 'per-site database clearing', 'hide/show UI', 'WebRTC disabled', 'secure random UUIDs in opaque sandbox origins', 'Favicon loading preserves the page viewport']};
 }

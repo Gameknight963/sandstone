@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 
 export async function interact_editor(page,proxy,site,{surface,read,wait}){
+  if(site.id==='desmos'){
+    await surface.locator('.dcg-mq-editable-field').first().click();
+    await page.keyboard.type('y=x^2');await page.keyboard.press('Enter');
+    const expressions='Calc.getExpressions().map(expression=>expression.latex||"")';
+    await wait(page,proxy,expressions+'.includes("y=x^{2}")');
+    const plotted='(()=>{const canvas=document.querySelector("canvas.dcg-graph-inner");if(!canvas)return false;const data=canvas.getContext("2d").getImageData(0,0,canvas.width,canvas.height).data;for(let index=0;index<data.length;index+=4)if(data[index]>150&&data[index+1]<130&&data[index+2]<130&&data[index+3]>200)return true;return false;})()';
+    await wait(page,proxy,plotted);const after=await read(page,proxy,expressions),serialized=JSON.stringify(JSON.stringify(after));
+    await surface.getByRole('button',{name:'Undo',exact:true}).click();await wait(page,proxy,'JSON.stringify('+expressions+')!=='+serialized);
+    await surface.getByRole('button',{name:'Redo',exact:true}).click();await wait(page,proxy,'JSON.stringify('+expressions+')==='+serialized);await wait(page,proxy,plotted);
+    return {expressions:after.filter(Boolean),plotted:true,undo:true,redo:true};
+  }
   if(site.id==='jspaint'){
     await surface.locator('canvas.main-canvas').waitFor();
     await surface.locator('.tool[title="Pencil"]').click();

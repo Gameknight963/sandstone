@@ -70,7 +70,8 @@ a, a:hover, a:visited, a:active {
 
 #address_bar {
   display: flex;
-  min-height: 26px;
+  /* Reserve the loaded favicon's line box before it replaces the placeholder. */
+  min-height: 30px;
   flex-shrink: 0;
 }
 #address_bar * {
