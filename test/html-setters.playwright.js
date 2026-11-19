@@ -1,4 +1,4 @@
-async page=>{
+async (page,batch=0,batches=1)=>{
   const origin='https://html-setters.test',html='<!doctype html><main id="fixture"></main>',native=await page.context().newPage();
   const direct=[],block=route=>{direct.push(route.request().url());return route.abort();};
   await native.route(origin+'/**',route=>route.fulfill({contentType:'text/html',body:html}));
@@ -8,7 +8,7 @@ async page=>{
     return evaluate(proxy,`(()=>{const fixture=document.getElementById('fixture');let result;${source};return JSON.stringify(result);})()`);
   };
   try{
-    if(!await native.evaluate(()=>typeof Element.prototype.setHTMLUnsafe==='function'))return ['HTML setters unavailable in this browser'];
+    if(!await native.evaluate(()=>typeof Element.prototype.setHTMLUnsafe==='function'))return batch===0?['HTML setters unavailable in this browser']:[];
     await page.route(/^https?:/,block);
     await page.evaluate(({origin,html})=>{const previous=sandstone.network.session.fetch;globalThis.htmlSetterRequests=[];sandstone.network.session.fetch=(url,options)=>{
       if(new URL(url).origin!==origin)return previous(url,options);
@@ -52,7 +52,8 @@ async page=>{
       ['declarative null registry',`${setup}fixture.METHOD('<x-setter-host><template shadowrootmode="closed" shadowrootserializable shadowrootcustomelementregistry><b>Shadow</b></template></x-setter-host>',{sanitizer:{}});const host=fixture.firstElementChild,root=host.internals.shadowRoot;result={html:fixture.getHTML({shadowRoots:[root]}),registry:root.customElementRegistry===null};`],
       ['shadow receiver',`const host=document.createElement('div');fixture.append(host);const root=host.attachShadow({mode:'closed'});root.METHOD('<div><template shadowrootmode="open" shadowrootserializable><b>Inner</b></template><i>Light</i></div>',{sanitizer:{}});result=root.getHTML({serializableShadowRoots:true});`]
     ];
-    for(const method of methods)for(const [name,source] of cases){const code=source.replaceAll('METHOD',method),expected=await run(false,code),actual=await run(true,code);if(expected!==actual)throw new Error(method+' '+name+' differs: '+actual+' expected '+expected);}
+    for(const method of methods)for(const [name,source] of cases.filter((_,index)=>index%batches===batch)){const code=source.replaceAll('METHOD',method),expected=await run(false,code),actual=await run(true,code);if(expected!==actual)throw new Error(method+' '+name+' differs: '+actual+' expected '+expected);}
+    if(batch!==batches-1){if(direct.length)throw new Error('HTML setters attempted direct HTTP: '+JSON.stringify(direct));return batch===0?['Native sanitizing HTML setters preserve parser contexts, options and declarative shadow roots']:[];}
     for(const method of methods)for(const closed of [false,true]){
       await run(true,`${setup}fixture.${method}('<x-setter-host><template shadowrootmode="${closed?'closed':'open'}" shadowrootserializable><img id="picture" src="/shadow-${method}-${closed}.svg"><link rel="stylesheet" href="/shadow.css"><style>.paint{background-image:url(/background.svg)}</style><span class="paint">Paint</span></template><img src="/light.svg"></x-setter-host>',{sanitizer:{}});globalThis.setterRoot=fixture.firstElementChild.internals.shadowRoot;result=true;`);
       const deadline=Date.now()+5000;while(!await evaluate(true,`setterRoot.querySelector('#picture').naturalWidth===7&&getComputedStyle(setterRoot.querySelector('.paint')).color==='rgb(12, 34, 56)'&&getComputedStyle(setterRoot.querySelector('.paint')).backgroundImage.includes('blob:')`)){if(Date.now()>deadline)throw new Error('Shadow resources did not load: '+method+' '+closed+' '+JSON.stringify(direct));await new Promise(resolve=>setTimeout(resolve,20));}
@@ -64,6 +65,6 @@ async page=>{
     }
     const requests=await page.evaluate(()=>htmlSetterRequests);if(requests.includes('/script-false.js'))throw new Error('An inert external setter script fetched');
     if(direct.length)throw new Error('HTML setters attempted direct HTTP: '+JSON.stringify(direct));
-    return ['Native sanitizing HTML setters preserve parser contexts, options and declarative shadow roots','Open and closed declarative shadow resources stay on the relay','Unsafe setter scripts honor runScripts without native remote requests'];
+    return [...(batch===0?['Native sanitizing HTML setters preserve parser contexts, options and declarative shadow roots']:[]),'Open and closed declarative shadow resources stay on the relay','Unsafe setter scripts honor runScripts without native remote requests'];
   }finally{await native.close();await page.unroute(/^https?:/,block);}
 }

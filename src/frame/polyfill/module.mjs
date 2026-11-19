@@ -4,6 +4,7 @@ import * as parser from "../parser.mjs";
 import * as loader from "../loader.mjs";
 import {ctx} from '../context.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
+import {compile_worker_cycles} from '../worker_module_compiler.mjs';
 
 // Keep native import out of webpack's chunk loader; every URL here is a prepared blob.
 const native_import = Function("url", "options", "return import(url, options)");
@@ -31,8 +32,16 @@ export const modules = new ModuleLoader({
     Object.assign(pending_imports, imports);
     if (loader.is_loaded) flush_import_map();
   },
-  execute: native_import
+  execute: native_import,
+  compileCycles:typeof document==='undefined'?compile_worker_cycles:undefined
 });
+
+// Worker startup evaluates an entry without Promise-assimilating an authored
+// `then` export. A side-effect-only wrapper also protects acyclic entry modules.
+export function evaluate_worker_module(record){
+  const url=record.namespaceBlob||(record.evaluationBlob??=modules.createURL('import '+JSON.stringify(record.blob)+';','text/javascript',record.url));
+  return native_import(url);
+}
 
 export function execute_module(record,{ordered=false}={}) {
   return new Promise((resolve, reject) => {

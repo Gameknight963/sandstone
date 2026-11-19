@@ -18,7 +18,7 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false, url,importReferrer=url, resolve, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false,functionSources} = {}) {
+export function rewrite_source(source, globals, {module = false, url,importReferrer=url, resolve,resolveNamespace, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false,functionSources,rewriteThis=true} = {}) {
   let named=false;
   const onComment=sourceURL?(type,text)=>{
     if(type==='SingleLine'&&/^[#@]\s+sourceURL=\s*\S+\s*$/.test(text))named=true;
@@ -217,6 +217,16 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
     // on a preceding initializer, return value or field expression.
     if(!for_binding&&(terminated_nodes.has(node.type)||default_expression)&&source[node.end-1]!==';')edits.push([node.end,node.end,';',1]);
     if (resolve && ["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type) && node.source) {
+      const namespace=node.specifiers?.find(specifier=>specifier.type==='ImportNamespaceSpecifier');
+      const bridge=(namespace||node.type==='ExportAllDeclaration'&&node.exported)&&resolveNamespace?.(node.source.value);
+      if(bridge){
+        let replacement;
+        if(namespace){
+          const normal=node.specifiers.find(specifier=>specifier.type==='ImportDefaultSpecifier');
+          replacement=(normal?'import '+normal.local.name+' from '+JSON.stringify(resolve(node.source.value))+';':'')+'import {namespace as '+namespace.local.name+'} from '+JSON.stringify(bridge)+';';
+        }else replacement='export {namespace as '+(node.exported.name||JSON.stringify(node.exported.value))+'} from '+JSON.stringify(bridge)+';';
+        edits.push([node.start,node.end,replacement]);return;
+      }
       edits.push([node.source.start, node.source.end, JSON.stringify(resolve(node.source.value))]);
       if (stripAttributes && node.attributes?.length) edits.push([node.source.end, node.end, ";"]);
     }
@@ -232,7 +242,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
       inferred_name(node.right,node.left.name);
       if(node.type==='AssignmentPattern'&&parent?.type==='Property'&&parent.shorthand)defaultShorthands.add(node.left);
     }
-    if (node.type === "ThisExpression") {
+    if (node.type === "ThisExpression"&&rewriteThis) {
       edits.push([node.start, node.end, `(${withToken?withToken+'.context.__get_this__':thisName}(this,${scopes.get(node).strict}))`]);
     } else if (node.type === "Identifier" && names.has(node.name) && (targets.has(node)||!bindings.has(node)&&(!scopes.get(node).has(node.name)||virtual_variable(node)))) {
       let reference = true;

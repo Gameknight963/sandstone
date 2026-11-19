@@ -12,6 +12,7 @@ import {virtual_frame_window} from './iframe_window.mjs';
 import * as rpc from '../rpc.mjs';
 import {create_with_scope} from './with_scope.mjs';
 import {create_global_bindings} from './global_bindings.mjs';
+import {worker_module_intrinsics} from './module_namespace.mjs';
 const parse_json = JSON.parse;
 const realm_global=globalThis,evaluate_global=globalThis.eval,describe_global=Reflect.getOwnPropertyDescriptor,define_global=Reflect.defineProperty;
 const with_entries=[];
@@ -45,6 +46,7 @@ export function get_handler_keys(obj) {
 }
 
 export class CustomCTX {
+  get __module_intrinsics__(){return worker_module_intrinsics;}
   constructor() {
     ctx_vars.push(...new Set([...get_handler_keys(this),...global_method_names(globalThis),...html_constructor_names]));
     this.__proxy__ = create_obj_proxy(this, ctx_vars, globalThis, (value,key)=>virtual_html_constructor(virtual_frame_window(value,key)));

@@ -72,12 +72,13 @@ export function module_dependencies(source) {
 // The browser executes the graph. We provide local blobs and a complete import map
 // before it resolves any dependencies, retaining native cycles and live bindings.
 export class ModuleLoader {
-  constructor({fetch, rewrite, createURL, register, execute, types=['javascript','json','css'],context=()=>({})}) {
+  constructor({fetch, rewrite, createURL, register, execute, compileCycles,types=['javascript','json','css'],context=()=>({})}) {
     this.fetch = fetch;
     this.rewrite = rewrite;
     this.createURL = createURL;
     this.register = register;
     this.execute = execute;
+    this.compileCycles=compileCycles;
     this.types=new Set(types);
     this.context=context;
     this.map = new ImportMap();
@@ -168,7 +169,9 @@ export class ModuleLoader {
   compile_graph(entry,graph){
     const compile = record => {
       let source = record.type === "json" ? `export default __ctx__.__json_module__(${JSON.stringify(record.source)});` : record.type==='css'?`export default __ctx__.__css_module__(${JSON.stringify(record.source)},${JSON.stringify(record.url)});`:this.rewrite(record.source, {
-        module: true, url: record.url, sourceURL:record.url,importReferrer:{key:record.key}, stripAttributes: true, resolve: specifier => {
+        module: true, url: record.url, sourceURL:record.url,importReferrer:{key:record.key}, stripAttributes: true,
+        resolveNamespace:specifier=>this.records.get(this.map.resolve(specifier,record.url))?.namespaceBlob,
+        resolve: specifier => {
           const dependency = this.records.get(this.map.resolve(specifier, record.url));
           return dependency.blob || dependency.nativeKey;
         }
@@ -192,6 +195,7 @@ export class ModuleLoader {
         progress = true;
       }
     }
+    if(remaining.size&&this.compileCycles)return this.compileCycles(entry,remaining,this);
     for (const record of remaining) compile(record);
     const imports = Object.create(null);
     for (const record of remaining) {
@@ -230,7 +234,7 @@ export class ModuleLoader {
     else if(typeof base==='function')base=base();
     const context=parent?{referrer:parent.url,referrerPolicy:parent.policy}:script?{referrer:script.url,referrerPolicy:script.referrerPolicy}:undefined;
     const record = await this.prepare_url(specifier, base, {with:snapshot,credentials:credentials??parent?.credentials??script?.credentials,context});
-    return this.execute(record.blob);
+    return record.namespaceBlob?(await this.execute(record.namespaceBlob)).namespace:this.execute(record.blob);
   }
 
   meta(url) {

@@ -4,7 +4,7 @@ import * as rpc from "../../rpc.mjs";
 import {bootstrap_worker,create_bootstrap_nonce} from '../../bootstrap.mjs';
 import * as parser from "../parser.mjs";
 import { ctx, update_ctx, convert_url } from "../context.mjs";
-import { modules } from "./module.mjs";
+import { modules,evaluate_worker_module } from "./module.mjs";
 import { prefetch_worker_scripts } from "../worker_scripts.mjs";
 import {on_document_unload} from '../runtime_events.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
@@ -110,7 +110,7 @@ export function initialize_worker(options) {
         modules.preamble = "__ctx__.__worker_module_started__();\n";
         const record = modules.record(options.url, "javascript", options.credentials);
         record.source = options.source;
-        await modules.import(options.url, options.url);
+        await evaluate_worker_module(await modules.prepare_url(options.url, options.url));
       } else {
         // Native classic-script evaluation preserves strict globals and lexical
         // bindings across imported files; indirect eval gives them another scope.

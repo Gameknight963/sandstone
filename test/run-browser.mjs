@@ -24,6 +24,8 @@ const resourceTest = await readFile(new URL("resources.playwright.js", import.me
 const verifyResources = runInThisContext(`(${resourceTest})`);
 const workerTest = await readFile(new URL("workers.playwright.js", import.meta.url), "utf8");
 const verifyWorkers = runInThisContext(`(${workerTest})`);
+const workerCycleTest=await readFile(new URL('worker-cycles.playwright.js',import.meta.url),'utf8');
+const verifyWorkerCycles=runInThisContext(`(${workerCycleTest})`);
 const workerScopeTest=await readFile(new URL('worker-scopes.playwright.js',import.meta.url),'utf8');
 const verifyWorkerScopes=runInThisContext(`(${workerScopeTest})`);
 const workerSettingsTest=await readFile(new URL('worker-settings.playwright.js',import.meta.url),'utf8');
@@ -327,6 +329,7 @@ try {
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
+    result.passed.push(...await timed(verifyWorkerCycles(page), 'Cyclic worker module fixture'));
     result.passed.push(...await timed(verifyWorkerScopes(page), 'Worker script scope fixture'));
     result.passed.push(...await timed(verifyWorkerSettings(page), 'Worker environment settings fixture'));
     result.passed.push(...await timed(verifyNetworkAPIs(page), 'Native network API exposure fixture'));
@@ -373,7 +376,9 @@ try {
     result.passed.push(...await timed(verifyAttributes(page), 'Event attribute fixture'));
     result.passed.push(...await timed(verifyHyperlinks(page), 'Hyperlink URL fixture'));
     result.passed.push(...await timed(verifyHTMLInsertion(page), 'HTML insertion fixture'));
-    result.passed.push(...await timed(verifyHTMLSetters(page), 'HTML setters fixture'));
+    // Keep all native/proxy navigation comparisons under bounded per-batch
+    // deadlines as the standalone runtime grows with compatibility support.
+    for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyHTMLSetters(page,batch,3), 'HTML setters fixture '+(batch+1)));
     result.passed.push(...await timed(verifyHTMLPosition(page), 'Positional HTML fixture'));
     result.passed.push(...await timed(verifyParsedDocuments(page), 'Parsed document fixture'));
     result.passed.push(...await timed(verifyLiveClone(page), 'Live clone fixture'));

@@ -1,6 +1,8 @@
 const webpack = require("webpack");
 const TerserPlugin = require('terser-webpack-plugin');
 const frame_realm = require('./build/frame-realm.cjs');
+const path = require('node:path');
+const rollup_license = require('node:fs').readFileSync(path.join(path.dirname(require.resolve('@rollup/browser')), '..', 'LICENSE.md'), 'utf8');
 
 const pkg = require("./package.json");
 const { execSync } = require("child_process");
@@ -33,7 +35,8 @@ License: https://github.com/ading2210/sandstone/blob/main/LICENSE
 const bundles = [
   {
     name: "sandstone_frame",
-    entry: "./src/frame/index.mjs",
+    dependencies:["sandstone_worker_bundler"],
+    entry:"./src/frame/index.mjs",
     output: {
       filename: "sandstone_frame.js",
       library: {
@@ -45,6 +48,10 @@ const bundles = [
       new webpack.BannerPlugin({banner:frame_realm.header,raw:true,entryOnly:true}),
       new webpack.BannerPlugin({banner:frame_realm.footer,raw:true,entryOnly:true,footer:true})
     ],
+    module: {rules:[{resource:/dist[\\/]sandstone_worker_bundler\.js$/,type:'asset/source'}]},
+    // Preserve dependency notices inside the standalone runtime, rather than
+    // referring to an extra LICENSE.txt file beside the downloaded HTML.
+    optimization:{minimizer:[new TerserPlugin({extractComments:false})]},
     mode: "development"
   },
   {
@@ -92,6 +99,18 @@ bundles.push({
       type: "module"
     }
   }
+});
+
+// Embed the compiler as source text. Ordinary documents and acyclic workers
+// carry its bytes but only cyclic workers parse/initialize its JavaScript/WASM.
+bundles.unshift({
+  name:'sandstone_worker_bundler',
+  entry:{main:{import:'./src/frame/worker_bundler.mjs',baseUri:'about:blank'}},
+  output:{filename:'sandstone_worker_bundler.js',library:{name:'sandstone_worker_bundler',type:'var'}},
+  module:{rules:[{test:/bindings_wasm_bg\.wasm$/,type:'asset/inline'}]},
+  optimization:{minimizer:[new TerserPlugin({extractComments:false})]},
+  plugins:[new webpack.BannerPlugin({banner:rollup_license,entryOnly:true})],
+  mode:'development'
 });
 
 module.exports = bundles;
