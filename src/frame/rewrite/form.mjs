@@ -44,7 +44,7 @@ export async function submit(form, submitter) {
     }
     return;
   }
-  const url = new URL(convert_url(action || ctx.location.href, ctx.document.baseURI));
+  const url = new URL(convert_url(action || ctx.location.href, ctx.document.baseURI,loader.character_encoding));
   const associated=submitter&&submitter_property(submitter,button_form,input_form)===form;
   const encoding=form_encoding(attribute(form,'accept-charset'),loader.character_encoding);
   let data;constructing.add(form);

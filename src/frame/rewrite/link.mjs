@@ -1,6 +1,9 @@
 import {ctx,intercept_property,proxy_function} from '../context.mjs';
 import {is_style_link,rewrite_stylesheet} from './stylesheet.mjs';
 import {resource_attribute} from '../resource_attributes.mjs';
+import {get_document_encoding} from '../document_encoding.mjs';
+import {encoding_parse_url} from '../../url_encoding.mjs';
+const owner=globalThis.Node&&Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get;
 
 export function rewrite_link(element) {
   const get=Element.prototype.getAttribute,remove=Element.prototype.removeAttribute;
@@ -22,7 +25,7 @@ export function rewrite_link(element) {
   }
   function changed(){try{activate()?.catch(console.error);}catch(error){console.error(error);}}
   intercept_property(element,'href',{
-    get(){if(authored===null)return '';try{return new URL(authored,ctx.document.baseURI).href;}catch{return authored;}},
+    get(){if(authored===null)return '';try{return encoding_parse_url(authored,ctx.document.baseURI,get_document_encoding(owner.call(element))).href;}catch{return authored;}},
     set(value){
       const text=`${value}`;
       if(active){element.href=text;return;}

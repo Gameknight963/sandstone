@@ -4,6 +4,8 @@ import { rewrite_srcset } from "../srcset.mjs";
 import {register_media_attributes,render_media_attribute,detach_media_attribute_node,media_placeholder,pending_media_attribute,raw_media_attribute} from '../media_attributes.mjs';
 import {on_dom_construction} from '../dom_operations.mjs';
 import {listen_runtime} from '../runtime_events.mjs';
+import {get_document_encoding} from '../document_encoding.mjs';
+import {encoding_parse_url} from '../../url_encoding.mjs';
 
 const prepared = new WeakMap();
 const sessions = new WeakMap();
@@ -37,7 +39,7 @@ function reflected_source(element,key,native){
   const session=sessions.get(element),value=session?.authored.get(key);
   if(value===null||value===undefined)return native;
   if(key==='srcset')return value;
-  try{return new URL(value,session.base()).href;}catch{return value;}
+  try{return encoding_parse_url(value,session.base(),get_document_encoding(owner.call(element))).href;}catch{return value;}
 }
 function reflected_current(element,native){
   const session=sessions.get(element);
@@ -216,6 +218,7 @@ export function rewrite_media(element,initial_sources) {
       authored.set(key, value);
       const document=owner.call(element),active=intended_active??!!view.call(document);
       const request_base=active?ctx.document.baseURI:base();
+      const request_encoding=get_document_encoding(active?globalThis.document:document);
       session.active=active;
       const generation = ++state.generation;
       state.controller?.abort();
@@ -236,7 +239,7 @@ export function rewrite_media(element,initial_sources) {
       if(state.waiting)return;
       const resource = async source => {
         if (!source) return source;
-        const url = new URL(source, request_base);
+        const url = encoding_parse_url(source, request_base,request_encoding);
         if (["data:", "blob:"].includes(url.protocol)) return url.href;
         if (!resources.has(url.href)) resources.set(url.href, (async () => {
           const response = await network.fetch(url.href, request_options);
@@ -287,7 +290,7 @@ export function rewrite_media(element,initial_sources) {
         const value = authored.get(key);
         if (value === null || value === undefined) return descriptor.get.call(element);
         if (key === "srcset") return value;
-        try { return new URL(value, base()).href; } catch { return value; }
+        try { return encoding_parse_url(value, base(),get_document_encoding(owner.call(element))).href; } catch { return value; }
       },
       set: value=>update(value)
     });

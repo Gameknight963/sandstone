@@ -2,6 +2,11 @@ import {document_states,unwrap_frame_document} from './document_identity.mjs';
 
 const encodings=document_states('document-character-encodings');
 const apply=Reflect.apply;
+const native_encoding=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'characterSet').get;
+export function get_document_encoding(document){
+  const target=unwrap_frame_document(document);
+  return encodings.get(target)||native_encoding.call(target);
+}
 export function configure_document_encoding(document,alias,encoding){
   encodings.set(document,encoding);encodings.set(alias,encoding);
 }

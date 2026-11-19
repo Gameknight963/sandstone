@@ -38,7 +38,7 @@ export function rewrite_stylesheet(element,initialHref) {
   const descriptor = intercept_property(element, "href", {
     get() {
       if(authored===null)return '';
-      try{return convert_url(authored,ctx.document.baseURI);}
+      try{return convert_url(authored,ctx.document.baseURI,loader.character_encoding);}
       catch{return authored;}
     },
     set(value) {
@@ -50,7 +50,7 @@ export function rewrite_stylesheet(element,initialHref) {
       // stylesheet request. Only a new valid URL supersedes that request.
       if(value==='')return;
       let url;
-      try{url=convert_url(value,ctx.document.baseURI);}
+      try{url=convert_url(value,ctx.document.baseURI,loader.character_encoding);}
       catch{return;}
       clear_error();
       const current=++generation;

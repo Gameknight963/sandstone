@@ -1,4 +1,5 @@
 import * as network from "./network.mjs";
+import {encoding_parse_url} from '../url_encoding.mjs';
 import * as polyfill from "./polyfill/index.mjs";
 import * as intercept from "./intercept/index.mjs";
 import * as parser from "./parser.mjs";
@@ -269,8 +270,8 @@ export function update_ctx(options = {}) {
   return storageReady;
 }
 
-export function convert_url(url, base) {
-  let url_obj = new URL(url, base);
+export function convert_url(url, base, encoding) {
+  let url_obj = encoding_parse_url(url, base, encoding);
   return url_obj.href;
 }
 

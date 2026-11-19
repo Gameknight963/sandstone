@@ -12,6 +12,7 @@ import {delay_script_load} from '../script_lifetime.mjs';
 import {script_text} from '../script_text.mjs';
 import {decode_classic_response} from '../../text_encoding.mjs';
 import {labelToName} from '@exodus/bytes/encoding.js';
+import {get_document_encoding} from '../document_encoding.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {parse_referrer_policy} from '../../referrer.mjs';
 
@@ -71,7 +72,7 @@ export function capture_script(source){
     }
     Object.defineProperty(copy,'src',{configurable:true,enumerable:src_property.enumerable,
       get(){const native=src_property.get.call(this);if(this!==copy)return native;const value=get.call(copy,'src');if(value===null)return '';
-        try{return convert_url(value,owner.call(copy)===document?ctx.document.baseURI:baseURI.call(copy));}catch{return value;}},set:src_property.set
+        try{return convert_url(value,owner.call(copy)===document?ctx.document.baseURI:baseURI.call(copy),get_document_encoding(owner.call(copy)));}catch{return value;}},set:src_property.set
     });
   };
 }
@@ -185,7 +186,7 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
     const context={referrer:ctx.location.href,referrerPolicy:parse_referrer_policy(element.referrerPolicy,document_referrer_policy())};
     try {
       if(script_url==='')throw new TypeError('Script source is empty');
-      return await (script_url ? modules.prepare_url(convert_url(script_url, ctx.document.baseURI), ctx.document.baseURI, {credentials,context}) :
+      return await (script_url ? modules.prepare_url(convert_url(script_url, ctx.document.baseURI,loader.character_encoding), ctx.document.baseURI, {credentials,context}) :
         modules.prepare_inline(script_text(element), ctx.document.baseURI, credentials,context));
     } catch(error) {
       report_error(error);
@@ -200,13 +201,13 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
     try {
       if(script_url==='')throw new TypeError('Script source is empty');
       classic_context=classic_request_context();
-      const response = await network.fetch(convert_url(script_url, ctx.document.baseURI), {
+      const response = await network.fetch(convert_url(script_url, ctx.document.baseURI,loader.character_encoding), {
         mode:classic_context.mode,credentials:classic_context.networkCredentials,
         referrerPolicy:classic_context.referrerPolicy,destination:'script',signal
       });
       if (!response.ok) throw new TypeError(`Script request failed: ${response.status}`);
       text = await decode_classic_response(response,classic_context.encoding);
-      element.__sandstone_url__ = response.url || convert_url(script_url, ctx.document.baseURI);
+      element.__sandstone_url__ = response.url || convert_url(script_url, ctx.document.baseURI,loader.character_encoding);
       classic_context.url=element.__sandstone_url__;
       classic_context.muted=classic_context.mode==='no-cors'&&(response.request_cross_origin??response.type==='opaque');
       if(sourceElement!==element)sourceElement.__sandstone_url__=element.__sandstone_url__;
@@ -225,7 +226,7 @@ export function rewrite_script(element,{parser=false,signal,run,sourceElement=el
   intercept_property(element, "src", {
     get: () => {
       if(authored_src===null)return '';
-      try{return convert_url(authored_src,ctx.document.baseURI);}
+      try{return convert_url(authored_src,ctx.document.baseURI,loader.character_encoding);}
       catch{return authored_src;}
     },
     set: value => {

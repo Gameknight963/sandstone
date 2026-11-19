@@ -4,13 +4,14 @@ import {document_referrer_policy} from './document.mjs';
 import {download} from '../downloads.mjs';
 import {install_link_events} from '../link_events.mjs';
 import {install_hyperlinks} from '../hyperlinks.mjs';
+import {install_html_urls} from '../html_urls.mjs';
 import {navigate_target,navigation_target} from '../navigation_targets.mjs';
 import {submit} from '../rewrite/form.mjs';
 
 function activate(element) {
   if(!element.hasAttribute('href'))return;
   let href;
-  try{href=convert_url(element.getAttribute('href'),ctx.document.baseURI);}catch{return;}
+  try{href=convert_url(element.getAttribute('href'),ctx.document.baseURI,loader.character_encoding);}catch{return;}
   const target=new URL(href),current=new URL(ctx.location.href);
   if(target.protocol==='javascript:'){run_script_safe(href.slice('javascript:'.length));return;}
   const policy=element.relList?.contains('noreferrer')?'no-referrer':element.referrerPolicy||document_referrer_policy();
@@ -22,6 +23,7 @@ function activate(element) {
 }
 
 if(globalThis.document){
+  install_html_urls(()=>ctx.document.baseURI,()=>ctx.location.href);
   install_hyperlinks(()=>ctx.document.baseURI);
   install_link_events({enabled:()=>loader.is_loaded,activate,submit});
 }

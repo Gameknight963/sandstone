@@ -1,5 +1,8 @@
 // Let the browser implement HTMLHyperlinkElementUtils against a virtual base.
 // An inert document gives native parsing/setter semantics without navigating.
+import {encoding_parse_url} from '../url_encoding.mjs';
+import {get_document_encoding} from './document_encoding.mjs';
+
 export function install_hyperlinks(base) {
   const get=Element.prototype.getAttribute,set=Element.prototype.setAttribute,remove=Element.prototype.removeAttribute;
   const owner=Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get;
@@ -12,9 +15,11 @@ export function install_hyperlinks(base) {
       doc.head.appendChild(baseElement);
       entry={base:baseElement,link:doc.createElement(tag),observer:new Observer(()=>{})};mirrors.set(tag,entry);
     }
-    set.call(entry.base,'href',base());
+    const baseURL=base();set.call(entry.base,'href',baseURL);
     const href=get.call(element,'href');
-    if(href===null)remove.call(entry.link,'href');else set.call(entry.link,'href',href);
+    let parsed=href;
+    if(href!==null)try{parsed=encoding_parse_url(href,baseURL,get_document_encoding(owner.call(element))).href;}catch{}
+    if(href===null)remove.call(entry.link,'href');else set.call(entry.link,'href',parsed);
     return entry;
   }
   for(const [tag,Constructor] of [['a',HTMLAnchorElement],['area',HTMLAreaElement]]){
