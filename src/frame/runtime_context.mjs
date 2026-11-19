@@ -4,9 +4,9 @@ import {create_bootstrap_nonce} from '../bootstrap.mjs';
 // wrapping programs or reserving fixed identifiers in authored lexical scopes.
 export const runtime_context_name='__sandstone_context_'+create_bootstrap_nonce();
 let context;
-export function install_runtime_context(value){
+export function install_runtime_context(value,helpers=value){
   if(!context){
-    Object.defineProperty(globalThis,runtime_context_name,{value});
+    Object.defineProperty(globalThis,runtime_context_name,{value:helpers});
     context=value;
   }
 }

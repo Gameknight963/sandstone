@@ -7,11 +7,13 @@ export async function verifyDirectEval(page,{batch=0,batches=1}={}){
   const pages=Object.fromEntries(cases.map((example,index)=>['/case-'+index,
     '<!doctype html><script>try{window.result={value:('+example.source+')}}catch(error){window.result={error:error.name}}<\/script>']));
   const worker='onmessage=async({data:value})=>{try{postMessage(await eval("fetch(\'./data\').then(r=>r.json()).then(data=>[value,data.value,location.pathname])"))}catch(error){postMessage({error:error.name})}}';
+  const aliasWorker='onmessage=async({data:value})=>{try{const read=Function("eval","value",\'return eval("fetch(\\\'./data\\\').then(r=>r.json()).then(data=>[value,data.value,location.pathname])")\');postMessage(await read(globalThis.eval,value))}catch(error){postMessage({error:error.name})}}';
   const resources={
     '/network/start':['text/html','<!doctype html><body>Eval network fixture'],
     '/network/data':['application/json','{"value":7}'],
     '/network/module.js':['text/javascript','export const value=7;'],
-    '/network/worker.js':['text/javascript',worker]
+    '/network/worker.js':['text/javascript',worker],
+    '/network/alias-worker.js':['text/javascript',aliasWorker]
   };
   const context=await page.context().browser().newContext(),native=await context.newPage();
   const record=request=>{if(request.url().startsWith(origin+'/'))direct.push(request.url());};
@@ -41,8 +43,9 @@ export async function verifyDirectEval(page,{batch=0,batches=1}={}){
     if(batch===batches-1){
       const address=origin+'/network/start';
       await native.goto(address);await page.evaluate(address=>main_frame.navigate_to(address),address);
-      const source='(async()=>{function read(value){return eval("fetch(\'./data\').then(r=>r.json()).then(data=>[value,data.value])")}function imported(value){return eval("import(\'./module.js\').then(module=>module.value+value)")}const workers=[];for(const type of ["classic","module"])workers.push(await new Promise((resolve,reject)=>{const worker=new Worker("./worker.js",{type});worker.onmessage=event=>{worker.terminate();resolve(event.data)};worker.onerror=reject;worker.postMessage(7)}));return JSON.stringify({fetch:await read(7),imported:await imported(7),workers,source:eval("(function authored(value){return value})").toString()})})()';
-      const expected=await native.evaluate(source=>eval(source),source);
+      const source='(async()=>{function read(eval,value){return eval("fetch(\'./data\').then(r=>r.json()).then(data=>[value,data.value])")}function imported(eval,value){return eval("import(\'./module.js\').then(module=>module.value+value)")}const workers=[];for(const [type,url] of [["classic","./worker.js"],["module","./worker.js"],["classic","./alias-worker.js"],["module","./alias-worker.js"]])workers.push(await new Promise((resolve,reject)=>{const worker=new Worker(url,{type});worker.onmessage=event=>{worker.terminate();resolve(event.data)};worker.onerror=reject;worker.postMessage(7)}));return JSON.stringify({fetch:await read(globalThis.eval,7),imported:await imported(globalThis.eval,7),generated:Function("eval","value",\'return eval("value")\')(globalThis.eval,7),workers,aliasSource:read.toString(),source:eval("(function authored(value){return value})").toString()})})()';
+      await native.addScriptTag({content:"globalThis.__eval_result__=("+source+");"});
+      const expected=await native.evaluate(()=>__eval_result__);
       const actual=await page.evaluate(source=>main_frame.eval_js(source),source);
       assert.equal(actual,expected,'Eval network, worker and source identity parity');
       requests.push(...await page.evaluate(()=>__eval_fixture_requests__));

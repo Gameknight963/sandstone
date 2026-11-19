@@ -2,15 +2,17 @@ const states=new WeakMap(),box=Object,create=Object.create,apply=Reflect.apply;
 const has=Reflect.has,get=Reflect.get,set=Reflect.set,remove=Reflect.deleteProperty;
 const unscopables=Symbol.unscopables;
 const NativeProxy=Proxy,NativeTypeError=TypeError;
+const stateGet=WeakMap.prototype.get,stateSet=WeakMap.prototype.set;
+const state_for=token=>apply(stateGet,states,[token]);
 
 // Resolve an identifier through captured with objects before the virtual global.
 // Calls retain the selected object while arguments run. Reads and writes
 // resolve independently, including compound updates and a changing object.
-export function create_with_scope(value,parent,context,globals=context){
+export function create_with_scope(value,parent,context,globals=context,evalFallback,physicalEval){
   if(value===null||value===undefined)throw new NativeTypeError('Cannot convert undefined or null to object');
-  const object=box(value),state={object,parent:states.get(parent),context};
-  const target_for=(name,callee=false,fallback=globals)=>{
-    for(let current=state;current;current=current.parent){
+  const object=box(value),state={object,parent:state_for(parent),context};
+  const target_for=(name,callee=false,fallback=globals,stop)=>{
+    for(let current=state;current&&current!==state_for(stop);current=current.parent){
       const object=current.object;if(!has(object,name))continue;
       const hidden=get(object,unscopables,object);
       if(hidden!==null&&(typeof hidden==='object'||typeof hidden==='function')&&hidden[name])continue;
@@ -19,21 +21,21 @@ export function create_with_scope(value,parent,context,globals=context){
     return callee?{object:fallback,receiver:undefined}:fallback;
   };
   const read=(target,name)=>get(target,name,target);
-  const token={object,context,
-    reference(name,strict,fallback=globals){
+  const token={object,context,evalFallback,physicalEval,
+    reference(name,strict,fallback=globals,stop){
       return new NativeProxy(create(null),{
-        get:(_,key)=>read(target_for(name,false,fallback),key),
+        get:(_,key)=>read(target_for(name,false,fallback,stop),key),
         set:(_,key,value)=>{
-          const target=target_for(name,false,fallback);return set(target,key,value,target);
+          const target=target_for(name,false,fallback,stop);return set(target,key,value,target);
         },
-        deleteProperty:(_,key)=>remove(target_for(name,false,fallback),key)
+        deleteProperty:(_,key)=>remove(target_for(name,false,fallback,stop),key)
       });
     },
-    evaluation(name,fallback=globals){const {object,receiver}=target_for(name,true,fallback);return [read(object,name),receiver,receiver!==undefined];},
-    callee(name,strict,fallback=globals){
-      const {object,receiver}=target_for(name,true,fallback),value=read(object,name);
+    evaluation(name,fallback=globals,stop){const {object,receiver}=target_for(name,true,fallback,stop);return [read(object,name),receiver,receiver!==undefined];},
+    callee(name,strict,fallback=globals,stop){
+      const {object,receiver}=target_for(name,true,fallback,stop),value=read(object,name);
       return typeof value==='function'?new NativeProxy(value,{apply(fn,ignored,args){return apply(fn,receiver,args)}}):value;
     }
   };
-  states.set(token,state);return token;
+  apply(stateSet,states,[token,state]);return token;
 }

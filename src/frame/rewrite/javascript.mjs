@@ -37,11 +37,20 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
   }else ast=parse(source, {ranges: true, webcompat: true, module, next: true, onComment});
   const scopes = new WeakMap();
   const bindings = new WeakSet();
+  const bindingScopes=new WeakMap(),withScopes=new WeakMap(),namedEvalDeclarations=new WeakSet();
   const names = new Set(globals.filter(name=>!evalContext?.locals?.includes(name)));
   const edits = functionSources?functionSources.register(source,function_source_entries(ast,source)):[];
   const functionBodies=new WeakSet(),legacyFunctions=[],globalFunctions=new Set(),globalVariables=new Set(),declarations=[],identifiers=new Set(),privateNames=new Set(evalContext?.privateNames);
   const strictBody=node=>Array.isArray(node?.body)&&node.body.some(statement=>statement.directive==='use strict');
   const functionScopes=new WeakMap();
+  const evalIdentifiers=new WeakMap();
+  const containsEval=node=>{
+    if(evalIdentifiers.has(node))return evalIdentifiers.get(node);
+    let found=node.type==='Identifier'&&node.name==='eval';
+    children(node,child=>{found=containsEval(child)||found;});
+    evalIdentifiers.set(node,found);return found;
+  };
+  const untouchedAsm=node=>node?.type==='BlockStatement'&&node.body[0]?.directive==='use asm'&&!containsEval(node);
 
   function bind(pattern, scope, lexical=false) {
     if (!pattern) return;
@@ -49,6 +58,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
       scope.names.add(pattern.name);
       if(lexical)scope.lexical.add(pattern.name);
       bindings.add(pattern);
+      bindingScopes.set(pattern,scope);
     } else if (pattern.type === "AssignmentPattern") bind(pattern.left, scope,lexical);
     else if (pattern.type === "RestElement") bind(pattern.argument, scope,lexical);
     else if (pattern.type === "ArrayPattern") pattern.elements.forEach(element => bind(element, scope,lexical));
@@ -60,7 +70,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
     if(node.type==='PrivateIdentifier')privateNames.add(node.name);
     if (node.type === "FunctionDeclaration") {
       // Annex B treats unbraced if arms as implicit lexical blocks.
-      if(parent?.type==='IfStatement')scope=new Scope(scope,"block");
+      if(parent?.type==='IfStatement'){scope=new Scope(scope,"block");scope.container=node;}
       const block=scope.kind!=="function"&&!scope.body;
       bind(node.id,block?scope:scope.variable(),block&&(node.async||node.generator));
       if(!module&&!block&&node.id&&scope.variable()===root&&names.has(node.id.name))globalFunctions.add(node.id.name);
@@ -77,12 +87,21 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
       scopes.set(node,scope);
       const bodyScope=new Scope(scope,"function");
       bodyScope.bodyNode=node.body;
+      bodyScope.container=node.body;
       bodyScope.functionNode=node;
       functionScopes.set(node,bodyScope);
       bodyScope.parameters=scope.names;
+      if(untouchedAsm(node.body)){
+        scope.preserveEval=true;bodyScope.preserveEval=true;
+        if(node.id?.name==='eval')bindingScopes.get(node.id).preserveEval=true;
+      }
       if(node.body.type==='BlockStatement')functionBodies.add(node.body);
       children(node,(child,key)=>build(child,key==='body'?bodyScope:scope,node));
       return;
+    } else if(node.type==='WithStatement'){
+      scopes.set(node,scope);build(node.object,scope,node);
+      const environment=new Scope(scope,'with');withScopes.set(node,environment);
+      build(node.body,environment,node);return;
     } else if(node.type==='StaticBlock'){
       // A class static block owns both its lexical and var declarations.
       // Neither may suppress global rewriting in other fields or outer code.
@@ -92,15 +111,18 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
       build(node.discriminant,scope,node);
       // The discriminant precedes the shared lexical environment of all cases.
       const caseScope=new Scope(scope,"block");
+      caseScope.container=node;
       node.cases.forEach(branch=>build(branch,caseScope,node));
       return;
     } else if (node.type === "ClassDeclaration" || node.type === "ClassExpression") {
       if (node.type === "ClassDeclaration") bind(node.id, scope,true);
       scope = new Scope(scope, "block");
+      scope.container=node;
       scope.strict=true;
       bind(node.id, scope,true);
     } else if (["BlockStatement", "CatchClause", "ForStatement", "ForInStatement", "ForOfStatement"].includes(node.type)) {
       scope = new Scope(scope, "block");
+      scope.container=node;
       if(functionBodies.has(node))scope.body=true;
       // Legacy var declarations may cross a simple catch parameter, but not
       // a destructuring catch binding or other intervening lexical bindings.
@@ -115,10 +137,45 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
     children(node, child => build(child, scope,node));
   }
   const root=new Scope(null,"function");root.strict=module||!!evalContext?.strict||strictBody(ast);
+  root.container=ast;
   if(evalContext?.declarationScope){root.evalScope=evalContext.declarationScope;root.evalScopeOptional=true;}
   build(ast,root);
   const targets=new WeakSet(),defaultShorthands=new WeakSet(),hoisted=new Set(),movedInitializers=[];
   const globalScript=!module&&!(evalMode&&root.strict)&&(!evalContext||evalContext.global);
+  const renameEval=directEval&&!preserveDirectEval;
+  const globalLegacyEvalScopes=new Set(globalScript?legacyFunctions.filter(entry=>entry.node.id.name==='eval'&&entry.scope.variable()===root).map(entry=>entry.scope):[]);
+  let evalAliasName=evalContext?.evalAliasName||contextName.replace(/\W/g,'_')+'_eval_binding',aliasIndex=0;
+  if(!evalContext?.evalAliasName)while(identifiers.has(evalAliasName)||source.includes(evalAliasName))evalAliasName=contextName.replace(/\W/g,'_')+'_eval_binding_'+(++aliasIndex);
+  const aliasOwner=node=>{
+    if(!renameEval||node.name!=='eval')return null;
+    const owner=bindings.has(node)?bindingScopes.get(node):scopes.get(node)?.owner('eval');
+    if(owner?.preserveEval||globalLegacyEvalScopes.has(owner))return null;
+    if(owner&&owner!==root)return owner;
+    if(owner===root&&evalContext&&(!evalContext.global||root.lexical.has('eval')))return owner;
+    return !owner&&evalContext?.evalAliasVisible?root:null;
+  };
+  const aliasWith=(node,token)=>{
+    if(!token)return null;
+    const owner=aliasOwner(node);if(!owner)return {token,stop:undefined};
+    let current=scopes.get(node),inner;
+    while(current&&current!==owner){if(current.kind==='with')inner??=current;current=current.parent;}
+    const inherited=owner===root&&evalContext?.evalAliasPath&&(!root.names.has('eval')||withAliasVariables.has('eval'));
+    if(!inner)return inherited?evalContext.evalAliasPath:null;
+    let stop;
+    for(current=owner.parent;current;current=current.parent)if(current.kind==='with'){stop=current.token;break;}
+    return {token:inner.token,stop:stop||(inherited?evalContext.evalAliasPath.stop:evalContext?.withToken)};
+  };
+  const aliasDefaults=new WeakSet(),nameContainers=new WeakSet();
+  if(renameEval){
+    const prepare=node=>{
+      if(node.type==='Property'&&node.shorthand&&node.value.type==='AssignmentPattern'&&aliasOwner(node.value.left))aliasDefaults.add(node.value.left);
+      if(node.type==='FunctionDeclaration'&&node.id&&aliasOwner(node.id)){
+        namedEvalDeclarations.add(node);const owner=bindingScopes.get(node.id);if(owner?.container)nameContainers.add(owner.container);
+      }
+      children(node,prepare);
+    };
+    prepare(ast);
+  }
   const lexicals=!module&&!evalMode?[...root.lexical].filter(name=>names.has(name)):[];
   if(lexicals.length){
     const offset=ast.body.find(statement=>statement.directive===undefined)?.start??source.length;
@@ -134,7 +191,8 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
   }
   if(globalScript)for(const {node} of declarations)for(const declaration of node.declarations)pattern_ids(declaration.id,id=>{if(names.has(id.name))globalVariables.add(id.name)});
   const directVariables=new Set(evalContext&&!root.strict&&!globalScript&&root.evalScope?[...root.names].filter(name=>names.has(name)&&!root.lexical.has(name)):[]);
-  const virtual_variable=id=>(globalVariables.has(id.name)||directVariables.has(id.name))&&scopes.get(id).owner(id.name)===root;
+  const withAliasVariables=new Set(renameEval&&evalContext?.evalAliasVisible&&evalContext.evalAliasPath&&!root.strict&&!globalScript&&root.names.has('eval')&&!root.lexical.has('eval')?['eval']:[]);
+  const virtual_variable=id=>(globalVariables.has(id.name)||directVariables.has(id.name)||withAliasVariables.has(id.name))&&scopes.get(id).owner(id.name)===root;
   // Assignment patterns can address the virtual Window directly. Keep bare var
   // declarations for native instantiation, conflicts and property attributes.
   const inferred_name=(node,name)=>{
@@ -155,12 +213,12 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
     else if(pattern.type==='ArrayPattern')pattern.elements.forEach(item=>{if(item)prepare_pattern(item)});
     else if(pattern.type==='RestElement')prepare_pattern(pattern.argument);
   }
-  if(globalScript||directVariables.size)for(const {node,parent} of declarations)for(const declaration of node.declarations){
+  if(globalScript||directVariables.size||withAliasVariables.size)for(const {node,parent} of declarations)for(const declaration of node.declarations){
     let affected=false;pattern_ids(declaration.id,id=>{affected||=virtual_variable(id)});
     if(!affected)continue;
     const loop=['ForInStatement','ForOfStatement'].includes(parent?.type)&&parent.left===node;
     if(!loop&&!declaration.init)continue;
-    pattern_ids(declaration.id,id=>hoisted.add(id.name));
+    pattern_ids(declaration.id,id=>hoisted.add(aliasOwner(id)?evalAliasName:id.name));
     prepare_pattern(declaration.id);
     if(loop){
       edits.push([node.start,node.start+3,'']);
@@ -232,7 +290,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
   };
   if(directEval&&!preserveDirectEval){
     const discover=node=>{
-      if(node.type==='CallExpression'&&!node.optional&&node.callee.type==='Identifier'&&node.callee.name==='eval'&&names.has('eval')&&(!scopes.get(node.callee).has('eval')||virtual_variable(node.callee))){
+      if(node.type==='CallExpression'&&!node.optional&&node.callee.type==='Identifier'&&node.callee.name==='eval'&&(names.has('eval')||aliasOwner(node.callee))&&(!scopes.get(node.callee).has('eval')||virtual_variable(node.callee)||aliasOwner(node.callee))){
         direct_calls.add(node);
         const owner=eval_owner(scopes.get(node));
         // A parameter eval creates its token inside the eval itself. Adding a
@@ -275,24 +333,70 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
   const eval_reference=(node,name,fallback,erase=false,withToken=null)=>{
     const candidates=eval_scopes(scopes.get(node));if(!candidates.length)return fallback;
     const parameter=fresh_eval_name();
-    const local='{get ['+JSON.stringify(name)+'](){return '+name+'},set ['+JSON.stringify(name)+']('+parameter+'){'+name+'='+parameter+'}}';
-    return (withToken?withToken+'.context':runtimeContext)+'.__eval_reference__(['+candidates.join(',')+'],'+JSON.stringify(name)+','+local+','+fallback+(erase?',()=>delete '+name:'')+')';
+    const nativeName=renameEval&&name==='eval'?evalAliasName:name;
+    const local='{get ['+JSON.stringify(name)+'](){return '+nativeName+'},set ['+JSON.stringify(name)+']('+parameter+'){'+nativeName+'='+parameter+'}}';
+    return (withToken?withToken+'.context':runtimeContext)+'.__eval_reference__(['+candidates.join(',')+'],'+JSON.stringify(name)+','+local+','+fallback+(erase?',()=>delete '+nativeName:'')+')';
+  };
+  const alias_reference=(node,token,erase=false)=>{
+    const path=aliasWith(node,token);
+    if(!path){
+      const value=evalContext?.evalAliasRef&&!scopes.get(node).owner('eval')?'('+evalContext.evalAliasRef+').eval':evalAliasName;
+      return {value,record:'['+value+',undefined]'};
+    }
+    const reference=path.token+'.evalFallback';
+    const stop=path.stop||'undefined';
+    return {value:'('+path.token+'.reference("eval",'+scopes.get(node).strict+','+reference+','+stop+')).eval',
+      record:path.token+'.evaluation("eval",'+reference+','+stop+')'};
   };
   let with_index=0;
   const with_name=()=>{let name;do{name='__sandstone_with_'+(++with_index)}while(identifiers.has(name)||source.includes(name));return name};
   function visit(node, parent, key, inWith=false,withToken=null) {
-    if (node.type === "BlockStatement" && node.body[0]?.directive === "use asm") return;
+    if(untouchedAsm(node))return;
     const initialize=functionScopes.get(node)?.evalInitializeEdit;
     if(initialize&&withToken)initialize[2]=initialize[2].replace(runtimeContext+'.__eval_scope__()',withToken+'.context.__eval_scope__()');
     const legacy=legacy_publications.get(node);
+    const runtime=withToken?withToken+'.context':runtimeContext;
+    if(nameContainers.has(node)){
+      const statement=';var {}=('+runtime+'.__eval_function__('+evalAliasName+'),0);';
+      if(node.type==='SwitchStatement'){
+        const test=node.cases.find(branch=>branch.test)?.test;
+        if(test){edits.push([test.start,test.start,'('+runtime+'.__eval_function__('+evalAliasName+'),']);edits.push([test.end,test.end,')']);}
+        else if(node.cases.length){const branch=node.cases[0],offset=branch.consequent[0]?.start??node.end-1;edits.push([offset,offset,statement]);}
+      }else if(node.type==='FunctionDeclaration'){
+        if(!legacy?.implicit)edits.push([node.start,node.start,'{']);
+        edits.push([node.end,node.end,statement+(legacy?.implicit?'':'}'),-1]);
+      }else{
+        const offset=node.body.find(item=>item.directive===undefined)?.start??(node===ast?source.length:node.end-1);
+        edits.push([offset,offset,statement,-1]);
+      }
+    }
+    if(node.type==='FunctionExpression'&&node.id&&aliasOwner(node.id)){
+      edits.push([node.start,node.start,'('+runtime+'.__eval_function__((']);edits.push([node.end,node.end,')))']);
+    }
     if(legacy&&withToken)legacy.publication[2]=`;var {}=(${globalName===contextName?withToken+'.context.'+legacy.name+'='+legacy.name:withToken+'.context.__publish_legacy_function__('+JSON.stringify(legacy.name)+','+legacy.name+')'});${legacy.implicit?'}':''}`;
     if(node.type==='WithStatement'&&!preserveWith){
       const token=with_name(),runtime=withToken?withToken+'.context':withContext;
+      withScopes.get(node).token=token;
+      const owner=eval_owner(scopes.get(node)),anchor=renameEval&&(owner!==root||evalContext&&!evalContext.global);
+      let aliasFallback='';
+      if(renameEval){
+        const lookup={name:'eval'};scopes.set(lookup,scopes.get(node.object));
+        const inherited=aliasWith(lookup,withToken);
+        const parameter=fresh_eval_name();
+        const local='{get eval(){return '+evalAliasName+'},set eval('+parameter+'){'+evalAliasName+'='+parameter+'}}';
+        aliasFallback=','+(inherited?inherited.token+'.evalFallback':evalContext?.evalAliasRef&&!scopes.get(node.object).owner('eval')?evalContext.evalAliasRef:runtime+'.__eval_binding__('+local+',()=>delete '+evalAliasName+')');
+      }
       edits.push([node.object.start,node.object.start,runtime+'.__enter_with__((']);
-      edits.push([node.object.end,node.object.end,'),'+(withToken||'null')+')']);
+      const physical=anchor?','+runtime+'.__eval_physical__()?(function(){return this})().eval:undefined':'';
+      edits.push([node.object.end,node.object.end,'),'+(withToken||'null')+aliasFallback+(anchor?',('+physical.slice(1)+')':'')+')']);
       const block=node.body.type==='BlockStatement',offset=block?node.body.start+1:node.body.start;
-      edits.push([offset,offset,(block?'':'{')+'const '+token+'='+runtime+'.__take_with__();']);
-      if(!block)edits.push([node.body.end,node.body.end,'}',2]);
+      if(anchor){
+        edits.push([node.body.start,node.body.start,'{const '+token+'='+withContext+'.__take_with__();const eval='+token+'.physicalEval;']);
+        edits.push([node.body.end,node.body.end,'}',2]);
+      }else{
+        edits.push([offset,offset,(block?'':'{')+'const '+token+'='+withContext+'.__take_with__();']);
+        if(!block)edits.push([node.body.end,node.body.end,'}',2]);
+      }
       visit(node.object,node,'object',inWith,withToken);visit(node.body,node,'body',true,token);return;
     }
     if(direct_calls.has(node))pending_evals.push({node,withToken});
@@ -323,12 +427,24 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
       edits.push([node.start, node.end, `${contextName}.__module_meta__(${JSON.stringify(url)})`]);
       return;
     }
-    const inferred=(node.type==='AssignmentExpression'&&['=','||=','&&=','??='].includes(node.operator)||node.type==='AssignmentPattern')&&node.left.type==='Identifier'&&names.has(node.left.name)&&!bindings.has(node.left)&&(!scopes.get(node.left).has(node.left.name)||virtual_variable(node.left));
+    const aliasInferred=(node.type==='AssignmentExpression'&&['=','||=','&&=','??='].includes(node.operator)||node.type==='AssignmentPattern')&&node.left.type==='Identifier'&&aliasOwner(node.left)&&!virtual_variable(node.left);
+    if(node.type==='VariableDeclarator'&&node.id.type==='Identifier'&&aliasOwner(node.id)&&!virtual_variable(node.id)&&node.init)inferred_name(node.init,'eval');
+    const inferred=aliasInferred||(node.type==='AssignmentExpression'&&['=','||=','&&=','??='].includes(node.operator)||node.type==='AssignmentPattern')&&node.left.type==='Identifier'&&names.has(node.left.name)&&!bindings.has(node.left)&&(!scopes.get(node.left).has(node.left.name)||virtual_variable(node.left));
     if(inferred){
       inferred_name(node.right,node.left.name);
       if(node.type==='AssignmentPattern'&&parent?.type==='Property'&&parent.shorthand)defaultShorthands.add(node.left);
     }
-    if (node.type === "ThisExpression"&&rewriteThis) {
+    if(node.type==='Identifier'&&aliasOwner(node)&&(!virtual_variable(node)||withAliasVariables.has(node.name)&&scopes.get(node).owner(node.name)===root||bindings.has(node)&&!targets.has(node))){
+      let reference=true;
+      if((parent?.type==='MemberExpression'||parent?.type==='OptionalMemberExpression')&&key==='property'&&!parent.computed)reference=false;
+      if(['Property','MethodDefinition','PropertyDefinition','FieldDefinition'].includes(parent?.type)&&key==='key'&&!parent.computed)reference=false;
+      if(['LabeledStatement','BreakStatement','ContinueStatement','MetaProperty','ImportSpecifier','ExportSpecifier'].includes(parent?.type))reference=false;
+      if(reference){
+        const shorthand=parent?.type==='Property'&&parent.shorthand&&key==='value'||aliasDefaults.has(node);
+        const value=bindings.has(node)&&!targets.has(node)?evalAliasName:alias_reference(node,withToken,parent?.type==='UnaryExpression'&&parent.operator==='delete').value;
+        edits.push([node.start,node.end,(shorthand?'eval: ':'')+value]);
+      }
+    }else if (node.type === "ThisExpression"&&rewriteThis) {
       edits.push([node.start, node.end, `(${withToken?withToken+'.context.__get_this__':thisName}(this,${scopes.get(node).strict}))`]);
     } else if (node.type === "Identifier" && names.has(node.name) && (targets.has(node)||!bindings.has(node)&&(!scopes.get(node).has(node.name)||virtual_variable(node)))) {
       let reference = true;
@@ -371,12 +487,16 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
     }
     const metadata={strict:scope.strict,global:owner===root&&(!evalContext||!!evalContext.global),spread:node.arguments.some(argument=>argument.type==='SpreadElement'),
       locals:[...locals],scopes:eval_scopes(scope),declarationScope:owner.evalScope,initializeScope:!!owner.parameterScope,
-      privateNames:[...privateNames],url,importReferrer,withToken:withToken||undefined};
+      privateNames:[...privateNames],url,importReferrer:dynamicImport?null:importReferrer,withToken:withToken||undefined,
+      evalAliasName:renameEval?evalAliasName:undefined,evalAliasVisible:!!aliasOwner(node.callee)&&(!virtual_variable(node.callee)||withAliasVariables.has(node.callee.name))};
+    const aliasPath=aliasOwner(node.callee)?aliasWith(node.callee,withToken):null;
+    if(aliasPath){metadata.evalAliasRef=aliasPath.token+'.evalFallback';metadata.evalAliasPath=aliasPath;}
+    else if(evalContext?.evalAliasRef&&!scope.owner('eval'))metadata.evalAliasRef=evalContext.evalAliasRef;
     const args=node.arguments.length?render(node.arguments[0].start,node.arguments.at(-1).end):'';
     const runtime=withToken?withToken+'.context':runtimeContext;
     const reference=eval_reference(node.callee,'eval',withToken?runtime+'.__globals__':globalName,false,withToken);
-    const callee=withToken?withToken+'.evaluation("eval",'+reference+')':'['+reference+'.eval,undefined]';
-    const replacement='('+runtime+'.__eval_select__('+callee+')?eval('+(metadata.spread?'...':'')+runtime+'.__eval_prepare__(['+args+'],'+JSON.stringify(metadata)+')):'+runtime+'.__eval_custom__()('+args+'))';
+    const callee=aliasOwner(node.callee)&&(!virtual_variable(node.callee)||withAliasVariables.has(node.callee.name))?alias_reference(node.callee,withToken).record:withToken?withToken+'.evaluation("eval",'+reference+')':'['+reference+'.eval,undefined]';
+    const replacement='('+runtime+'.__eval_select__('+callee+',()=>eval)?eval('+(metadata.spread?'...':'')+runtime+'.__eval_prepare__(['+args+'],'+JSON.stringify(metadata)+')):'+runtime+'.__eval_custom__()('+args+'))';
     for(let index=edits.length-1;index>=0;index--)if(edits[index][0]>=node.start&&edits[index][1]<=node.end&&edits[index][0]<node.end&&!(edits[index][0]===node.start&&edits[index][1]===node.start))edits.splice(index,1);
     edits.push([node.start,node.end,replacement]);
   }
@@ -426,5 +546,5 @@ export function rewrite_dynamic_function(source,globals,options={}){
   if(id)expression=expression.slice(0,id.start)+expression.slice(id.end);
   // Sloppy direct eval can introduce bindings that no static scope pass sees.
   // Let the native environment resolve those names before its global fallback.
-  return {source:rewrite_source(expression,globals,{...options,contextName,globalName:options.lexicalGlobals?contextName+'.__globals__':contextName,thisName,dynamicImport:true,preserveWith:true,preserveDirectEval:true,preserveGlobalScope:hasDirectEval}),contextName,thisName,scopeName,needsScope};
+  return {source:rewrite_source(expression,globals,{...options,contextName,globalName:options.lexicalGlobals?contextName+'.__globals__':contextName,thisName,dynamicImport:true,withContext:options.withContext||contextName,preserveWith:!options.directEval,preserveDirectEval:!options.directEval,preserveGlobalScope:hasDirectEval}),contextName,thisName,scopeName,needsScope};
 }

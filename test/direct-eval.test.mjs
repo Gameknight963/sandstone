@@ -20,14 +20,17 @@ function evaluate(source,proxy){
     get(_,name){if(name==='globalThis'||name==='window')return view;if(name==='eval')return currentEval;return live.has(name)?native[name]:overrides.has(name)?overrides.get(name):native[name];},
     set(_,name,value){if(name==='eval')currentEval=value;else if(live.has(name))native[name]=value;else overrides.set(name,value);return true;}
   });
-  const helper=create_direct_eval({native:runInContext('eval',realm),virtual,rewrite:(source,context)=>rewrite(source,{evalMode:true,evalContext:context})});
+  const helper=create_direct_eval({native:runInContext('eval',realm),virtual,global:native,rewrite:(source,context)=>rewrite(source,{evalMode:true,evalContext:context})});
   const entries=[];
   realm.__runtime__={
     __globals__:view,__get_this__:value=>value===native?view:value,
     __eval_scope__:()=>helper.scope(),__eval_declare__:(...args)=>helper.declare(...args),
     __eval_reference__:(...args)=>helper.reference(...args),__eval_select__:(...args)=>helper.select(...args),
     __eval_custom__:()=>helper.custom(),__eval_prepare__:(...args)=>helper.prepare(...args),
-    __enter_with__:(value,parent)=>{const token=create_with_scope(value,parent,realm.__runtime__,view);entries.push(token);return token.object;},
+    __eval_function__:value=>helper.name(value),
+    __eval_physical__:()=>helper.physical(),
+    __eval_binding__:(...args)=>helper.binding(...args),
+    __enter_with__:(value,parent,evalFallback,physicalEval)=>{const token=create_with_scope(value,parent,realm.__runtime__,view,evalFallback,physicalEval);entries.push(token);return token.object;},
     __take_with__:()=>entries.pop(),
     __declare_global_vars__:names=>names.forEach(name=>live.add(name)),
     __publish_global_function__:(name,value)=>{live.add(name);return value;},

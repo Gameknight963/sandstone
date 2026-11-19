@@ -15,10 +15,11 @@ import {create_global_bindings} from './global_bindings.mjs';
 import {worker_module_intrinsics} from './module_namespace.mjs';
 import {install_runtime_context} from './runtime_context.mjs';
 import {create_direct_eval} from './direct_eval.mjs';
+import {create_runtime_helpers} from './runtime_helpers.mjs';
 export {get_runtime_context} from './runtime_context.mjs';
 const parse_json = JSON.parse;
 const realm_global=globalThis,evaluate_global=globalThis.eval,describe_global=Reflect.getOwnPropertyDescriptor,define_global=Reflect.defineProperty;
-const with_entries=[];
+let with_entry;
 const native_worker_post=realm_global.postMessage?.bind(realm_global);
 
 export const is_worker = typeof importScripts === "function";
@@ -136,7 +137,10 @@ export class CustomCTX {
   __eval_scope__(){return direct_eval.scope();}
   __eval_declare__(scope,names){direct_eval.declare(scope,names);}
   __eval_reference__(...args){return direct_eval.reference(...args);}
-  __eval_select__(reference){return direct_eval.select(reference);}
+  __eval_select__(reference,physical){return direct_eval.select(reference,physical);}
+  __eval_function__(value){return direct_eval.name(value);}
+  __eval_physical__(){return direct_eval.physical();}
+  __eval_binding__(...args){return direct_eval.binding(...args);}
   __eval_custom__(){return direct_eval.custom();}
   __eval_prepare__(args,context){return direct_eval.prepare(args,context);}
 
@@ -151,8 +155,8 @@ export class CustomCTX {
   get __globals__(){return global_bindings.globals;}
   __declare_global_lexicals__(definitions){global_bindings.declare(definitions);}
   __publish_legacy_function__(name,value){if(!global_bindings.has(name))Reflect.set(ctx.__proxy__,name,value,ctx.__proxy__);return value;}
-  __enter_with__(value,parent){const token=create_with_scope(value,parent,ctx.__proxy__,global_bindings.globals);with_entries.push(token);return token.object;}
-  __take_with__(){return with_entries.pop();}
+  __enter_with__(value,parent,evalFallback,physicalEval){const token=create_with_scope(value,parent,runtime_helpers,global_bindings.globals,evalFallback,physicalEval);with_entry={token,previous:with_entry};return token.object;}
+  __take_with__(){const entry=with_entry;with_entry=entry?.previous;return entry?.token;}
   __declare_global_vars__(names){for(const name of names)bind_declared_property(ctx.__proxy__,name);}
 
   __publish_global_function__(name,value){
@@ -181,8 +185,9 @@ export class CustomCTX {
 
 export const ctx = new CustomCTX();
 const global_bindings=create_global_bindings(ctx.__proxy__);
-const direct_eval=create_direct_eval({native:evaluate_global,virtual:CustomCTX.prototype.eval,
+const direct_eval=create_direct_eval({native:evaluate_global,virtual:CustomCTX.prototype.eval,global:realm_global,
   rewrite:(source,context)=>parser.rewrite_js(source,{url:context.url||loader.url,importReferrer:context.importReferrer,evalMode:true,evalContext:context})});
+export const runtime_helpers=create_runtime_helpers(ctx,Reflect.ownKeys(CustomCTX.prototype).filter(name=>typeof name==='string'&&name.startsWith('__')));
 
 export function proxy_function(target, key, apply_callback) {
   if (!target) return;
@@ -260,7 +265,7 @@ export function update_ctx(options = {}) {
     try { if(!Reflect.deleteProperty(globalThis,key))Object.defineProperty(globalThis,key,{value:undefined,configurable:true}); } catch {}
   }
 
-  install_runtime_context(ctx.__proxy__);
+  install_runtime_context(ctx.__proxy__,runtime_helpers);
   return storageReady;
 }
 
