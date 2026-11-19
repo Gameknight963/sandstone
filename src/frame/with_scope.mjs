@@ -9,28 +9,29 @@ const NativeProxy=Proxy,NativeTypeError=TypeError;
 export function create_with_scope(value,parent,context,globals=context){
   if(value===null||value===undefined)throw new NativeTypeError('Cannot convert undefined or null to object');
   const object=box(value),state={object,parent:states.get(parent),context};
-  const target_for=(name,callee=false)=>{
+  const target_for=(name,callee=false,fallback=globals)=>{
     for(let current=state;current;current=current.parent){
       const object=current.object;if(!has(object,name))continue;
       const hidden=get(object,unscopables,object);
       if(hidden!==null&&(typeof hidden==='object'||typeof hidden==='function')&&hidden[name])continue;
       return callee?{object,receiver:object}:object;
     }
-    return callee?{object:globals,receiver:undefined}:globals;
+    return callee?{object:fallback,receiver:undefined}:fallback;
   };
   const read=(target,name)=>get(target,name,target);
   const token={object,context,
-    reference(name){
+    reference(name,strict,fallback=globals){
       return new NativeProxy(create(null),{
-        get:(_,key)=>read(target_for(name),key),
+        get:(_,key)=>read(target_for(name,false,fallback),key),
         set:(_,key,value)=>{
-          const target=target_for(name);return set(target,key,value,target);
+          const target=target_for(name,false,fallback);return set(target,key,value,target);
         },
-        deleteProperty:(_,key)=>remove(target_for(name),key)
+        deleteProperty:(_,key)=>remove(target_for(name,false,fallback),key)
       });
     },
-    callee(name){
-      const {object,receiver}=target_for(name,true),value=read(object,name);
+    evaluation(name,fallback=globals){const {object,receiver}=target_for(name,true,fallback);return [read(object,name),receiver,receiver!==undefined];},
+    callee(name,strict,fallback=globals){
+      const {object,receiver}=target_for(name,true,fallback),value=read(object,name);
       return typeof value==='function'?new NativeProxy(value,{apply(fn,ignored,args){return apply(fn,receiver,args)}}):value;
     }
   };

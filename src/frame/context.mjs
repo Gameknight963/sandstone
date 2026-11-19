@@ -14,6 +14,7 @@ import {create_with_scope} from './with_scope.mjs';
 import {create_global_bindings} from './global_bindings.mjs';
 import {worker_module_intrinsics} from './module_namespace.mjs';
 import {install_runtime_context} from './runtime_context.mjs';
+import {create_direct_eval} from './direct_eval.mjs';
 export {get_runtime_context} from './runtime_context.mjs';
 const parse_json = JSON.parse;
 const realm_global=globalThis,evaluate_global=globalThis.eval,describe_global=Reflect.getOwnPropertyDescriptor,define_global=Reflect.defineProperty;
@@ -132,6 +133,12 @@ export class CustomCTX {
   eval(js) {
     return typeof js==='string'?run_script(js):js;
   }
+  __eval_scope__(){return direct_eval.scope();}
+  __eval_declare__(scope,names){direct_eval.declare(scope,names);}
+  __eval_reference__(...args){return direct_eval.reference(...args);}
+  __eval_select__(reference){return direct_eval.select(reference);}
+  __eval_custom__(){return direct_eval.custom();}
+  __eval_prepare__(args,context){return direct_eval.prepare(args,context);}
 
   __import__(referrer, specifier, options) {
     const base=referrer===null?()=>is_worker?ctx.location.href:ctx.document.baseURI:referrer;
@@ -174,6 +181,8 @@ export class CustomCTX {
 
 export const ctx = new CustomCTX();
 const global_bindings=create_global_bindings(ctx.__proxy__);
+const direct_eval=create_direct_eval({native:evaluate_global,virtual:CustomCTX.prototype.eval,
+  rewrite:(source,context)=>parser.rewrite_js(source,{url:context.url||loader.url,importReferrer:context.importReferrer,evalMode:true,evalContext:context})});
 
 export function proxy_function(target, key, apply_callback) {
   if (!target) return;

@@ -5,6 +5,7 @@ import { runInThisContext } from "node:vm";
 import assert from "node:assert/strict";
 import {createHmac} from 'node:crypto';
 import {verifyHTMLInputStream} from './html-input-native.mjs';
+import {verifyDirectEval} from './direct-eval.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -314,6 +315,7 @@ try {
     result.passed.push(...await timed(verifyJavascriptASI(page), 'JavaScript ASI fixture'));
     result.passed.push(...await timed(verifyFunctionConstructor(page), 'Function constructor fixture'));
     result.passed.push(...await timed(verifyFunctionSources(page), 'Function source fixture'));
+    for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyDirectEval(page,{batch,batches:3}), 'Direct eval fixture '+(batch+1)));
     result.passed.push(...await timed(verifyBlockFunctions(page,blockFunctionCases,globalBlockFunctionCases), 'Block function scope fixture'));
     result.passed.push(...await timed(verifyGlobalFunctions(page,globalFunctionCases), 'Global function declaration fixture'));
     result.passed.push(...await timed(verifyGlobalVars(page), 'Global var declaration fixture'));

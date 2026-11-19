@@ -19,18 +19,29 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false, url,importReferrer=url, resolve,resolveNamespace, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',withContext='(function(){return this})().__ctx__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false,functionSources,rewriteThis=true} = {}) {
+export function rewrite_source(source, globals, {module = false, url,importReferrer=url, resolve,resolveNamespace, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',withContext='(function(){return this})().__ctx__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false,functionSources,rewriteThis=true,directEval=false,evalContext} = {}) {
+  const runtimeContext=evalContext?.withToken?evalContext.withToken+'.context':contextName;
   let named=false;
   const onComment=sourceURL?(type,text)=>{
     if(type==='SingleLine'&&/^[#@]\s+sourceURL=\s*\S+\s*$/.test(text))named=true;
   }:undefined;
-  const ast = parse(source, {ranges: true, webcompat: true, module, next: true, onComment});
+  let ast;
+  if(evalContext){
+    // Parse the caller's contextual grammar without executing a wrapper.
+    // Native eval still validates the extracted Script in its real environment.
+    const prefix=evalContext.strict?'class __Eval__ extends Object {'+(evalContext.privateNames||[]).map(name=>'#'+name+';').join('')+'constructor(){':'function __Eval__(){';
+    const wrapper=parse(prefix+source+'\n}'+(evalContext.strict?'}':''),{ranges:true,webcompat:true,next:true,onComment});
+    const body=evalContext.strict?wrapper.body[0].body.body.at(-1).value.body.body:wrapper.body[0].body.body;
+    const shift=node=>{node.start-=prefix.length;node.end-=prefix.length;if(node.range)node.range=[node.start,node.end];children(node,shift);};
+    body.forEach(shift);ast={type:'Program',start:0,end:source.length,body};
+  }else ast=parse(source, {ranges: true, webcompat: true, module, next: true, onComment});
   const scopes = new WeakMap();
   const bindings = new WeakSet();
-  const names = new Set(globals);
+  const names = new Set(globals.filter(name=>!evalContext?.locals?.includes(name)));
   const edits = functionSources?functionSources.register(source,function_source_entries(ast,source)):[];
-  const functionBodies=new WeakSet(),legacyFunctions=[],globalFunctions=new Set(),globalVariables=new Set(),declarations=[],identifiers=new Set();
+  const functionBodies=new WeakSet(),legacyFunctions=[],globalFunctions=new Set(),globalVariables=new Set(),declarations=[],identifiers=new Set(),privateNames=new Set(evalContext?.privateNames);
   const strictBody=node=>Array.isArray(node?.body)&&node.body.some(statement=>statement.directive==='use strict');
+  const functionScopes=new WeakMap();
 
   function bind(pattern, scope, lexical=false) {
     if (!pattern) return;
@@ -46,6 +57,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
 
   function build(node, scope,parent) {
     if(node.type==='Identifier')identifiers.add(node.name);
+    if(node.type==='PrivateIdentifier')privateNames.add(node.name);
     if (node.type === "FunctionDeclaration") {
       // Annex B treats unbraced if arms as implicit lexical blocks.
       if(parent?.type==='IfStatement')scope=new Scope(scope,"block");
@@ -58,11 +70,15 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
       // Parameter initializers run outside the body's variable environment.
       // Closures created there must not capture a later body var/function.
       scope = new Scope(scope, "block");
+      scope.parameterScope=true;
       scope.strict ||= strictBody(node.body);
       if (node.type === "FunctionExpression") bind(node.id, scope);
       node.params.forEach(param => bind(param, scope));
       scopes.set(node,scope);
       const bodyScope=new Scope(scope,"function");
+      bodyScope.bodyNode=node.body;
+      bodyScope.functionNode=node;
+      functionScopes.set(node,bodyScope);
       bodyScope.parameters=scope.names;
       if(node.body.type==='BlockStatement')functionBodies.add(node.body);
       children(node,(child,key)=>build(child,key==='body'?bodyScope:scope,node));
@@ -98,15 +114,16 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
     if (node.type === "ImportDeclaration") node.specifiers.forEach(specifier => bind(specifier.local, scope,true));
     children(node, child => build(child, scope,node));
   }
-  const root=new Scope(null,"function");root.strict=module||strictBody(ast);
+  const root=new Scope(null,"function");root.strict=module||!!evalContext?.strict||strictBody(ast);
+  if(evalContext?.declarationScope){root.evalScope=evalContext.declarationScope;root.evalScopeOptional=true;}
   build(ast,root);
   const targets=new WeakSet(),defaultShorthands=new WeakSet(),hoisted=new Set(),movedInitializers=[];
-  const globalScript=!module&&!(evalMode&&root.strict);
+  const globalScript=!module&&!(evalMode&&root.strict)&&(!evalContext||evalContext.global);
   const lexicals=!module&&!evalMode?[...root.lexical].filter(name=>names.has(name)):[];
   if(lexicals.length){
     const offset=ast.body.find(statement=>statement.directive===undefined)?.start??source.length;
     const definitions=lexicals.map(name=>`get [${JSON.stringify(name)}](){return ${name}},set [${JSON.stringify(name)}](value){${name}=value}`).join(',');
-    edits.push([offset,offset,`var {}=(${contextName}.__declare_global_lexicals__?.({${definitions}}),0);`]);
+    edits.push([offset,offset,`var {}=(${runtimeContext}.__declare_global_lexicals__?.({${definitions}}),0);`]);
   }
   function pattern_ids(pattern,callback){
     if(pattern.type==='Identifier')callback(pattern);
@@ -116,7 +133,8 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
     else if(pattern.type==='ObjectPattern')pattern.properties.forEach(item=>pattern_ids(item.type==='RestElement'?item:item.value,callback));
   }
   if(globalScript)for(const {node} of declarations)for(const declaration of node.declarations)pattern_ids(declaration.id,id=>{if(names.has(id.name))globalVariables.add(id.name)});
-  const virtual_variable=id=>globalVariables.has(id.name)&&scopes.get(id).owner(id.name)===root;
+  const directVariables=new Set(evalContext&&!root.strict&&!globalScript&&root.evalScope?[...root.names].filter(name=>names.has(name)&&!root.lexical.has(name)):[]);
+  const virtual_variable=id=>(globalVariables.has(id.name)||directVariables.has(id.name))&&scopes.get(id).owner(id.name)===root;
   // Assignment patterns can address the virtual Window directly. Keep bare var
   // declarations for native instantiation, conflicts and property attributes.
   const inferred_name=(node,name)=>{
@@ -137,7 +155,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
     else if(pattern.type==='ArrayPattern')pattern.elements.forEach(item=>{if(item)prepare_pattern(item)});
     else if(pattern.type==='RestElement')prepare_pattern(pattern.argument);
   }
-  if(globalScript)for(const {node,parent} of declarations)for(const declaration of node.declarations){
+  if(globalScript||directVariables.size)for(const {node,parent} of declarations)for(const declaration of node.declarations){
     let affected=false;pattern_ids(declaration.id,id=>{affected||=virtual_variable(id)});
     if(!affected)continue;
     const loop=['ForInStatement','ForOfStatement'].includes(parent?.type)&&parent.left===node;
@@ -162,14 +180,14 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
   }
   if(globalVariables.size){
     const offset=ast.body.find(statement=>statement.directive===undefined)?.start??source.length;
-    edits.push([offset,offset,`var {}=(${contextName}.__declare_global_vars__?.(${JSON.stringify([...globalVariables])}),0);`]);
+    edits.push([offset,offset,`var {}=(${runtimeContext}.__declare_global_vars__?.(${JSON.stringify([...globalVariables])}),0);`]);
   }
-  if(!module&&!(evalMode&&root.strict)&&globalFunctions.size){
+  if(globalScript&&globalFunctions.size){
     // Global declaration instantiation has already selected and initialized the
     // final function for each name. Mirror its descriptor before authored code,
     // while leaving directive prologues, local eval bindings and modules intact.
     const offset=ast.body.find(statement=>statement.directive===undefined)?.start??source.length;
-    const publish=[...globalFunctions].map(name=>`var {}=${contextName}.__publish_global_function__(${JSON.stringify(name)},${name});`).join('');
+    const publish=[...globalFunctions].map(name=>`var {}=${runtimeContext}.__publish_global_function__(${JSON.stringify(name)},${name});`).join('');
     edits.push([offset,offset,publish]);
   }
   // Add only the outer var bindings a browser actually instantiates. Keep the
@@ -184,7 +202,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
       if(current===target)break;
     }
     if(blocked)continue;
-    if(target===root){
+    if(target===root&&globalScript){
       // Existing browser globals retain their virtual value until the authored
       // declaration executes. Publish that function to the virtual Window at
       // the same statement; leaving reads native would expose physical APIs.
@@ -193,17 +211,83 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
       // empty completion, including eval's last preceding expression value.
       const publication=[node.end,node.end,`;var {}=(${globalName===contextName?contextName+'.'+name+'='+name:contextName+'.__publish_legacy_function__('+JSON.stringify(name)+','+name+')'});${implicit?'}':''}`];
       edits.push(publication);legacy_publications.set(node,{publication,name,implicit});
-    }else target.names.add(name);
+    }else {target.names.add(name);if(target===root&&evalContext&&!root.strict&&root.evalScope)directVariables.add(name);}
   }
 
+  // Sloppy eval can add and delete bindings after this static scope pass.
+  // Opaque per-activation tokens select those native cells before globals.
+  let eval_index=0;
+  const fresh_eval_name=()=>{let name;do{name=contextName.replace(/\W/g,'_')+'_eval_scope_'+(++eval_index)}while(identifiers.has(name)||source.includes(name));identifiers.add(name);return name;};
+  const eval_owner=scope=>{while(scope.parent&&scope.kind!=='function'&&!scope.parameterScope)scope=scope.parent;return scope;};
+  const direct_calls=new WeakSet(),pending_evals=[];
+  const arrow_body_start=node=>{
+    let offset=node.params.at(-1)?.end??node.start;
+    while(offset<node.body.start){
+      if(source.startsWith('/*',offset)){const end=source.indexOf('*/',offset+2);offset=end<0?node.body.start:end+2;}
+      else if(source.startsWith('//',offset)){while(offset<node.body.start&&!/[\r\n\u2028\u2029]/.test(source[offset]))offset++;}
+      else if(source.startsWith('=>',offset))return offset+2;
+      else offset++;
+    }
+    return node.body.start;
+  };
+  if(directEval&&!preserveDirectEval){
+    const discover=node=>{
+      if(node.type==='CallExpression'&&!node.optional&&node.callee.type==='Identifier'&&node.callee.name==='eval'&&names.has('eval')&&(!scopes.get(node.callee).has('eval')||virtual_variable(node.callee))){
+        direct_calls.add(node);
+        const owner=eval_owner(scopes.get(node));
+        // A parameter eval creates its token inside the eval itself. Adding a
+        // parameter or a body binding would change native parameter semantics.
+        if(!owner.strict&&owner.parameterScope&&!owner.evalScope){owner.evalScope=fresh_eval_name();owner.evalScopeOptional=true;}
+        else if(!owner.strict&&!owner.evalScope&&(owner!==root||evalContext&&!evalContext.global)){
+          owner.evalScope=fresh_eval_name();
+          const body=owner.bodyNode||ast,statement=Array.isArray(body.body)?body.body.find(item=>item.directive===undefined):undefined;
+          if(Array.isArray(body.body)){
+            const offset=statement?.start??(body===ast?source.length:body.end-1);
+            edits.push(owner.evalInitializeEdit=[offset,offset,'const '+owner.evalScope+'='+runtimeContext+'.__eval_scope__();']);
+          }else{
+            const start=arrow_body_start(owner.functionNode);
+            edits.push(owner.evalInitializeEdit=[start,start,'{const '+owner.evalScope+'='+runtimeContext+'.__eval_scope__();return (']);
+            edits.push([owner.functionNode.end,owner.functionNode.end,');}']);
+          }
+        }
+      }
+      children(node,discover);
+    };
+    discover(ast);
+  }
+  if(evalContext&&!root.strict&&!evalContext.global&&root.evalScope){
+    const declared=[...root.names].filter(name=>names.has(name)&&!root.lexical.has(name));
+    if(declared.length||evalContext.initializeScope){
+      const offset=ast.body.find(item=>item.directive===undefined)?.start??source.length;
+      const initialize=evalContext.initializeScope?'var '+root.evalScope+';var {}=('+root.evalScope+'||='+runtimeContext+'.__eval_scope__(),0);':'';
+      edits.push([offset,offset,initialize+'var {}=('+runtimeContext+'.__eval_declare__('+root.evalScope+','+JSON.stringify(declared)+'),0);']);
+    }
+  }
+  const eval_scopes=scope=>{
+    const result=[];
+    for(let current=scope;current;current=current.parent)if(current.evalScope){
+      const name=current.evalScopeOptional?"(typeof "+current.evalScope+"==='undefined'?undefined:"+current.evalScope+")":current.evalScope;
+      if(!result.includes(name))result.push(name);
+    }
+    for(const name of evalContext?.scopes||[])if(!result.includes(name))result.push(name);
+    return result;
+  };
+  const eval_reference=(node,name,fallback,erase=false,withToken=null)=>{
+    const candidates=eval_scopes(scopes.get(node));if(!candidates.length)return fallback;
+    const parameter=fresh_eval_name();
+    const local='{get ['+JSON.stringify(name)+'](){return '+name+'},set ['+JSON.stringify(name)+']('+parameter+'){'+name+'='+parameter+'}}';
+    return (withToken?withToken+'.context':runtimeContext)+'.__eval_reference__(['+candidates.join(',')+'],'+JSON.stringify(name)+','+local+','+fallback+(erase?',()=>delete '+name:'')+')';
+  };
   let with_index=0;
   const with_name=()=>{let name;do{name='__sandstone_with_'+(++with_index)}while(identifiers.has(name)||source.includes(name));return name};
   function visit(node, parent, key, inWith=false,withToken=null) {
     if (node.type === "BlockStatement" && node.body[0]?.directive === "use asm") return;
+    const initialize=functionScopes.get(node)?.evalInitializeEdit;
+    if(initialize&&withToken)initialize[2]=initialize[2].replace(runtimeContext+'.__eval_scope__()',withToken+'.context.__eval_scope__()');
     const legacy=legacy_publications.get(node);
     if(legacy&&withToken)legacy.publication[2]=`;var {}=(${globalName===contextName?withToken+'.context.'+legacy.name+'='+legacy.name:withToken+'.context.__publish_legacy_function__('+JSON.stringify(legacy.name)+','+legacy.name+')'});${legacy.implicit?'}':''}`;
     if(node.type==='WithStatement'&&!preserveWith){
-      const token=with_name(),runtime=withContext;
+      const token=with_name(),runtime=withToken?withToken+'.context':withContext;
       edits.push([node.object.start,node.object.start,runtime+'.__enter_with__((']);
       edits.push([node.object.end,node.object.end,'),'+(withToken||'null')+')']);
       const block=node.body.type==='BlockStatement',offset=block?node.body.start+1:node.body.start;
@@ -211,6 +295,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
       if(!block)edits.push([node.body.end,node.body.end,'}',2]);
       visit(node.object,node,'object',inWith,withToken);visit(node.body,node,'body',true,token);return;
     }
+    if(direct_calls.has(node))pending_evals.push({node,withToken});
     const for_binding=node.type==='VariableDeclaration'&&(parent?.type==='ForStatement'&&key==='init'||['ForInStatement','ForOfStatement'].includes(parent?.type)&&key==='left');
     const default_expression=node.type==='ExportDefaultDeclaration'&&!['FunctionDeclaration','ClassDeclaration'].includes(node.declaration.type);
     // Mapping this introduces a leading parenthesis. Preserve the parser's
@@ -255,18 +340,46 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
       if(preserveDirectEval&&node.name==='eval'&&parent?.type==='CallExpression'&&key==='callee'&&!parent.optional)reference=false;
       if (reference) {
         const shorthand = parent?.type === "Property" && parent.shorthand && key === "value";
-        const value=withToken?`${withToken}.reference(${JSON.stringify(node.name)},${scopes.get(node).strict}).${node.name}`:`${globalName}.${node.name}`;
+        const fallback=eval_reference(node,node.name,withToken?withToken+'.context.__globals__':globalName,parent?.type==='UnaryExpression'&&parent.operator==='delete',withToken);
+        const base=withToken?`${withToken}.reference(${JSON.stringify(node.name)},${scopes.get(node).strict},${fallback})`:fallback;
+        const value=(withToken||eval_scopes(scopes.get(node)).length?'('+base+')':base)+'.'+node.name;
         // An identifier call has no property receiver. Native global methods
         // already bind their required Window; authored strict functions must
         // receive undefined here, including optional calls and template tags.
         const unbound=parent?.type==='CallExpression'&&key==='callee'||parent?.type==='TaggedTemplateExpression'&&key==='tag';
-        const expression=unbound?(withToken?`${withToken}.callee(${JSON.stringify(node.name)},${scopes.get(node).strict})`:'(0,'+value+')'):value;
+        const expression=unbound?(withToken?`${withToken}.callee(${JSON.stringify(node.name)},${scopes.get(node).strict},${fallback})`:'(0,'+value+')'):value;
         edits.push([node.start, node.end, `${shorthand||defaultShorthands.has(node) ? node.name + ": " : ""}${expression}`]);
       }
     }
     children(node, (child, childKey) => visit(child, node, childKey,inWith||node.type==='WithStatement'&&childKey==='body',withToken));
   }
-  visit(ast);
+  visit(ast,undefined,undefined,!!evalContext?.withToken,evalContext?.withToken||null);
+  const render=(start,end)=>{
+    let result='',offset=start;
+    for(const [from,to,text] of edits.filter(([from,to])=>from>=start&&to<=end).sort((a,b)=>a[0]-b[0]||a[1]-b[1]||(a[3]||0)-(b[3]||0))){
+      if(from<offset)continue;result+=source.slice(offset,from)+text;offset=to;
+    }
+    return result+source.slice(offset,end);
+  };
+  // Finish inner calls first so argument rewrites survive the outer edit.
+  // Only the selected branch evaluates arguments; a replaced eval keeps its
+  // ordinary call path, while intrinsic eval retains the caller's environment.
+  for(const {node,withToken} of pending_evals.sort((a,b)=>b.node.start-a.node.start)){
+    const scope=scopes.get(node),owner=eval_owner(scope),locals=new Set(evalContext?.locals);
+    for(let current=scope;current;current=current.parent){
+      for(const name of current===root&&globalScript?current.lexical:current.names)if(current!==root||!directVariables.has(name))locals.add(name);
+    }
+    const metadata={strict:scope.strict,global:owner===root&&(!evalContext||!!evalContext.global),spread:node.arguments.some(argument=>argument.type==='SpreadElement'),
+      locals:[...locals],scopes:eval_scopes(scope),declarationScope:owner.evalScope,initializeScope:!!owner.parameterScope,
+      privateNames:[...privateNames],url,importReferrer,withToken:withToken||undefined};
+    const args=node.arguments.length?render(node.arguments[0].start,node.arguments.at(-1).end):'';
+    const runtime=withToken?withToken+'.context':runtimeContext;
+    const reference=eval_reference(node.callee,'eval',withToken?runtime+'.__globals__':globalName,false,withToken);
+    const callee=withToken?withToken+'.evaluation("eval",'+reference+')':'['+reference+'.eval,undefined]';
+    const replacement='('+runtime+'.__eval_select__('+callee+')?eval('+(metadata.spread?'...':'')+runtime+'.__eval_prepare__(['+args+'],'+JSON.stringify(metadata)+')):'+runtime+'.__eval_custom__()('+args+'))';
+    for(let index=edits.length-1;index>=0;index--)if(edits[index][0]>=node.start&&edits[index][1]<=node.end&&edits[index][0]<node.end&&!(edits[index][0]===node.start&&edits[index][1]===node.start))edits.splice(index,1);
+    edits.push([node.start,node.end,replacement]);
+  }
   for(const {declaration,parent} of movedInitializers){
     const init=declaration.init,parts=[];let offset=init.start;
     for(const [start,end,text] of edits.filter(([start,end])=>start>=init.start&&end<=init.end).sort((a,b)=>a[0]-b[0]||a[1]-b[1]||(a[3]||0)-(b[3]||0))){
