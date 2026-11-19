@@ -28,6 +28,11 @@ export function create_module_namespace(value){
 }
 
 export const worker_module_intrinsics=freeze({
+  setName(value,name){
+    const descriptor=getOwnPropertyDescriptor(value,'name');
+    if(descriptor&&'value'in descriptor&&descriptor.configurable&&!descriptor.writable&&descriptor.value!==name)defineProperty(value,'name',{...descriptor,value:name});
+    return value;
+  },
   Object:new Proxy(NativeObject,{get(target,key){
     if(key==='freeze')return value=>value&&getPrototypeOf(value)===null&&value[NativeSymbol.toStringTag]==='Module'?create_module_namespace(value):freeze(value);
     return get(target,key,target);

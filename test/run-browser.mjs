@@ -26,6 +26,8 @@ const workerTest = await readFile(new URL("workers.playwright.js", import.meta.u
 const verifyWorkers = runInThisContext(`(${workerTest})`);
 const workerCycleTest=await readFile(new URL('worker-cycles.playwright.js',import.meta.url),'utf8');
 const verifyWorkerCycles=runInThisContext(`(${workerCycleTest})`);
+const workerNamesTest=await readFile(new URL('worker-names.playwright.js',import.meta.url),'utf8');
+const verifyWorkerNames=runInThisContext(`(${workerNamesTest})`);
 const workerScopeTest=await readFile(new URL('worker-scopes.playwright.js',import.meta.url),'utf8');
 const verifyWorkerScopes=runInThisContext(`(${workerScopeTest})`);
 const workerSettingsTest=await readFile(new URL('worker-settings.playwright.js',import.meta.url),'utf8');
@@ -330,6 +332,7 @@ try {
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
     result.passed.push(...await timed(verifyWorkerCycles(page), 'Cyclic worker module fixture'));
+    result.passed.push(...await timed(verifyWorkerNames(page), 'Worker function name fixture'));
     result.passed.push(...await timed(verifyWorkerScopes(page), 'Worker script scope fixture'));
     result.passed.push(...await timed(verifyWorkerSettings(page), 'Worker environment settings fixture'));
     result.passed.push(...await timed(verifyNetworkAPIs(page), 'Native network API exposure fixture'));

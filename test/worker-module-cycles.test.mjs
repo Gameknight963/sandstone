@@ -18,7 +18,9 @@ test('Cyclic worker compiler executes live exports, namespace bridges and later 
     'empty-a.js':'"use client";import "./empty-b.js";',
     'empty-b.js':'import "./empty-a.js";',
     'then-a.js':'import "./then-b.js";export function then(resolve){globalThis.workerThenRuns++;resolve(99)}',
-    'then-b.js':'import "./then-a.js";'
+    'then-b.js':'import "./then-a.js";',
+    'names-a.js':'#!/usr/bin/env node\nimport * as b from "./names-b.js";export function open(){}export const render=()=>0;export default function(){};export function names(){return [open.name,render.name,b.early,b.names()]}',
+    'names-b.js':'import {open as parentOpen} from "./names-a.js";const __ctx__=null,__get_this__=null;export const early=parentOpen.name;export function open(){}export const render=function(){};export default class {static observed=this.name;}export function names(){switch(parentOpen.name){case open.name:function open(){};return [open.name,render.name,__ctx__,__get_this__];default:return ["wrong",open.name];}}'
   };
   const loader=new ModuleLoader({
     fetch:async url=>new Response(sources[url.slice(base.length)]),
@@ -32,7 +34,7 @@ test('Cyclic worker compiler executes live exports, namespace bridges and later 
   // The published browser compiler fetches its bundled WASM. Node has no file:
   // fetch implementation, so serve only that exact local asset to the test.
   globalThis.fetch=(input,...args)=>String(input)===wasmURL.href?readFile(wasmURL).then(bytes=>new Response(bytes,{headers:{'Content-Type':'application/wasm'}})):originalFetch(input,...args);
-  globalThis.__ctx__={__globals__:{Object,Symbol},__module_intrinsics__:worker_module_intrinsics,__module_meta__:url=>loader.meta(url),__import__:(base,specifier,options)=>loader.import(specifier,base,options)};
+  globalThis.__ctx__={__get_this__:value=>value,__globals__:{Object,Symbol},__module_intrinsics__:worker_module_intrinsics,__module_meta__:url=>loader.meta(url),__import__:(base,specifier,options)=>loader.import(specifier,base,options)};
   try{
     const first=await loader.import('./a.js',base),again=await loader.import('./a.js',base);
     assert.equal(first,again);assert.equal(Object.prototype.toString.call(first),'[object Module]');
@@ -45,6 +47,11 @@ test('Cyclic worker compiler executes live exports, namespace bridges and later 
     const empty=await loader.import('./empty-a.js',base);
     assert.deepEqual(Object.keys(empty),[]);assert.equal(Object.prototype.toString.call(empty),'[object Module]');
     globalThis.workerThenRuns=0;assert.equal(await loader.import('./then-a.js',base),99);assert.equal(globalThis.workerThenRuns,1);
+    loader.preamble='__ctx__.started=(__ctx__.started||0)+1;';
+    const named=await loader.import('./names-a.js',base),other=await loader.import('./names-b.js',base);
+    assert.deepEqual(named.names(),['open','render','open',['open','render',null,null]]);
+    assert.equal(named.default.name,'default');assert.equal(other.default.name,'default');assert.equal(other.default.observed,'default');
+    assert.ok(globalThis.__ctx__.started>0);
   }finally{globalThis.fetch=originalFetch;if(originalContext===undefined)delete globalThis.__ctx__;else globalThis.__ctx__=originalContext;delete globalThis.badWorkerValue;delete globalThis.workerThenRuns;}
 });
 

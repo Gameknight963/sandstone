@@ -1,10 +1,12 @@
 import {parse} from './javascript_parser.mjs';
 import {rewrite_source} from './rewrite/javascript.mjs';
+import {WorkerNames} from './rewrite/worker_names.mjs';
 
 // Compile only unresolved worker graphs. Each record is an entry, so Rollup
 // emits native ESM facades for later imports of any member of the cycle.
 export async function compile_worker_cycles(entry,records,loader,rollup){
   const byId=new Map([...records].map(record=>[record.nativeKey,record]));
+  const names=new WorkerNames([...records].map(record=>record.source));
   const input=Object.fromEntries([...records].map((record,index)=>['entry'+index,record.nativeKey]));
   const namespaceIds=new Map([...records].map(record=>[record.nativeKey+':namespace',record]));
   for(const [index,id] of [...namespaceIds.keys()].entries())input['namespace'+index]=id;
@@ -28,12 +30,13 @@ export async function compile_worker_cycles(entry,records,loader,rollup){
         if(record.type!=='javascript')throw new TypeError('Unsupported worker module type: '+record.type);
         const rewritten=loader.rewrite(record.source,{
           module:true,url:record.url,importReferrer:{key:record.key},stripAttributes:true,
+          contextName:names.contextAlias,thisName:names.contextAlias+'.__get_this__',
           resolveNamespace:specifier=>loader.records.get(loader.map.resolve(specifier,record.url))?.namespaceBlob,
           resolve(specifier){const dependency=loader.records.get(loader.map.resolve(specifier,record.url));return dependency.blob||dependency.nativeKey;}
         });
         // Distinguish authored built-in references from helpers the compiler
         // will add later. Public Object.freeze must retain native semantics.
-        return rewrite_source(rewritten,['Object','Symbol'],{module:true,contextName:'__ctx__',globalName:'__ctx__.__globals__',rewriteThis:false});
+        return names.prepare(rewrite_source(rewritten,['Object','Symbol'],{module:true,contextName:names.contextAlias,globalName:names.contextAlias+'.__globals__',rewriteThis:false}));
       }
     }]
   });
@@ -41,6 +44,9 @@ export async function compile_worker_cycles(entry,records,loader,rollup){
     const {output}=await bundle.generate({format:'es',entryFileNames:'[name].js',chunkFileNames:'chunk-[hash].js',minifyInternalExports:false,generatedCode:{symbols:true}});
     const chunks=new Map(output.filter(item=>item.type==='chunk').map(chunk=>[chunk.fileName,chunk]));
     if(chunks.size!==output.length)throw new TypeError('Unexpected worker module asset');
+    // A separate trusted module cannot be shadowed by a binding in an authored
+    // module. Every chunk imports the same context before its body executes.
+    const contextURL=loader.createURL('export default __ctx__;\n//# sourceURL='+entry.url.replace(/[\r\n\u2028\u2029]/g,'')+'\n','text/javascript',entry.url);
     const urls=new Map(),pending=new Set(chunks.keys());
     while(pending.size){
       let progressed=false;
@@ -57,8 +63,11 @@ export async function compile_worker_cycles(entry,records,loader,rollup){
         for(const [start,end,text] of edits.sort((a,b)=>b[0]-a[0]))source=source.slice(0,start)+text+source.slice(end);
         // Compiler namespace helpers must retain native built-ins even when a
         // classic worker has published replacement Object/Symbol globals.
-        source=rewrite_source(source,['Object','Symbol'],{module:true,contextName:'__ctx__.__module_intrinsics__',rewriteThis:false});
-        if(loader.preamble)source=loader.preamble+'\n'+source;
+        source=rewrite_source(names.finish(source,contextURL),['Object','Symbol'],{module:true,contextName:names.alias,rewriteThis:false});
+        if(loader.preamble){
+          const offset=source.startsWith('#!')?source.indexOf('\n')+1||source.length:0;
+          source=source.slice(0,offset)+'\n'+loader.preamble.replaceAll('__ctx__',names.contextAlias)+'\n'+source.slice(offset);
+        }
         const record=byId.get(chunk.facadeModuleId),label=record?.url||entry.url;
         source+='\n//# sourceURL='+label.replace(/[\r\n\u2028\u2029]/g,'')+'\n';
         urls.set(name,loader.createURL(source,'text/javascript',label));pending.delete(name);progressed=true;
