@@ -1,7 +1,7 @@
 import { ctx, intercept_property } from "../context.mjs";
 import * as network from "../network.mjs";
 import { rewrite_srcset } from "../srcset.mjs";
-import {register_media_attributes,render_media_attribute,detach_media_attribute_node,media_placeholder,pending_media_attribute,raw_media_attribute} from '../media_attributes.mjs';
+import {register_media_attributes,render_media_attribute,detach_media_attribute_node,media_placeholder,placeholder_media_attribute,raw_media_attribute} from '../media_attributes.mjs';
 import {on_dom_construction} from '../dom_operations.mjs';
 import {listen_runtime} from '../runtime_events.mjs';
 import {get_document_encoding} from '../document_encoding.mjs';
@@ -195,9 +195,9 @@ export function rewrite_media(element,initial_sources) {
   },key=>{
     authored.set(key,null);
     const state=states.get(key);
-    if(state){state.generation++;state.controller?.abort();state.release(state.urls);state.urls=[];}
+    if(state){state.generation++;state.pending=false;state.controller?.abort();state.release(state.urls);state.urls=[];}
     render_media_attribute(element,key,null);
-  });
+  },key=>states.get(key)?.pending);
   if(element instanceof HTMLImageElement){
     observe_policy(element,{attributes:true,attributeFilter:['crossorigin']});
   }
@@ -207,7 +207,7 @@ export function rewrite_media(element,initial_sources) {
   for (const key of properties)render_media_attribute(element,key,key==='srcset'?'':media_placeholder);
 
   for (const key of properties) {
-    const state = {generation: 0, urls: [], controller: null,waiting:false,requestElement:null};
+    const state = {generation: 0, urls: [], controller: null,waiting:false,requestElement:null,pending:false};
     states.set(key, state);
     const release = urls => {
       for (const url of urls) { URL.revokeObjectURL(url); delete network.known_urls[url]; }
@@ -221,6 +221,7 @@ export function rewrite_media(element,initial_sources) {
       const request_encoding=get_document_encoding(active?globalThis.document:document);
       session.active=active;
       const generation = ++state.generation;
+      state.pending=true;
       state.controller?.abort();
       const controller = state.controller = new AbortController();
       if(session.readCurrent)session.previousCurrentSrc=reflected_current(element,session.readCurrent());
@@ -255,6 +256,7 @@ export function rewrite_media(element,initial_sources) {
       };
       // Local sources retain their synchronous property behavior.
       if (!active || key !== "srcset" && (!value || /^(data|blob):/i.test(value))) {
+        state.pending=false;
         descriptor.set.call(element, value);
         done();
         return;
@@ -274,15 +276,16 @@ export function rewrite_media(element,initial_sources) {
             mode:crossOrigin===null?state.requestElement instanceof HTMLTrackElement?'same-origin':'no-cors':'cors',referrerPolicy:state.requestElement.referrerPolicy};
           const rewritten = key === "srcset" ? await rewrite_srcset(value, async source => {
             try { return await resource(source); }
-            catch (error) { if (controller.signal.aborted) throw error; return "data:application/octet-stream,"; }
+            catch (error) { if (controller.signal.aborted) throw error; return "data:application/octet-stream,failed"; }
           }) : await resource(value);
           if (generation !== state.generation) { release(urls); return; }
           state.urls = urls;
           descriptor.set.call(element, rewritten);
         } catch (error) {
           release(urls);
+          if(generation===state.generation)state.pending=false;
           if (generation === state.generation && !controller.signal.aborted) dispatch.call(element,new Event("error"));
-        } finally { done(); }
+        } finally { if(generation===state.generation)state.pending=false;done(); }
       })();
     }
     descriptor = element instanceof HTMLImageElement?image_properties[key]:intercept_property(element, key, {
@@ -311,7 +314,14 @@ export function rewrite_media(element,initial_sources) {
   // Removing a temporary source can produce a native empty-source error.
   listen_runtime(element,"error",event=>{
     if (!event.isTrusted) return;
-    if (properties.every(key => authored.get(key)===null||pending_media_attribute(element,key))) event.stopImmediatePropagation();
+    if (!properties.every(key => authored.get(key)===null||placeholder_media_attribute(element,key))) return;
+    // A picture source can be selected without an authored URL on the image.
+    // Its real decode failure must still reach the page and document loader.
+    if(element instanceof HTMLImageElement){
+      const current=image_properties.currentSrc.get.call(element);
+      if(current&&current!==media_placeholder)return;
+    }
+    event.stopImmediatePropagation();
   }, true);
   for (const [key, value] of authored) if (value !== null) states.get(key).update(value,true);
 }

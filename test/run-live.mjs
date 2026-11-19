@@ -8,8 +8,12 @@ import {chromium} from 'playwright-core';
 import {create_relay_server} from '../example/http.mjs';
 import {server as wisp,logging} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
 import {track_client_sockets} from './client-sockets.mjs';
+import {interact_editor} from './live-editors.mjs';
 
 const sites=[
+  {id:'jspaint',url:'https://jspaint.app/',editor:true},
+  {id:'mermaid',url:'https://mermaid.live/',editor:true},
+  {id:'diagrams',url:'https://app.diagrams.net/',editor:true},
   {id:'discourse',url:'https://discuss.python.org/latest'},
   {id:'openstreetmap',url:'https://www.openstreetmap.org/#map=5/39.828/-98.579'},
   {id:'mastodon',url:'https://mastodon.social/explore'},
@@ -64,6 +68,7 @@ async function wait(page,proxy,expression){
 const summary=(page,proxy)=>read(page,proxy,'({title:document.title,heading:document.querySelector("h1")?.textContent.trim()||"",links:document.links.length})');
 async function interact(page,proxy,site){
   const surface=proxy?page.frameLocator('iframe[frame-id]'):page;
+  if(site.editor)return interact_editor(page,proxy,site,{surface,read,wait});
   if(site.id==='excalidraw'){
     await surface.getByRole('button',{name:'Rectangle',exact:true}).click();
     const box=await surface.locator('canvas.interactive').boundingBox();
@@ -229,7 +234,8 @@ try{
       const response=await native.goto(site.url,{waitUntil:'domcontentloaded'});
       assert.ok(response.ok(),'Native page returned '+response.status());
       await native.waitForTimeout(1000);
-      result.native={status:response.status(),...await summary(native,false),interaction:await deadline(interact(native,false,site),'Native interaction',site.id==='react'?40000:25000)};
+      const interaction=await deadline(interact(native,false,site),'Native interaction',site.id==='react'?40000:25000);
+      result.native={status:response.status(),...await summary(native,false),interaction};
     }catch(error){result.status='baseline-unavailable';result.error=error.message;}
     finally{await nativeContext.close();}
     if(!result.native){results.push(result);console.log(JSON.stringify(result));continue;}
@@ -252,9 +258,10 @@ try{
       await page.evaluate(port=>sandstone.network.set_websocket('ws://127.0.0.1:'+port+'/'),server.address().port);
       await deadline(page.evaluate(url=>main_frame.navigate_to(url),site.url),'Proxy navigation');
       await page.waitForTimeout(1000);
-      result.proxy={...await summary(page,true),interaction:await deadline(interact(page,true,site),'Proxy interaction',site.id==='react'?40000:25000)};
-      assert.equal(result.proxy.title,result.native.title,'Initial document title differs');
-      assert.ok(result.proxy.links>0,'No proxied links rendered');
+      const interaction=await deadline(interact(page,true,site),'Proxy interaction',site.id==='react'?40000:25000);
+      result.proxy={...await summary(page,true),interaction};
+      assert.equal(result.proxy.title,result.native.title,'Document title differs after interaction');
+      if(!site.editor)assert.ok(result.proxy.links>0,'No proxied links rendered');
       assert.deepEqual(result.proxy.interaction,result.native.interaction,'Interaction result differs from native');
       assert.deepEqual(direct,[],'A proxied page attempted direct HTTP');
       assert.deepEqual(errors,[],'A proxied page raised script errors');

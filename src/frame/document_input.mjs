@@ -54,18 +54,36 @@ function styles(current){
 }
 function images(current){
   const pending=[];
+  if(current.controller.signal.aborted)return pending;
   walk_resources(document,node=>{
     if(!(node instanceof HTMLImageElement)||node.loading==='lazy')return;
-    if(!node.getAttribute('src')&&!node.getAttribute('srcset')&&!(node.parentElement instanceof HTMLPictureElement&&node.parentElement.querySelector('source[srcset]')))return;
+    const requested=()=>!!node.getAttribute('src')||!!node.getAttribute('srcset')||node.parentElement instanceof HTMLPictureElement&&!!node.parentElement.querySelector('source[srcset]');
+    if(!requested())return;
     const waiting=()=>!!node.getAttribute('src')&&pending_media_attribute(node,'src')||!!node.getAttribute('srcset')&&pending_media_attribute(node,'srcset')||node.parentElement instanceof HTMLPictureElement&&[...node.parentElement.querySelectorAll('source[srcset]')].some(source=>!!source.getAttribute('srcset')&&pending_media_attribute(source,'srcset'));
     if(node.complete&&!waiting())return;
     pending.push(new Promise(resolve=>{
-      const cleanup=()=>{unlisten_runtime(node,'load',loaded);unlisten_runtime(node,'error',loaded);current.controller.signal.removeEventListener('abort',cleanup);resolve();};
-      const loaded=event=>{if(event.type==='error'&&!event.isTrusted||!waiting())cleanup();};
+      const observer=new MutationObserver(()=>{if(!requested())cleanup();});
+      const cleanup=()=>{observer.disconnect();unlisten_runtime(node,'load',loaded);unlisten_runtime(node,'error',loaded);current.controller.signal.removeEventListener('abort',cleanup);resolve();};
+      // Error/load handlers can replace the source. Check after they run so a
+      // fallback request still delays the document, while removal can settle
+      // without waiting for a resource event that the browser never dispatches.
+      const loaded=()=>queueMicrotask(()=>{if(!waiting())cleanup();});
+      observer.observe(node,{attributes:true,attributeFilter:['src','srcset']});
       listen_runtime(node,'load',loaded);listen_runtime(node,'error',loaded);current.controller.signal.addEventListener('abort',cleanup,{once:true});
     }));
   });
   return pending;
+}
+
+async function wait_image_loads(current,pending=images(current)){
+  // Load/error handlers and late scripts can create another image request.
+  // Drain both queues until their handlers leave no outstanding work.
+  do{
+    await Promise.allSettled(pending);
+    await wait_script_loads(current.controller.signal);
+    if(current.controller.signal.aborted)return;
+    pending=images(current);
+  }while(pending.length||pending_script_loads());
 }
 
 function prepare_script(current,node,input){
@@ -128,11 +146,12 @@ function close(current){
   const imageLoads=current.stream.closed?images(current):[];
   if(live()&&current.stream.closed&&!current.stream.pendingResources&&!current.deferred.length&&!current.async.length&&!imageLoads.length&&!pending_script_loads()){
     emit(document,'DOMContentLoaded');
-    if(!current.source&&!pending_script_loads()){complete();current.finished=Promise.resolve();return;}
+    const lateImages=images(current);
+    if(!current.source&&!pending_script_loads()&&!lateImages.length){complete();current.finished=Promise.resolve();return;}
     // Source parsing yields for DOMContentLoaded microtasks before deciding
     // whether load is still delayed. Explicit document.close stays synchronous
     // when it has no pending resources, as in native written documents.
-    current.finished=Promise.resolve().then(()=>wait_script_loads(current.controller.signal)).then(()=>{if(live())complete();});return;
+    current.finished=Promise.resolve().then(()=>wait_image_loads(current,lateImages)).then(()=>{if(live())complete();});return;
   }
   current.finished=parsed.then(async()=>{
     if(!live())return;interactive();
@@ -140,7 +159,7 @@ function close(current){
     for(const execute of current.deferred){await execute();if(!live())return;}
     emit(document,'DOMContentLoaded');
     await Promise.allSettled([...current.async,current.stream.settled(),...styles(current),...imageLoads,...images(current)]);
-    await wait_script_loads(current.controller.signal);if(!live())return;complete();
+    await wait_image_loads(current);if(!live())return;complete();
   }).catch(error=>{if(!current.controller.signal.aborted)console.error(error);});
 }
 

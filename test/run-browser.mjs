@@ -11,6 +11,8 @@ import {verifyFormEncoding} from './form-encoding.playwright.mjs';
 import {verifyRetiredReadiness} from './iframe-retired-readiness.playwright.mjs';
 import {verifyHTMLURLs} from './html-urls.playwright.mjs';
 import {verifyURLSurfaces} from './url-surfaces.playwright.mjs';
+import {verifyImageLoads} from './image-loads.playwright.mjs';
+import {verifyFrameFocus} from './frame-focus.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -420,6 +422,8 @@ try {
     result.passed.push(...await timed(verifyRangeCopy(page), 'Range copy fixture'));
     result.passed.push(...await timed(verifyCSS(page), "CSS fixture"));
     result.passed.push(...await timed(verifyMedia(page), "Media fixture"));
+    result.passed.push(...await timed(verifyImageLoads(page), 'Image load completion fixture'));
+    result.passed.push(...await timed(verifyFrameFocus(page), 'Virtual top-level focus fixture'));
     result.passed.push(...await timed(verifyAudio(page), 'Audio constructor fixture'));
     result.passed.push(...await timed(verifyImageConstructor(page), 'Image constructor fixture'));
     result.passed.push(...await timed(verifyMediaAttributes(page), 'Media attribute fixture'));

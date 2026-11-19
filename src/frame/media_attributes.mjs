@@ -19,16 +19,21 @@ export const media_placeholder='data:application/octet-stream,';
 export const raw_media_attribute=(element,key)=>methods.getAttributeNS.call(element,null,key);
 export const media_attribute_mirror=element=>states.get(element)?.mirror;
 export function pending_media_attribute(element,key){
+  const state=states.get(element);
+  if(state?.pending)return !!state.pending(key);
+  return placeholder_media_attribute(element,key);
+}
+export function placeholder_media_attribute(element,key){
   const state=states.get(element),source=methods.getAttributeNS.call(element,null,key);
   return source===media_placeholder||key==='srcset'&&source===''&&state.authored.get(key)!=='';
 }
 
-export function register_media_attributes(element,authored,update,remove){
+export function register_media_attributes(element,authored,update,remove,pending){
   if(states.has(element))return;
   inert??=document.implementation.createHTMLDocument('');
   const mirror=create.call(inert,'http://www.w3.org/1999/xhtml',element.localName);
   for(const [key,source] of authored)if(source!==null)methods.setAttribute.call(mirror,key,source);
-  const state={element,mirror,authored,update,remove,values:new WeakMap()};
+  const state={element,mirror,authored,update,remove,pending,values:new WeakMap()};
   states.set(element,state);maps.set(attributes.call(element),state);
   for(const [key,source] of authored){const node=attr(element,null,key);if(node)state.values.set(node,source);}
 }
