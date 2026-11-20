@@ -1,12 +1,21 @@
 import {ctx,convert_url,run_script_safe} from '../context.mjs';
 import * as loader from '../loader.mjs';
 import {document_referrer_policy} from './document.mjs';
-import {download} from '../downloads.mjs';
+import {download,capture_download} from '../downloads.mjs';
 import {install_link_events} from '../link_events.mjs';
 import {install_hyperlinks} from '../hyperlinks.mjs';
 import {install_html_urls} from '../html_urls.mjs';
 import {navigate_target,navigation_target} from '../navigation_targets.mjs';
 import {submit} from '../rewrite/form.mjs';
+const get_attribute=globalThis.Element?.prototype.getAttribute;
+
+function prepare_activation(element){
+  const hint=get_attribute.call(element,'download');if(hint===null)return;
+  const value=get_attribute.call(element,'href');if(value===null)return;
+  let href;try{href=convert_url(value,ctx.document.baseURI,loader.character_encoding);}catch{return;}
+  if(!/^(blob|data):/.test(href))return;
+  const activate=capture_download(href,hint);return()=>activate().catch(console.error);
+}
 
 function activate(element) {
   if(!element.hasAttribute('href'))return;
@@ -25,5 +34,5 @@ function activate(element) {
 if(globalThis.document){
   install_html_urls(()=>ctx.document.baseURI,()=>ctx.location.href);
   install_hyperlinks(()=>ctx.document.baseURI);
-  install_link_events({enabled:()=>loader.is_loaded,activate,submit});
+  install_link_events({enabled:()=>loader.is_loaded,activate,submit,prepareActivation:prepare_activation});
 }

@@ -14,7 +14,7 @@ const gates=document_states('link-gates');
 export function configure_link_events(){gates.set(globalThis.document,own_gate);}
 export function finish_event_listener(event){finish_listener(event);}
 export function forget_document_listeners(nodes){forget_listeners(nodes);}
-export function install_link_events({enabled,activate,submit}) {
+export function install_link_events({enabled,activate,submit,prepareActivation}) {
   const records=document_states('link-events'),prepared=new WeakSet(),listeners=document_states('link-listeners');
   const active_entries=document_states('link-entries');
   const untrack=(target,entry)=>active_entries.get(target)?.delete(entry);
@@ -41,7 +41,9 @@ export function install_link_events({enabled,activate,submit}) {
     record.queued=false;pending.delete(record);clearTimeout(record.timer);
     if(!record.duringCancelled)record.action();
   }
-  function flush(){for(const record of [...pending])if(record.event.eventPhase===Event.NONE)complete(record);}
+  // Capture local download resources after programmatic dispatch finishes,
+  // before its caller can revoke their URLs. Routing still uses its task.
+  function flush(){for(const record of [...pending])if(record.event.eventPhase===Event.NONE){if(record.event.type==='click')record.prepare?.();else complete(record);}}
   function schedule(record){if(record?.queued)record.schedule();}
   finish_listener=event=>{const record=records.get(event);if(event?.type==='submit'&&record?.immediate)schedule(record);};
   // Trusted user input has no script-level dispatch wrapper to flush it.
@@ -79,11 +81,15 @@ export function install_link_events({enabled,activate,submit}) {
     if(record?.queued)return;
     const cancelled=record?record.cancelled:prevented.get.call(event),activated=!!record?.activated;
     record={cancelled,duringCancelled:cancelled,queued:true,passive:false,activated:true,event,action,complete,schedule:()=>queueMicrotask(()=>complete(record))};records.set(event,record);
+    record.prepare=()=>{
+      if(record.prepared)return;record.prepared=true;
+      if(event.type==='click'&&!record.duringCancelled){const action=prepareActivation?.(element);if(action)record.action=action;}
+    };
     prevent.call(event);
     // A native MouseEvent's activation is handled once even if dispatched again.
     if(!activated){
+      pending.add(record);
       if(event.type==='submit'){
-        pending.add(record);
         for(const node of event.composedPath()){prepare_tail(node,true);prepare_tail(node,false);}
       }
       record.timer=setTimeout(()=>complete(record),0);

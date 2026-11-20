@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 const bytes=Buffer.from([68,111,119,110,108,111,97,100,10,0,1,255]);
-export const download_cases=['blob','data','attribute','header','unicode','encoded','inline','attachment','binary','fallback','redirect','noreferrer','policy','detached','shadow','history'];
+export const download_cases=['blob','revoked-blob','detached-revoked-blob','data','attribute','header','unicode','encoded','inline','attachment','binary','fallback','redirect','noreferrer','policy','detached','shadow','history'];
 
 export function download_fixture(){
   const requests=[];
@@ -46,14 +46,14 @@ export const prepare_downloads=client=>`(()=>{
     if(name==='redirect'){link.href='/downloads/redirect?client='+${JSON.stringify(client)}+'&name=redirect';link.download='';}
     if(name==='noreferrer')link.rel='noreferrer';
     if(name==='policy')link.referrerPolicy='origin';
-    if(name==='blob')link.href=URL.createObjectURL(new Blob(['local blob'],{type:'text/plain'}));
+    if(name==='blob'||name.endsWith('revoked-blob'))link.href=URL.createObjectURL(new Blob(['local blob'],{type:'text/plain'}));
     if(name==='data')link.href='data:text/plain;charset=UTF-8,local%20data';
     if(name==='shadow'){const host=document.createElement('div');document.body.append(host);host.attachShadow({mode:'open'}).append(link);}
-    else if(name!=='detached')document.body.append(link);
+    else if(name!=='detached'&&name!=='detached-revoked-blob')document.body.append(link);
     downloadLinks[name]=link;
   }
   const canceled=document.createElement('a');canceled.href=endpoint('canceled');canceled.download='canceled.txt';canceled.addEventListener('click',event=>event.preventDefault());document.body.append(canceled);downloadLinks.canceled=canceled;
-  const button=document.createElement('button');button.id='download-trigger';button.textContent='Export';button.onclick=()=>downloadLinks[window.downloadAction].click();document.body.append(button);
+  const button=document.createElement('button');button.id='download-trigger';button.textContent='Export';button.onclick=()=>{const link=downloadLinks[window.downloadAction];link.click();if(window.downloadAction.endsWith('revoked-blob'))URL.revokeObjectURL(link.href);};document.body.append(button);
   return true;
 })()`;
 
@@ -70,11 +70,11 @@ export async function verify_downloads(page,evaluate,client,activate){
     const download=await pending;
     assert.equal(await download.failure(),null,name);
     const content=await readFile(await download.path());
-    const expected=name==='blob'?Buffer.from('local blob'):name==='data'?Buffer.from('local data'):bytes;
+    const expected=name==='blob'||name.endsWith('revoked-blob')?Buffer.from('local blob'):name==='data'?Buffer.from('local data'):bytes;
     assert.deepEqual(content,expected,'Downloaded bytes differ for '+name);
     results.push({name,filename:download.suggestedFilename(),body:content.toString('base64')});
     assert.equal(await evaluate('downloadMarker'),'original','A download replaced the original document');
-    if(!['blob','data'].includes(name)){
+    if(!['blob','data'].includes(name)&&!name.endsWith('revoked-blob')){
       const seen=name==='redirect'?'redirect-final':name,deadline=Date.now()+2000;
       while(!await evaluate('document.cookie.split("; ").includes('+JSON.stringify('download_seen='+seen)+')')){
         if(Date.now()>deadline)throw new Error('Download response cookies were not reflected in the original page: '+name);
