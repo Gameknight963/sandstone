@@ -49,7 +49,7 @@ async page=>{
         console.log('SCRIPT_LABEL '+${JSON.stringify(proxy?'proxy':'native')}+' constructed '+path);
         const timer=setTimeout(()=>{console.log('SCRIPT_LABEL worker timeout '+path);worker.terminate();reject(new Error('Stack label worker timed out: '+path));},10000);
         worker.onmessage=event=>{console.log('SCRIPT_LABEL message '+event.data.kind);workers[event.data.kind]=event.data;if(++received===count){clearTimeout(timer);worker.terminate();resolve();}};
-        worker.onerror=event=>{clearTimeout(timer);event.preventDefault();worker.terminate();reject(new Error(event.message));};
+        worker.onerror=event=>{console.log('SCRIPT_LABEL worker error '+path+': '+event.message);clearTimeout(timer);event.preventDefault();worker.terminate();reject(new Error(event.message));};
       });
     }
     return JSON.stringify({scripts:stackLabels,workers});
@@ -75,5 +75,6 @@ async page=>{
     if(!requests.includes('/script-labels/redirect')||!requests.includes('/script-labels/assets/redirected.js'))throw new Error('Script redirect chain was not exercised: '+JSON.stringify(requests));
     if(JSON.stringify(actual)!==JSON.stringify(expected))throw new Error('Virtual script filename parity: '+JSON.stringify({expected,actual,diagnostics}));
     return ['Virtual filenames and stack-derived asset URLs for classic/module scripts', 'Redirected script filenames, authored sourceURL labels and inline document URLs', 'Virtual filenames in classic/module workers and importScripts dependencies'];
-  }finally{page.off('console',workerLog);stage('native context cleanup');await nativeContext.close();}
+  }catch(error){stage('failure: '+(error.stack||error));throw error;}
+  finally{page.off('console',workerLog);stage('native context cleanup');await nativeContext.close();}
 }
