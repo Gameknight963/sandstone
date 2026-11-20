@@ -152,7 +152,7 @@ export class FileService{
   }
   release(owner){for(const [token,lease] of this.leases)if(lease.owner===owner)this.drop(token);}
   async clear(hostname){
-    for(const [token,lease] of this.leases){const host=new URL(lease.origin).hostname;if(!hostname||host===hostname||host.endsWith('.'+hostname))this.drop(token);}
+    for(const [token,lease] of this.leases){const host=new URL(lease.origin).hostname;if(!hostname||host===hostname)this.drop(token);}
     await this.storage.clear(hostname);
   }
 }

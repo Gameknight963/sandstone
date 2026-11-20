@@ -41,7 +41,7 @@ export class FileStorage{
   }
   async clear(hostname){
     for(const {origin} of await this.catalog()){
-      const host=new URL(origin).hostname;if(hostname&&host!==hostname&&!host.endsWith('.'+hostname))continue;
+      const host=new URL(origin).hostname;if(hostname&&host!==hostname)continue;
       await this.run(origin,true,({tree,remove,revoke})=>{for(const id of tree.keys())remove(id);revoke();});
     }
     await this.catalog();

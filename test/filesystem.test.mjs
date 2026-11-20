@@ -45,6 +45,21 @@ test('File directory removal checks descendants, names, lease ownership and dele
   const replacement=await call({op:'directory',handle:root,name:'folder',create:true});assert.equal(await call({op:'same',handle:dir,other:replacement}),true);
   assert.deepEqual(await call({op:'resolve',handle:root,other:file}),['folder','x']);
 });
+
+test('Per-host file clearing preserves subdomains, unrelated hosts and their open writers',async()=>{
+  const factory=new IDBFactory(),service=new FileService(factory),origins=['https://files.test','https://files.test:8443','https://child.files.test','https://other.test'];
+  const files=await Promise.all(origins.map(async(origin,index)=>{
+    const owner='owner-'+index,call=command=>service.command(origin,owner,command),root=await call({op:'root'}),file=await call({op:'file',handle:root,name:'saved',create:true}),token=await call({op:'writable',handle:file});
+    await call({op:'write',token,bytes:Uint8Array.of(index+1)});return {call,file,token};
+  }));
+  await service.clear('files.test');
+  for(const file of files.slice(0,2)){await assert.rejects(file.call({op:'close',token:file.token}),{name:'InvalidStateError'});await assert.rejects(file.call({op:'getFile',handle:file.file}),{name:'NotFoundError'});}
+  for(const [index,file] of files.slice(2).entries()){await file.call({op:'close',token:file.token});assert.deepEqual((await file.call({op:'getFile',handle:file.file})).bytes,Uint8Array.of(index+3));}
+  const reloaded=new FileService(factory);
+  assert.deepEqual((await service.storage.catalog()).map(entry=>entry.origin).sort(),origins.slice(2).sort());
+  assert.deepEqual((await reloaded.command(origins[2],'reloaded',{op:'getFile',handle:files[2].file})).bytes,Uint8Array.of(3));
+  await reloaded.clear();assert.deepEqual(await service.storage.catalog(),[]);
+});
 test('Directory iterators bypass public overrides and remain resumable after an early exit',async()=>{
   const {service}=fixture(),client=create_file_client(command=>service.command(origin,owner,structuredClone(command))),root=await client.storage.getDirectory();
   await root.getFileHandle('a.txt',{create:true});await root.getDirectoryHandle('folder',{create:true});
