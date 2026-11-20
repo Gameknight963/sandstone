@@ -19,6 +19,7 @@ import {verifyFragmentNavigation} from './fragment-navigation.playwright.mjs';
 import {verifyRedirectNavigation} from './redirect-navigation.playwright.mjs';
 import {verifyManualRedirects} from './manual-redirect.playwright.mjs';
 import {verifyResponseTypes} from './response-types.playwright.mjs';
+import {verifyResponseRedirect} from './response-redirect.playwright.mjs';
 import {verifyBodyHandlers} from './body-handlers.playwright.mjs';
 import {verifyMediaMuted} from './media-muted.playwright.mjs';
 import {verifyMediaPlayback,verifyMediaSources} from './media-playback.playwright.mjs';
@@ -499,6 +500,7 @@ try {
     result.passed.push(...await timed(verifyRedirectNavigation(page), 'Redirect fragment navigation fixture'));
     result.passed.push(...await timed(verifyManualRedirects(page), 'Manual redirect filtering fixture'));
     result.passed.push(...await timed(verifyResponseTypes(page), 'Fetch response filtering fixture'));
+    result.passed.push(...await timed(verifyResponseRedirect(page), 'Response redirect factory fixture'));
     result.passed.push(...await timed(verifyNodeDocuments(page), 'Node document identity fixture'));
     result.passed.push(...await timed(verifyMediaMuted(page), 'Initial media mutedness fixture'));
     result.passed.push(...await timed(verifyMediaPlayback(page), 'Pending media playback fixture'));

@@ -18,6 +18,8 @@ import {install_runtime_context} from './runtime_context.mjs';
 import {create_direct_eval} from './direct_eval.mjs';
 import {create_runtime_helpers} from './runtime_helpers.mjs';
 import {install_node_documents} from './node_documents.mjs';
+import {document_base_url} from './document_base.mjs';
+import {create_response_redirect} from './response.mjs';
 export {get_runtime_context} from './runtime_context.mjs';
 const parse_json = JSON.parse;
 const realm_global=globalThis,evaluate_global=globalThis.eval,describe_global=Reflect.getOwnPropertyDescriptor,define_global=Reflect.defineProperty;
@@ -190,6 +192,8 @@ export class CustomCTX {
 }
 
 export const ctx = new CustomCTX();
+const response_redirect=Object.getOwnPropertyDescriptor(realm_global.Response,'redirect');
+Object.defineProperty(realm_global.Response,'redirect',{...response_redirect,value:create_response_redirect(()=>is_worker?ctx.location.href:document_base_url()||ctx.location.href)});
 const global_bindings=create_global_bindings(ctx.__proxy__);
 const direct_eval=create_direct_eval({native:evaluate_global,virtual:CustomCTX.prototype.eval,global:realm_global,
   rewrite:(source,context)=>parser.rewrite_js(source,{url:context.url||loader.url,importReferrer:context.importReferrer,evalMode:true,evalContext:context})});
