@@ -22,6 +22,7 @@ import {verifyResponseTypes} from './response-types.playwright.mjs';
 import {verifyResponseRedirect} from './response-redirect.playwright.mjs';
 import {verifySiteFileClearing} from './site-data-files.playwright.mjs';
 import {verifyActiveSiteClearing} from './site-data-active.playwright.mjs';
+import {verifyPendingCookieClear} from './pending-cookie-clear.playwright.mjs';
 import {verifyBodyHandlers} from './body-handlers.playwright.mjs';
 import {verifyMediaMuted} from './media-muted.playwright.mjs';
 import {verifyMediaPlayback,verifyMediaSources} from './media-playback.playwright.mjs';
@@ -505,6 +506,7 @@ try {
     result.passed.push(...await timed(verifyResponseRedirect(page), 'Response redirect factory fixture'));
     result.passed.push(...await timed(verifySiteFileClearing(page), 'Per-site file controls fixture'));
     result.passed.push(...await timed(verifyActiveSiteClearing(page), 'Active embedded site clearing fixture'));
+    result.passed.push(...await timed(verifyPendingCookieClear(page), 'Pending cookie response clearing fixture'));
     result.passed.push(...await timed(verifyNodeDocuments(page), 'Node document identity fixture'));
     result.passed.push(...await timed(verifyMediaMuted(page), 'Initial media mutedness fixture'));
     result.passed.push(...await timed(verifyMediaPlayback(page), 'Pending media playback fixture'));

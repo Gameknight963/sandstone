@@ -24,6 +24,7 @@ export class SiteDataStore {
     this.storage = storage;
     this.local = Object.create(null);
     this.cookies = new CookieJar();
+    this.cookieGeneration=0;this.cookieCleared=new Map();
     this.indexed = [];
     this.cacheStorage=[];
     this.serviceWorkers=[];
@@ -77,6 +78,10 @@ export class SiteDataStore {
     try {
       const parsed=storage_cookie(value,policy);
       if(!parsed)return undefined;
+      // An old response must not restore deleted cookies or erase replacements
+      // written after an explicit clear. Other cookie domains remain writable.
+      const domain=canonicalDomain(parsed.domain||new URL(url).hostname);
+      if(policy.cookieGeneration!==undefined&&(this.cookieCleared.get(domain)||0)>policy.cookieGeneration)return undefined;
       const cookie = this.cookies.setCookieSync(parsed, url, {http, ignoreError: true});
       this.persist();
       if(cookie)for(const listener of this.cookieListeners)listener(cookie.domain);
@@ -156,6 +161,7 @@ export class SiteDataStore {
       try { this.storage?.removeItem("proxy_local_storage"); } catch {}
     }
     if (cookies) {
+      this.cookieCleared.set(hostname,++this.cookieGeneration);
       const data = this.cookies.serializeSync();
       data.cookies = data.cookies.filter(cookie => cookie.domain !== hostname);
       this.cookies = CookieJar.deserializeSync(data);

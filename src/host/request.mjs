@@ -6,6 +6,7 @@ import {redirect_url} from '../redirect.mjs';
 
 // Redirects must pass through the cookie jar at every hop, including login flows.
 export async function fetch_with_cookies(transport, data, input, init = {}, context = {}, worker) {
+  const cookieGeneration=data.cookieGeneration;
   let url = new URL(input);
   const source = new URL(context.url || url);
   const top = new URL(context.top_url || source);
@@ -64,7 +65,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
       for (const [key, value] of raw) {
         if (key.toLowerCase() === "set-cookie") setCookies.push(value);
       }
-      for (const value of new Set(setCookies)) data.setCookie(url.href, value,true,{crossSite:sameSiteContext==='none',topLevel:context.navigation&&!context.nested});
+      for (const value of new Set(setCookies)) data.setCookie(url.href, value,true,{crossSite:sameSiteContext==='none',topLevel:context.navigation&&!context.nested,...(cookieGeneration===undefined?{}:{cookieGeneration})});
     }
     const location = response.headers.get("location");
     if (!location || ![301, 302, 303, 307, 308].includes(response.status) || redirect === "manual") {
