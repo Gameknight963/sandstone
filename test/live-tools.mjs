@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import {documentSites,interactDocumentTool} from './live-documents.mjs';
 import {gameSites,interactGame} from './live-games.mjs';
+import {search_sites,interactSearchPortal} from './live-search.mjs';
 
 export const tool_sites=[
   ...documentSites,
   ...gameSites,
+  ...search_sites,
   {id:'squoosh',url:'https://squoosh.app/',editor:true},
   {id:'sqlime',url:'https://sqlime.org/',editor:true}
 ];
@@ -12,6 +14,7 @@ export const tool_sites=[
 export async function interact_tool(page,proxy,site,{surface,read,wait}){
   if(documentSites.some(tool=>tool.id===site.id))return interactDocumentTool(page,proxy,site,{surface,read,wait});
   if(gameSites.some(game=>game.id===site.id))return interactGame(page,proxy,site,{surface,read,wait});
+  if(search_sites.some(search=>search.id===site.id))return interactSearchPortal(page,proxy,{surface,read,wait});
   if(site.id==='sqlime'){
     const editor=surface.locator('#editor');await editor.fill("create table numbers(value); insert into numbers values (6),(7); select sum(value) as answer from numbers;");
     await surface.getByRole('button',{name:'run',exact:true}).click();

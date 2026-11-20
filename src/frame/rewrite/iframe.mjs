@@ -88,6 +88,7 @@ export function rewrite_iframe(iframe_element) {
     if(authored_src&&authored.get('srcdoc')===null)try{source=new URL(authored_src,ctx.document.baseURI).href;}catch{source='about:invalid';}
     render_internal_media_attribute(iframe_element,'allow',iframe_focus_policy(authored.get('allow'),{
       parent:ctx.origin,document:policy_url,source,
+      sandboxed:loader.sandboxed_context||authored.get('sandbox')!==null,
       opaque:ctx.origin==='null'||authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'),defaultAll
     }));
   };
@@ -165,6 +166,8 @@ export function rewrite_iframe(iframe_element) {
       const creator_url=loader.cookie_url||loader.url,policy=document_referrer_policy();
       let local=[],session=[];try{local=storage_entries(ctx.localStorage);session=storage_entries(ctx.sessionStorage);}catch{}
       const ready=runtime.loader.initialize_blank({url,frame_id,beacon_context:token,document_origin:ctx.origin,cookie_url:creator_url,
+        automatic_features:loader.automatic_features&&(authored.get('sandbox')===null||sandbox_tokens(authored.get('sandbox')).has('allow-scripts')),
+        sandboxed_context:loader.sandboxed_context||authored.get('sandbox')!==null,
         service_worker_state:service_worker_snapshot(),
         inherited_base_url:ctx.document.baseURI,document_referrer:request_referrer(creator_url,creator_url,policy),referrer_policy:policy,
         message_origin:ctx.origin,message_parent:child_message_parent(message_token),is_iframe:true,window_name:window_name,
@@ -349,6 +352,8 @@ export function rewrite_iframe(iframe_element) {
           default_settings: loader.default_settings,
           version: loader.version,
           is_iframe: true,
+          automatic_features:loader.automatic_features&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts')),
+          sandboxed_context:loader.sandboxed_context||sandbox!==null,
           message_parent:child_message_parent(message_token),
           message_origin:state.message_origin
         });

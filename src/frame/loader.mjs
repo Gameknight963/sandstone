@@ -14,6 +14,7 @@ import {load_document_html,run_document_script,initialize_blank_document,on_docu
 import {navigation_activation} from './user_activation.mjs';
 import {configure_document_encoding} from './document_encoding.mjs';
 import {configure_service_workers} from './polyfill/service_worker.mjs';
+import {configure_autofocus} from './autofocus.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -48,6 +49,8 @@ export let base_url;
 // and cookie URL. Their origin is distinct from Location.origin.
 export let inherited_base_url, document_origin, cookie_url;
 export let is_iframe = false;
+export let automatic_features = true;
+export let sandboxed_context = false;
 export let cookie_cross_site = false;
 export let site_settings = {};
 export let default_settings = {};
@@ -147,6 +150,8 @@ function prepare_html(options) {
   beacon_context = options.beacon_context;
   version = options.version;
   is_iframe = options.is_iframe || false;
+  automatic_features = options.automatic_features!==false;
+  sandboxed_context = !!options.sandboxed_context;
   service_worker_host = !!options.service_worker_host;
   cookie_cross_site = !!options.cookie_cross_site;
   default_settings = options.default_settings;
@@ -165,7 +170,7 @@ function prepare_html(options) {
   const ready=update_ctx(options);
   configure_document_encoding(document,ctx.document,character_encoding);
   configure_window_messages(options);
-  return Promise.all([ready,configure_cookies(options.cookies,ctx.document),configure_service_workers(options)]);
+  return Promise.all([ready,configure_cookies(options.cookies,ctx.document),configure_service_workers(options)]).then(result=>{configure_autofocus();return result;});
 }
 
 export function initialize_blank(options,onload,onurl){

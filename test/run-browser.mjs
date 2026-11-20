@@ -14,6 +14,7 @@ import {verifyURLSurfaces} from './url-surfaces.playwright.mjs';
 import {verifyImageLoads} from './image-loads.playwright.mjs';
 import {verifyFrameFocus} from './frame-focus.playwright.mjs';
 import {verifyIframeFocusPolicy} from './iframe-focus-policy.playwright.mjs';
+import {verifyAutofocus,verifyAutofocusWithoutScripts} from './autofocus.playwright.mjs';
 import {verifyBodyHandlers} from './body-handlers.playwright.mjs';
 import {verifyMediaMuted} from './media-muted.playwright.mjs';
 import {verifyMediaPlayback,verifyMediaSources} from './media-playback.playwright.mjs';
@@ -472,6 +473,12 @@ try {
     try{result.passed.push(...await timed(verifyIframeFocusPolicy(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Iframe focus permissions fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyBodyHandlers(page), 'Body window handler fixture'));
+    for(let batch=0;batch<4;batch++){
+      try{result.passed.push(...await timed(verifyAutofocus(page,{batch,batches:4,expectDiagnostics:messages=>messages.forEach(message=>expectedDiagnostics.add(message))}), 'HTML autofocus fixture '+(batch+1)));}
+      finally{expectedDiagnostics.clear();}
+    }
+    try{result.passed.push(...await timed(verifyAutofocusWithoutScripts(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'HTML autofocus without JavaScript fixture'));}
+    finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyNodeDocuments(page), 'Node document identity fixture'));
     result.passed.push(...await timed(verifyMediaMuted(page), 'Initial media mutedness fixture'));
     result.passed.push(...await timed(verifyMediaPlayback(page), 'Pending media playback fixture'));

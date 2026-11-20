@@ -6,6 +6,8 @@ test('Frame focus permissions resolve self, src, origin and opaque source grants
   assert.equal(permits(null),true);assert.equal(permits(null,{document:'https://cross.test/child'}),false);
   assert.equal(permits(null,{document:'https://cross.test/child',defaultAll:true}),true);
   assert.equal(permits(null,{opaque:true,defaultAll:true}),false);
+  assert.equal(permits(null,{sandboxed:true,defaultAll:true}),false);
+  assert.equal(permits(feature+" 'self'",{sandboxed:true}),true);
   assert.equal(permits(feature+" 'self'"),true);assert.equal(permits(feature+" 'self'",{document:'https://cross.test/child'}),false);
   assert.equal(permits(feature),true);assert.equal(permits(feature,{opaque:true}),true);
   assert.equal(permits(feature,{document:'https://redirect.test/final'}),false);

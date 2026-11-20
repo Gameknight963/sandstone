@@ -13,6 +13,8 @@ const cases=[
   {id:'explicit',url:cross+'/child',allow:feature+' '+cross},
   {id:'opaque',url:origin+'/child',sandbox:'allow-scripts'},
   {id:'opaque-source',url:origin+'/child',sandbox:'allow-scripts',allow:feature},
+  {id:'same-sandbox',url:origin+'/child',sandbox:'allow-scripts allow-same-origin'},
+  {id:'same-sandbox-self',url:origin+'/child',sandbox:'allow-scripts allow-same-origin',allow:feature+" 'self'"},
   {id:'redirect-source',url:origin+'/redirect',allow:feature},
   {id:'other-directives',url:origin+'/child',allow:'autoplay; fullscreen'}
 ];

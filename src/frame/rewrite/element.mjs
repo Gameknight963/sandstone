@@ -8,6 +8,7 @@ import {is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
 import {observe_media_container} from './media.mjs';
 import {inline_style_version,remember_inline_style} from '../style_sources.mjs';
 import {shadow_root} from '../shadow_roots.mjs';
+import {note_autofocus} from '../autofocus.mjs';
 
 const rewritten_elements = new WeakSet();
 
@@ -70,6 +71,7 @@ export function rewrite_element(element) {
   }
   if (!(element instanceof Element))
     return;
+  note_autofocus(element);
 
   let promises = [];
   if (!rewritten_elements.has(element) && (element instanceof HTMLFormElement || element.__rewritten__ !== true)) {
