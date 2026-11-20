@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {SiteDataStore} from '../src/host/site_data.mjs';
-import {fetch_with_cookies} from '../src/host/request.mjs';
+import {fetch_with_cookies,snapshot_request_context} from '../src/host/request.mjs';
 import {websocket_options} from '../src/host/websocket.mjs';
+import {BeaconQueue} from '../src/host/beacon.mjs';
+import {ServiceWorkerRequests} from '../src/service_worker/requests.mjs';
 
 const origin='https://cookies.test';
 function deferred(){let resolve;const promise=new Promise(value=>resolve=value);return {promise,resolve};}
@@ -51,4 +53,40 @@ test('Cookie clear barriers match canonical host-only domains for IP and interna
     const pending=fetch_with_cookies(()=>held.promise,store,url,{}, {url});store.clear(cookie.domain,{cookies:true,localStorage:false});held.resolve(response(['old=restored; Path=/']));await(await pending).text();
     assert.equal(store.cookies.getCookieStringSync(url),'',url);
   }
+});
+
+test('Accepted beacons retain their cookie clear barrier while their Blob body is being read',async()=>{
+  const store=new SiteDataStore(),bodyReady=deferred(),received=[];
+  class HeldBlob extends Blob{async arrayBuffer(){await bodyReady.promise;return super.arrayBuffer();}}
+  const queue=new BeaconQueue({cookies:url=>({url}),capture_context:context=>snapshot_request_context(store,context),
+    fetch:(url,options,context)=>fetch_with_cookies(async(url,options)=>{
+      received.push({url,options,context});
+      return response(url.endsWith('/fresh')?['new=accepted; Path=/']:['old=restored; Path=/','fresh=deleted; Max-Age=0; Path=/']);
+    },store,url,options,context)});
+  const id=queue.register('frame',{url:origin+'/page'});
+  store.setCookie(origin,'old=before; Path=/');
+  const pending=queue.send(id,origin+'/held',new HeldBlob(['payload']));
+  store.clear('cookies.test',{cookies:true,localStorage:false});store.setCookie(origin,'fresh=after; Path=/');
+  queue.contexts.get(id).context.url=origin+'/replacement';
+  bodyReady.resolve();const result=await pending;
+  assert.equal(store.cookies.getCookieStringSync(origin),'fresh=after');
+  assert.deepEqual(result,{cookies:{url:origin+'/page'}});
+  assert.equal(received[0].context.url,origin+'/page');assert.equal(new TextDecoder().decode(received[0].options.body),'payload');
+  assert.equal(received[0].options.headers.referer,origin+'/page');
+  await queue.send(id,origin+'/fresh',new Blob(['fresh']));
+  assert.equal(store.cookies.getCookieStringSync(origin),'fresh=after; new=accepted');
+  assert.equal(queue.contexts.get(id).queued,0);assert.equal(queue.pending.size,0);
+});
+
+test('Forwarded service worker requests retain the cookie clear barrier of their accepted client request',async()=>{
+  const store=new SiteDataStore(),requests=new ServiceWorkerRequests();
+  const original={url:origin+'/page'},context=snapshot_request_context(store,original);
+  const token=requests.issue('worker',origin+'/forwarded',context);
+  store.clear('cookies.test',{cookies:true,localStorage:false});store.setCookie(origin,'fresh=after; Path=/');
+  const restored=requests.restore('worker',token,origin+'/forwarded');
+  await(await fetch_with_cookies(async()=>response(['old=restored; Path=/','fresh=deleted; Max-Age=0; Path=/']),store,origin+'/forwarded',{},snapshot_request_context(store,restored))).text();
+  assert.equal(store.cookies.getCookieStringSync(origin),'fresh=after');
+  assert.equal(original.cookieGeneration,undefined,'Capturing a request must not age the reusable document context');
+  await(await fetch_with_cookies(async()=>response(['new=accepted; Path=/']),store,origin+'/fresh',{},snapshot_request_context(store,original))).text();
+  assert.equal(store.cookies.getCookieStringSync(origin),'fresh=after; new=accepted');
 });

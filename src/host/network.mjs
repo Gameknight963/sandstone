@@ -2,7 +2,7 @@ import { iframes } from "./controller.mjs";
 import { rpc_handlers } from "../rpc.mjs";
 import { libcurl } from "libcurl.js/bundled";
 import { site_data } from "./site_data.mjs";
-import { fetch_with_cookies } from "./request.mjs";
+import { fetch_with_cookies,snapshot_request_context } from "./request.mjs";
 import { requests, request_key, cancel_requests } from "./streams.mjs";
 import { streaming_http_session } from "./http_session.mjs";
 import { relay_websocket_class, websocket_options } from "./websocket.mjs";
@@ -38,7 +38,7 @@ export function reserved_navigation_client(id){return service_worker_navigation.
 export let session = null;
 export const navigation_metadata=new NavigationMetadata(parent=>iframes[parent]?.document_context);
 const context_cookies=(url,context)=>site_data.documentCookies(url,{crossSite:!!context?.cross_site});
-export const beacons = new BeaconQueue({fetch: (...args) => fetch(...args), cookies: context_cookies});
+export const beacons = new BeaconQueue({fetch: (...args) => fetch(...args), cookies: context_cookies,capture_context:context=>snapshot_request_context(site_data,context)});
 export const keepalives = new KeepaliveRequests({queue:beacons,fetch:(...args)=>fetch(...args),cookies:context_cookies});
 export const downloads=new Downloads({fetch:(...args)=>fetch(...args),contexts:beacons.contexts,cookies:context_cookies});
 rpc_handlers.download_request=(...args)=>downloads.request(...args);
@@ -50,6 +50,7 @@ rpc_handlers.fetch_keepalive_abort = (...args) => keepalives.abort(...args);
 rpc_handlers.fetch_keepalive_done = (...args) => keepalives.completed(...args);
 
 export async function fetch(url, options, context) {
+  context=snapshot_request_context(site_data,context);
   const transport=(url,options,context,worker)=>fetch_with_cookies((url,init)=>http_cache.fetch((url,init)=>session.fetch(url,init),url,init,context),site_data,url,options,context,worker);
   return service_worker_fetch?service_worker_fetch(url,options,context,transport):transport(url,options,context);
 }

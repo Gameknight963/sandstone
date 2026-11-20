@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ServiceWorkerFetch} from '../src/service_worker/fetch.mjs';
-import {fetch_with_cookies} from '../src/host/request.mjs';
+import {fetch_with_cookies,snapshot_request_context} from '../src/host/request.mjs';
 import {SiteDataStore} from '../src/host/site_data.mjs';
 
 const context={url:'https://app.test/page',top_url:'https://app.test/page'};
@@ -149,4 +149,17 @@ test('A cross-site ancestor still withholds Strict/Lax cookies after a round-tri
   },data,'https://app.test/start',{credentials:'include'}, {...context,cross_site:true});
   await response.text();assert.equal(headers[0].cookie,'none=original');assert.equal(headers[1].cookie,undefined);assert.equal(headers[2].cookie,'none=original');
   assert.match(data.cookies.getCookieStringSync('https://app.test/'),/strict=original/);
+});
+
+test('A delayed worker fallback cannot restore cookies cleared after its client request was accepted',async()=>{
+  let release;const held=new Promise(resolve=>{release=resolve;}),api=environment(()=>held),data=new SiteDataStore();
+  data.setCookie('https://app.test/','old=before; Path=/');
+  const accepted=snapshot_request_context(data,context);
+  const pending=api.router.fetch('https://app.test/data',{},accepted,(url,options,source)=>fetch_with_cookies(async()=>
+    new Response('network',{headers:[['set-cookie','old=restored; Path=/'],['set-cookie','fresh=deleted; Max-Age=0; Path=/']]}),data,url,options,source));
+  data.clear('app.test',{cookies:true,localStorage:false});data.setCookie('https://app.test/','fresh=after; Path=/');
+  release({type:'fallback'});
+  assert.equal(await(await pending).text(),'network');
+  assert.equal(data.cookies.getCookieStringSync('https://app.test/'),'fresh=after');
+  assert.deepEqual(api.jobs[0].handledCalls,[undefined]);
 });

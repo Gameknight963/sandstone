@@ -4,9 +4,15 @@ import {parse_referrer_policy, request_referrer, request_origin} from '../referr
 import {cookie_header} from './cookie_policy.mjs';
 import {redirect_url} from '../redirect.mjs';
 
+// Preserve the accepted request's clear barrier across body reads and worker
+// dispatch. Reusing its document context for another request still stays fresh.
+export function snapshot_request_context(data,context={}){
+  return {...context,cookieGeneration:context.cookieGeneration??data.cookieGeneration};
+}
+
 // Redirects must pass through the cookie jar at every hop, including login flows.
 export async function fetch_with_cookies(transport, data, input, init = {}, context = {}, worker) {
-  const cookieGeneration=data.cookieGeneration;
+  const cookieGeneration=context.cookieGeneration??data.cookieGeneration;
   let url = new URL(input);
   const source = new URL(context.url || url);
   const top = new URL(context.top_url || source);

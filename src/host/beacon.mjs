@@ -1,9 +1,10 @@
 // Accepted beacons belong to their original document, not the frame's current
 // navigation. Keep that context briefly for beacons posted by unload handlers.
 export class BeaconQueue {
-  constructor({fetch, cookies, grace = 10000, timeout = 30000}) {
+  constructor({fetch, cookies, capture_context=context=>({...context}), grace = 10000, timeout = 30000}) {
     this.fetch = fetch;
     this.cookies = cookies;
+    this.capture_context = capture_context;
     this.grace = grace;
     this.timeout = timeout;
     this.contexts = new Map();
@@ -40,20 +41,22 @@ export class BeaconQueue {
     const lease = this.reserve(id,body.size);
     if (!lease) return false;
     const {entry} = lease;
+    let context=entry.context;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout);
     timer.unref?.();
     const request = {id, controller};
     this.pending.add(request);
     try {
+      context=this.capture_context(context);
       const response = await this.fetch(target.href, {
         method: 'POST', body: await body.arrayBuffer(),
-        headers: {Origin: new URL(entry.context.url).origin, ...(body.type ? {'Content-Type': body.type} : {})},
+        headers: {Origin: new URL(context.url).origin, ...(body.type ? {'Content-Type': body.type} : {})},
         mode:!body.type || /^(text\/plain|application\/x-www-form-urlencoded|multipart\/form-data)(?:;|$)/i.test(body.type) ? 'no-cors' : 'cors',
         referrerPolicy:options.referrerPolicy,
         referrer:options.referrer,
         credentials: 'include', redirect: 'follow', signal: controller.signal
-      }, entry.context);
+      }, context);
       await response.body?.cancel();
     } catch {
       // Beacon deliberately provides no response/error callback to the page.
@@ -62,6 +65,6 @@ export class BeaconQueue {
       this.pending.delete(request);
       lease.release();
     }
-    return {cookies: this.cookies(entry.context.url,entry.context)};
+    return {cookies: this.cookies(context.url,context)};
   }
 }

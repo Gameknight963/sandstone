@@ -9,7 +9,7 @@ export class ServiceWorkerRequests{
   issue(owner,input,context){
     while(this.records.size>=this.limit)this.records.delete(this.records.keys().next().value);
     const token=this.id(),url=new URL(input).href;
-    const snapshot=Object.fromEntries(['url','top_url','referrer_url','broadcast_origin','referrerPolicy','metadata_source'].map(key=>[key,context[key]]));
+    const snapshot=Object.fromEntries(['url','top_url','referrer_url','broadcast_origin','referrerPolicy','metadata_source','cookieGeneration'].map(key=>[key,context[key]]));
     for(const key of ['url','top_url','referrer_url','metadata_source'])snapshot[key]=origin_url(snapshot[key]);
     Object.assign(snapshot,{navigation:!!context.navigation,nested:!!context.nested,cross_site:!!context.cross_site,user_activation:false,history_user_activation:false,request_metadata:undefined});
     this.records.set(token,{owner,url,context:Object.freeze(snapshot)});return token;
