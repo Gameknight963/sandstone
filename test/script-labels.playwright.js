@@ -35,6 +35,9 @@ async page=>{
   });
   const native=await nativeContext.newPage();
   const stage=value=>console.log(JSON.stringify({fixture:'Script filenames',stage:value}));
+  const crashMonitor=await page.context().browser().newBrowserCDPSession();
+  crashMonitor.on('Target.targetCrashed',event=>stage({targetCrash:event}));
+  await crashMonitor.send('Target.setDiscoverTargets',{discover:true});
   const workerLog=message=>{if(message.text().startsWith('SCRIPT_LABEL '))stage(message.text());};
   page.on('console',workerLog);native.on('console',workerLog);
   native.on('console',message=>{if(message.type()==='error')diagnostics.push(message.text());});
@@ -70,11 +73,22 @@ async page=>{
       };
       await main_frame.navigate_to(start);
     },{origin,start,html,sources});
-    stage('proxy workers');const actual=await snapshot(true);
+    stage('proxy workers');
+    // A renderer that stops processing tasks cannot run the worker's own timer.
+    // Report that phase before the runner's outer deadline closes the browser.
+    let snapshotTimer;
+    let actual;
+    try{actual=await Promise.race([snapshot(true),new Promise((_,reject)=>{
+      snapshotTimer=setTimeout(()=>{
+        stage({workerTimeout:true,closed:page.isClosed(),connected:page.context().browser().isConnected(),frames:page.frames().map(frame=>({url:frame.url().slice(0,180),detached:frame.isDetached()})),workers:page.workers().map(worker=>worker.url().slice(0,180))});
+        reject(new Error('Proxy worker snapshot did not settle in 20 seconds'));
+      },20000);
+    })]);}
+    finally{clearTimeout(snapshotTimer);}
     const requests=await page.evaluate(()=>scriptLabelRequests);
     if(!requests.includes('/script-labels/redirect')||!requests.includes('/script-labels/assets/redirected.js'))throw new Error('Script redirect chain was not exercised: '+JSON.stringify(requests));
     if(JSON.stringify(actual)!==JSON.stringify(expected))throw new Error('Virtual script filename parity: '+JSON.stringify({expected,actual,diagnostics}));
     return ['Virtual filenames and stack-derived asset URLs for classic/module scripts', 'Redirected script filenames, authored sourceURL labels and inline document URLs', 'Virtual filenames in classic/module workers and importScripts dependencies'];
   }catch(error){stage('failure: '+(error.stack||error));throw error;}
-  finally{page.off('console',workerLog);stage('native context cleanup');await nativeContext.close();}
+  finally{page.off('console',workerLog);await crashMonitor.detach().catch(()=>{});stage('native context cleanup');await nativeContext.close();}
 }
