@@ -1,5 +1,6 @@
 // Normalize with the browser's Request implementation, retaining generated body headers.
 import {beacon_body} from '../beacon.mjs';
+import {request_metadata} from '../../request_metadata.mjs';
 
 export function prepare_request(resource, init, base, source_url = base, reserve,client_referrer) {
   const input = resource instanceof Request ? resource : new URL(resource, base).href;
@@ -18,10 +19,11 @@ export function prepare_request(resource, init, base, source_url = base, reserve
       options.headers = headers;
     }
   }
-  const initial_referrer = options.referrer !== undefined ? options.referrer : resource instanceof Request ? resource.referrer : 'about:client';
+  const trusted_referrer=options.referrer===undefined?request_metadata(resource)?.referrer:undefined;
+  const initial_referrer = options.referrer !== undefined ? options.referrer : trusted_referrer??(resource instanceof Request ? resource.referrer : 'about:client');
   delete options.referrer;
   let referrer = initial_referrer;
-  if (referrer !== '' && referrer !== 'about:client') {
+  if (trusted_referrer===undefined&&referrer !== '' && referrer !== 'about:client') {
     const source = new URL(source_url || input.url || input), requested = new URL(referrer,base || source);
     referrer = source.origin !== 'null' && requested.origin === source.origin ? requested.href : 'about:client';
   }
@@ -46,7 +48,8 @@ export function prepare_request(resource, init, base, source_url = base, reserve
       keepalive: request.keepalive,
       mode: request.mode,
       referrer,
-      referrerPolicy: request.referrerPolicy
+      referrerPolicy: request.referrerPolicy,
+      ...(request_metadata(resource)?.destination?{destination:request_metadata(resource).destination}:{})
     }
   };
   };

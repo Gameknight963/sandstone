@@ -20,6 +20,8 @@ export {http_cache} from './http_cache.mjs';
 export {broadcast_channels};
 
 export const ws_connections = {};
+let service_worker_fetch,service_worker_disconnect;
+export function set_service_worker_fetch(fetch,disconnect){service_worker_fetch=fetch;service_worker_disconnect=disconnect;}
 export let session = null;
 export const navigation_metadata=new NavigationMetadata(parent=>iframes[parent]?.document_context);
 const context_cookies=(url,context)=>site_data.documentCookies(url,{crossSite:!!context?.cross_site});
@@ -35,7 +37,8 @@ rpc_handlers.fetch_keepalive_abort = (...args) => keepalives.abort(...args);
 rpc_handlers.fetch_keepalive_done = (...args) => keepalives.completed(...args);
 
 export async function fetch(url, options, context) {
-  return fetch_with_cookies((url, init) => http_cache.fetch((url,init)=>session.fetch(url,init),url,init,context), site_data, url, options, context);
+  const transport=(url,options,context)=>fetch_with_cookies((url,init)=>http_cache.fetch((url,init)=>session.fetch(url,init),url,init,context),site_data,url,options,context);
+  return service_worker_fetch?service_worker_fetch(url,options,context,transport):transport(url,options,context);
 }
 
 export function set_websocket(url) {
@@ -66,7 +69,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
     broadcast_origin:frame.broadcast_origin,
     navigation: options?.mode === 'navigate',request_metadata:options?.mode==='navigate'&&frame.pending_navigation?.traversed?frame.history.current?.request_metadata:undefined,
     history_user_activation:options?.mode==='navigate'&&frame.pending_navigation?.traversed&&iframes[frame.root_id]?.history.current?.request_metadata?.user,
-    user_activation:!!options?.sandstone_navigation_activation,nested:true,cross_site:frame_cross_site(frame,iframes)
+    user_activation:!!options?.sandstone_navigation_activation,nested:true,cross_site:frame_cross_site(frame,iframes),frame_id:frame.id,service_worker_client:frame.document_context
   };
   const key = request_key(frame_id, request_id);
   const metadataTarget=options?.sandstone_navigation_target,metadataFrame=iframes[metadataTarget];
@@ -201,6 +204,7 @@ rpc_handlers["ws_close"] = function (frame_id, ws_id) {
 
 //when navigating to a new page we need to close unused connections
 export function clean_ws_connections(id_to_clean) {
+  service_worker_disconnect?.(id_to_clean);
   cache_storage.disconnect(id_to_clean);
   disconnect_storage(id_to_clean);
   broadcast_channels.disconnect(id_to_clean);

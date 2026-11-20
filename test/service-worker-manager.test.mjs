@@ -69,6 +69,17 @@ test('Activation waits for an old response body even when its background event w
     assert.equal(record.active.source,'two');assert.equal(previous.pending,0);assert.equal(api.owners[0].closed,true);assert.equal(skipped,true);
   }finally{api.close();}
 });
+
+test('A fetch reservation retains its owner until the host acknowledges delivery, even after EOF',async()=>{
+  const api=environment();
+  try{
+    const record=await api.register();await api.manager.settled(record);const worker=record.active;
+    const job=await api.manager.dispatch(record,worker,{event:'fetch'},{waitHandled:true});
+    await job.result;await job.lifetime;await job.read();await job.read();
+    assert.equal(worker.pending,1);await job.handled();assert.equal(worker.pending,0);
+    await job.handled();assert.equal(worker.pending,0);
+  }finally{api.close();}
+});
 test('Import-only changes install new versions while an unchanged graph reuses its worker',async()=>{
   const api=environment();api.files.set(origin+'/dependency.js','one');
   try{

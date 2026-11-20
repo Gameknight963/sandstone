@@ -148,22 +148,22 @@ export class ServiceWorkerManager{
     this.valid(record);this.state(record,worker,'activated');this.changed(record);
     if(record.waiting)this.requestActivation(record);
   }
-  async dispatch(record,worker,event){
+  async dispatch(record,worker,event,{waitHandled=false}={}){
     worker.pending++;let owner,raw;
     const lost=error=>{if(['InvalidStateError','TimeoutError'].includes(error?.name)&&worker.owner===owner){owner.close(error);worker.owner=null;}};
     try{
       if(!['install','activate'].includes(event.event)&&worker.state==='activating')await record.activation;
       owner=await this.running(record,worker);raw=owner.dispatch(event);
     }catch(error){lost(error);worker.pending--;this.requestActivation(record);this.collect(record);throw error;}
-    let resultDone=false,lifetimeDone=false,bodyDone=false,finished=false;
+    let resultDone=false,lifetimeDone=false,bodyDone=false,handledDone=!waitHandled,finished=false;
     const finish=()=>{
-      if(finished||!resultDone||!lifetimeDone||!bodyDone)return;finished=true;worker.pending--;
+      if(finished||!resultDone||!lifetimeDone||!bodyDone||!handledDone)return;finished=true;worker.pending--;
       raw.release().catch(()=>{});this.requestActivation(record);this.collect(record);
     };
     const result=raw.result.then(value=>{resultDone=true;if(!(value.type==='response'&&value.body))bodyDone=true;finish();return value;},error=>{lost(error);resultDone=true;bodyDone=true;finish();throw error;});
     const lifetime=raw.lifetime.then(value=>{lifetimeDone=true;finish();return value;},error=>{lost(error);lifetimeDone=true;finish();throw error;});
     result.catch(()=>{});lifetime.catch(()=>{});
-    return {...raw,result,lifetime,read:()=>raw.read().then(value=>{if(value.done){bodyDone=true;finish();}return value;},error=>{bodyDone=true;finish();throw error;}),
+    return {...raw,result,lifetime,handled:error=>Promise.resolve().then(()=>raw.handled(error)).finally(()=>{handledDone=true;finish();}),read:()=>raw.read().then(value=>{if(value.done){bodyDone=true;finish();}return value;},error=>{bodyDone=true;finish();throw error;}),
       cancel:reason=>raw.cancel(reason).finally(()=>{bodyDone=true;finish();})};
   }
   control(client,record,worker){const changed=client.controller!==worker;client.registration=record;client.controller=worker;if(changed)this.notify({event:'controllerchange',record,worker,client});}

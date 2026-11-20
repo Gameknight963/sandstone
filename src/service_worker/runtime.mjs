@@ -1,11 +1,14 @@
 import {create_service_worker_events} from './events.mjs';
 import {create_service_worker_dispatcher} from './dispatcher.mjs';
+import {response_metadata} from '../response_metadata.mjs';
+import {remember_request} from '../request_metadata.mjs';
 
 // The owner supplies this private transport. Pages never receive the control
 // port: authored postMessage traffic is delivered as ExtendableMessageEvent.
-export function create_service_worker_runtime({profile,target=globalThis,send,scripts=()=>[],requestMetadata,responseMetadata}){
+export function create_service_worker_runtime({profile,target=globalThis,send,scripts=()=>[],Request:RequestClass=globalThis.Request,requestMetadata,responseMetadata=response_metadata}){
   const events=create_service_worker_events({requestMetadata,responseMetadata});
   const jobs=new Map(),readers=new Map(),commands=new Map(),queued=[];
+  const collect=id=>{const job=jobs.get(id);if(job?.complete&&(!job.fetch||job.handled&&!readers.has(id)))jobs.delete(id);};
   let ready=false,closed=false,nextCommand=0;
   const error_value=error=>({name:error?.name||'Error',message:error?.message||String(error),...(typeof error?.stack==='string'?{stack:error.stack}:{})});
   const reply=(id,type,value={})=>{if(!closed)send({id,type,...value});};
@@ -26,25 +29,26 @@ export function create_service_worker_runtime({profile,target=globalThis,send,sc
     [Symbol.toStringTag]:{value:'ServiceWorkerRegistration'}
   });
   async function dispatch(packet){
-    let event;
+    let event,controller;
     if(packet.event==='fetch'){
-      const {url,body,...init}=packet.request;
-      const request=new Request(url,{...init,...(body===undefined?{}:{body})});
+      const {url,body,destination,virtualReferrer,aborted,...init}=packet.request;
+      controller=new AbortController();if(aborted)controller.abort();
+      const request=remember_request(new RequestClass(url,{...init,referrer:virtualReferrer||'',signal:controller.signal,...(body===undefined?{}:{body})}),{destination:destination||'',referrer:virtualReferrer||''});
       event=new events.FetchEvent('fetch',{request,clientId:packet.clientId||'',resultingClientId:packet.resultingClientId||'',cancelable:true});
     }else if(packet.event==='message'||packet.event==='messageerror'){
       event=new events.ExtendableMessageEvent(packet.event,{data:packet.data,origin:packet.origin,ports:packet.ports||[]});
     }else if(packet.event==='install'||packet.event==='activate')event=new events.ExtendableEvent(packet.event);
     else throw new TypeError('Unsupported service worker event');
     if(jobs.has(packet.id)||readers.has(packet.id))throw new TypeError('Duplicate service worker event ID');
-    const job={event,fetch:packet.event==='fetch'};jobs.set(packet.id,job);
+    const job={event,controller,fetch:packet.event==='fetch'};jobs.set(packet.id,job);
     const result=await dispatcher.deliver(event);
-    result.lifetime.then(()=>reply(packet.id,'lifetime'),error=>reply(packet.id,'lifetime',{error:error_value(error)})).finally(()=>{job.complete=true;if(!job.fetch||job.handled)jobs.delete(packet.id);});
+    result.lifetime.then(()=>reply(packet.id,'lifetime'),error=>reply(packet.id,'lifetime',{error:error_value(error)})).finally(()=>{job.complete=true;collect(packet.id);});
     await result.dispatched;
     if(!job.fetch){reply(packet.id,'dispatched');return;}
     if(!result.responded){reply(packet.id,'fallback');return;}
     try{
       const handle=await result.response;
-      if(closed)return;
+      if(closed||job.canceled){await handle.reader?.cancel();if(!closed)fail(packet.id,new DOMException('Request was aborted','AbortError'));return;}
       if(handle.reader)readers.set(packet.id,handle.reader);
       reply(packet.id,'response',{metadata:{...handle.metadata,headers:[...handle.metadata.headers]},body:!!handle.reader});
     }catch(error){fail(packet.id,error);}
@@ -61,18 +65,23 @@ export function create_service_worker_runtime({profile,target=globalThis,send,sc
     try{
       if(packet.type==='scripts'){reply(packet.id,'scripts',{scripts:scripts()});return;}
       if(packet.type==='dispatch'){await dispatch(packet);return;}
+      if(packet.type==='abort'){jobs.get(packet.id)?.controller?.abort(packet.reason);return;}
       if(packet.type==='handled'){
         const job=jobs.get(packet.id);if(!job?.fetch)return;
         if(packet.error)events.finish_fetch(job.event,Object.assign(new Error(packet.error.message),{name:packet.error.name}));else events.finish_fetch(job.event);
-        job.handled=true;if(job.complete)jobs.delete(packet.id);return;
+        job.handled=true;collect(packet.id);return;
       }
       if(packet.type==='read'){
         const reader=readers.get(packet.id);if(!reader)throw new TypeError('Unknown service worker response body');
-        const result=await reader.read();if(result.done)readers.delete(packet.id);
+        let result;
+        try{result=await reader.read();}
+        catch(error){readers.delete(packet.id);collect(packet.id);try{await reader.cancel(error);}catch{}throw error;}
+        if(result.done){readers.delete(packet.id);collect(packet.id);}
         reply(packet.id,'chunk',result);return;
       }
       if(packet.type==='cancel'){
-        const reader=readers.get(packet.id);readers.delete(packet.id);if(reader)await reader.cancel(packet.reason);
+        const job=jobs.get(packet.id);if(job)job.canceled=true;
+        const reader=readers.get(packet.id);readers.delete(packet.id);collect(packet.id);if(reader)await reader.cancel(packet.reason);
         reply(packet.id,'canceled');return;
       }
       throw new TypeError('Unknown service worker control message');

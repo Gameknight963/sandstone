@@ -35,6 +35,7 @@ export class ServiceWorkerBridge{
     try{this.send({type:'cancel',id,reason});}catch(error){job.cancel=null;pending.reject(error);}
     return pending.promise;
   }
+  abort(id,reason){this.job(id);this.send({type:'abort',id,reason});}
   handled(id,error){this.job(id);this.send({type:'handled',id,...(error?{error:{name:error.name||'Error',message:error.message||String(error)}}:{})});}
   scripts(){
     if(this.scriptRequest)return this.scriptRequest.promise;

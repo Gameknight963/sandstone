@@ -1,4 +1,5 @@
 import {request_data,restore_cached_request,validate_put} from './storage.mjs';
+import {response_metadata,remember_response} from '../response_metadata.mjs';
 
 const NativeResponse=globalThis.Response;
 const NativeRequest=globalThis.Request;
@@ -14,15 +15,15 @@ function query_options(value={},storage=false){
 async function snapshot(response){
   const body=response_body.call(response);
   if(response_used.call(response)||body?.locked)throw new TypeError('Response body is already used or locked');
-  const items=Object.fromEntries(['status','statusText','url','type','redirected'].map(key=>[key,response[key]]));
-  return {headers:[...response.headers],items,body:body===null?null:await read_body.call(response)};
+  const {headers,...items}=response_metadata(response);
+  return {headers:[...headers],items,body:body===null?null:await read_body.call(response)};
 }
 function response_from(data){
   if(!data)return undefined;
   const response=data.items.status===0?NativeResponse.error():new NativeResponse(data.body,{status:data.items.status,statusText:data.items.statusText,headers:data.headers});
   for(const key of ['url','type','redirected'])Object.defineProperty(response,key,{value:data.items[key]});
   const clone=response.clone.bind(response);Object.defineProperty(response,'clone',{value:()=>response_from({...data,body:clone().body})});
-  return response;
+  return remember_response(response,data.items);
 }
 
 export function create_cache_api({command,fetch,Request:RequestClass}){
@@ -48,8 +49,9 @@ export function create_cache_api({command,fetch,Request:RequestClass}){
     try{
       const responses=await Promise.all(requests.map(async(input,index)=>{
         const response=await fetch(input,{signal:signals[index]});
-        if(!response.ok)throw new TypeError('Cache add request failed');
-        validate_put(request_data(input),response);return response;
+        const metadata=response_metadata(response);
+        if(metadata.status<200||metadata.status>299)throw new TypeError('Cache add request failed');
+        validate_put(request_data(input),metadata);return response;
       }));
       const entries=await Promise.all(responses.map(async(response,index)=>({request:request_data(requests[index]),response:await snapshot(response)})));
       await command({cache:id,method:'batch',entries});
@@ -64,7 +66,7 @@ export function create_cache_api({command,fetch,Request:RequestClass}){
     async delete(input,options={}){cache_state(this);required(arguments,1);return call(this,'delete',request(input),query_options(options));}
     async put(input,response){
       const id=cache_state(this);required(arguments,2);const data=request(input);
-      response_body.call(response);validate_put(data,response);
+      response_body.call(response);validate_put(data,response_metadata(response));
       const saved=await snapshot(response);await command({cache:id,method:'put',request:data,response:saved});
     }
     async add(input){cache_state(this);required(arguments,1);return add_all(this,[input]);}

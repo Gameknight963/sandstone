@@ -6,11 +6,21 @@ import {normalize_registration} from '../service_worker/registration.mjs';
 import {ServiceWorkerStorage} from '../service_worker/storage.mjs';
 import {site_data} from './site_data.mjs';
 import {ServiceWorkerManager} from '../service_worker/manager.mjs';
+import {ServiceWorkerFetch} from '../service_worker/fetch.mjs';
 
 let factory;try{factory=globalThis.indexedDB;}catch{}
 export const registrations=new ServiceWorkerStorage(factory,{onCatalog:catalog=>site_data.serviceWorkers=catalog});
 export const manager=new ServiceWorkerManager({storage:registrations,createWorker:(profile,options)=>create_service_worker_driver(profile,{timeout:300000,...options}),
-  fetch:(url,options,context)=>network.fetch(url,options,{...context,url:context.url||context.base||url,top_url:context.top_url||context.url||context.base||url})});
+  fetch:(url,options,context)=>network.fetch(url,options,{...context,service_worker_bypass:true,url:context.url||context.base||url,top_url:context.top_url||context.url||context.base||url})});
+export const fetch_router=new ServiceWorkerFetch({manager,client:context=>{
+  const frame=iframes[context.frame_id];
+  if(!frame||frame.service_worker_host||iframes[frame.root_id]?.service_worker_host)return null;
+  const client=manager.clients.get(context.service_worker_client);
+  return client?.frame===frame.id?client:null;
+}});
+network.set_service_worker_fetch((...args)=>fetch_router.fetch(...args),frame=>{
+  for(const client of manager.clients.values())if(client.frame===frame)manager.removeClient(client.id);
+});
 export async function clear_registrations(hostname){
   manager.revoke(hostname);
   for(const owner of [...owners.values()])if(new URL(owner.profile.origin).hostname===hostname)owner.close();
@@ -45,7 +55,7 @@ export async function create_service_worker_driver(profile,{command,timeout=3000
       const id=++next,result=call('dispatch',[{...event,id}],event.ports||[]),lifetime=call('wait',[id]);
       result.catch(()=>{});lifetime.catch(()=>{});
       return {id,result,lifetime,read:()=>call('read',[id]),cancel:reason=>call('cancel',[id,reason]),
-        handled:error=>call('handled',[id,error]),release:()=>call('release',[id])};
+        abort:reason=>call('abort',[id,reason]),handled:error=>call('handled',[id,error]),release:()=>call('release',[id])};
     },
     close(reason=new DOMException('Service worker owner was terminated','AbortError')){
       if(closed)return;closed=true;owners.delete(frame.id);abort.abort(reason);

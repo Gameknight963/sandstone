@@ -5,6 +5,7 @@ import { ctx } from "./context.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
 import {document_referrer_policy} from './intercept/document.mjs';
 import {reserve_keepalive} from './keepalive_budget.mjs';
+import {remember_response} from '../response_metadata.mjs';
 const native_fetch=globalThis.fetch;
 const navigation_data=new WeakMap(),metadata_get=WeakMap.prototype.get,metadata_set=WeakMap.prototype.set,apply=Reflect.apply;
 export function navigation_metadata(response){return apply(metadata_get,navigation_data,[response]);}
@@ -113,6 +114,7 @@ function restore_response(data) {
   for (const [key, value] of Object.entries({url, redirected, type})) {
     Object.defineProperty(response, key, {value});
   }
+  if(status===0)Object.defineProperties(response,{status:{value:0},ok:{value:false}});
   if (data.request_referrer !== undefined) Object.defineProperty(response,'request_referrer',{value:data.request_referrer});
   if(data.request_cross_origin!==undefined)Object.defineProperty(response,'request_cross_origin',{value:data.request_cross_origin});
   if(data.navigation_metadata)apply(metadata_set,navigation_data,[response,data.navigation_metadata]);
@@ -121,7 +123,7 @@ function restore_response(data) {
     const copy = clone();
     return restore_response({...data, body: copy.body});
   }});
-  return response;
+  return remember_response(response,data.items);
 }
 
 export function create_blob_url(blob, target_url = null, request_context = null) {

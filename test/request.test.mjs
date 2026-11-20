@@ -2,6 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {create_request_class} from '../src/frame/request.mjs';
 import {serialize_request} from '../src/frame/polyfill/request.mjs';
+import {remember_request} from '../src/request_metadata.mjs';
+
+test('Trusted worker requests retain destination and referrer through clones and pass-through serialization',async()=>{
+  const Request=create_request_class(()=> 'https://site.test/worker.js',()=> 'about:blank');
+  const request=remember_request(new Request('https://cdn.test/image'),{destination:'image',referrer:'https://site.test/page'});
+  const clone=request.clone(),copy=new Request(clone);
+  assert.equal(copy.destination,'image');assert.equal(copy.referrer,'https://site.test/page');
+  const serialized=await serialize_request(clone,{},'https://site.test/worker.js','about:blank');
+  assert.equal(serialized.options.destination,'image');assert.equal(serialized.options.referrer,'https://site.test/page');
+  assert.equal(new Request(copy,{referrer:''}).referrer,'');
+  assert.equal((await serialize_request(copy,{referrer:''},'https://site.test/worker.js','about:blank')).options.referrer,'');
+});
 
 test('Virtual Request resolves against a changing base and retains native request behavior',async()=>{
   let base='https://site.test/assets/';
