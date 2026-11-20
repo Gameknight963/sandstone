@@ -143,6 +143,11 @@ export async function load_document_xml(source,{scriptingEnabled=true}={}){
       prime_inert_script(copy);for(const attribute of [...copy.attributes])copy.removeAttributeNode(attribute);
       for(const [namespace,name,value] of attributes)dom.attribute.call(copy,namespace,name,value);
       copy.__rewritten__=true;mark_parser_script(copy);
+      // Native XML parser modules are already started without
+      // executing. Preserve that state through later edits and cloning;
+      // scripts created dynamically still use normal module preparation.
+      const kind=is_svg_script(copy)?svg_script_kind(copy.getAttribute('type')):script_kind(copy.getAttribute('type'),copy.getAttribute('language'));
+      if(kind==='module')copy.__sandstone_inert__=true;
     }
     prepare_resources(copy);
     const prepared=rewrite_element(copy);if(prepared)pending.push(Promise.resolve(prepared));
