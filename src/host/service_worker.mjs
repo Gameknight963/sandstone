@@ -34,6 +34,7 @@ export async function create_service_worker_driver(profile,{command,timeout=3000
     return rpc.call_procedure(frame.rpc_target,'service_worker_control',[method,...args],{signal:abort.signal,transfer});
   }
   const owner={frame,command,profile:normalized,
+    scripts:()=>call('scripts'),
     dispatch(event){
       if(closed)throw new DOMException('Service worker owner was terminated','InvalidStateError');
       const id=++next,result=call('dispatch',[{...event,id}],event.ports||[]),lifetime=call('wait',[id]);
@@ -57,7 +58,7 @@ export async function create_service_worker_driver(profile,{command,timeout=3000
   owners.set(frame.id,owner);document.body.append(frame.iframe);
   try{
     await frame.navigate_to(normalized.scriptURL);abort.signal.throwIfAborted();
-    await rpc.call_procedure(frame.rpc_target,'service_worker_start',[{...normalized,source:profile.source,referrerPolicy:profile.referrerPolicy},timeout],{signal:abort.signal});
+    await rpc.call_procedure(frame.rpc_target,'service_worker_start',[{...normalized,source:profile.source,referrerPolicy:profile.referrerPolicy,scripts:profile.scripts,restoring:!!profile.restoring},timeout],{signal:abort.signal});
     return owner;
   }catch(error){owner.close(error);throw error;}
 }

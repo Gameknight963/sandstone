@@ -6,6 +6,7 @@ import {ctx} from '../context.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {compile_worker_cycles} from '../worker_module_compiler.mjs';
 import {runtime_context_name} from '../runtime_context.mjs';
+import {fetch_service_worker_script} from '../service_worker_scripts.mjs';
 
 // Keep native import out of webpack's chunk loader; every URL here is a prepared blob.
 const native_import = Function("url", "options", "return import(url, options)");
@@ -28,7 +29,7 @@ export const modules = new ModuleLoader({
   contextModule:()=>context_url??=network.create_blob_url(new Blob(['export default '+runtime_context_name+';'],{type:'text/javascript'}),'sandstone:module-context'),
   context:()=>({referrer:ctx.location.href,referrerPolicy:document_referrer_policy(),destination:loader.worker_type==='module'?'worker':'script'}),
   types:globalThis.CSSStyleSheet?['javascript','json','css']:['javascript','json'],
-  fetch: (url, options,type) => network.fetch(url, {...options,mode:'cors',destination:type==='json'?'json':type==='css'?'style':options.destination||'script'}),
+  fetch: (url, options,type) => fetch_service_worker_script(url,{...options,mode:'cors',destination:type==='json'?'json':type==='css'?'style':options.destination||'script'},type,network.fetch),
   rewrite: (source, options) => parser.rewrite_js(source, options),
   createURL: (source, type, original) => network.create_blob_url(new Blob([source], {type}), original),
   register(imports) {

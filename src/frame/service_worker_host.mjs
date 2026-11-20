@@ -15,6 +15,6 @@ rpc.rpc_handlers.service_worker_start=async(profile,timeout)=>{
 };
 rpc.rpc_handlers.service_worker_control=(method,...args)=>{
   authorize();if(!bridge)throw new DOMException('Service worker owner is not running','InvalidStateError');
-  if(!['dispatch','wait','read','cancel','handled','release','close'].includes(method))throw new TypeError('Unknown service worker owner operation');
+  if(!['dispatch','wait','read','cancel','handled','release','close','scripts'].includes(method))throw new TypeError('Unknown service worker owner operation');
   return bridge[method](...args);
 };

@@ -21,6 +21,7 @@ import {verifyNodeDocuments} from './node-documents.playwright.mjs';
 import {verifyServiceWorkerRuntime} from './service-worker-runtime.playwright.mjs';
 import {verifyServiceWorkerOwner} from './service-worker-owner.playwright.mjs';
 import {verifyServiceWorkerStorage} from './service-worker-storage.playwright.mjs';
+import {verifyServiceWorkerScripts} from './service-worker-scripts.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -365,6 +366,7 @@ try {
     result.passed.push(...await timed(verifyServiceWorkerRuntime(page), 'Service worker runtime fixture'));
     result.passed.push(...await timed(verifyServiceWorkerOwner(page), 'Service worker owner fixture'));
     result.passed.push(...await timed(verifyServiceWorkerStorage(page,{storageDenied}), 'Service worker storage fixture'));
+    result.passed.push(...await timed(verifyServiceWorkerScripts(page,{storageDenied}), 'Installed service worker scripts fixture'));
     result.passed.push(...await timed(verifyWorkerCycles(page), 'Cyclic worker module fixture'));
     result.passed.push(...await timed(verifyWorkerNames(page), 'Worker function name fixture'));
     result.passed.push(...await timed(verifyWorkerScopes(page), 'Worker script scope fixture'));

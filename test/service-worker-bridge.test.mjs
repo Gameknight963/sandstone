@@ -56,3 +56,12 @@ test('Closing a service worker bridge rejects pending startup, event and stream 
 test('A stalled service worker operation times out and terminates its owner',async()=>{
   const {bridge,state}=setup({timeout:10});await assert.rejects(bridge.ready,{name:'TimeoutError'});assert.equal(state.terminated,1);
 });
+test('Service worker owner snapshots share a pending request and are rejected during termination',async()=>{
+  const {bridge,sent}=setup();
+  try{
+    bridge.accept({type:'ready'});
+    const first=bridge.scripts(),second=bridge.scripts();assert.equal(first,second);assert.equal(sent.length,1);
+    const scripts=[{url:'https://site.test/worker.js',source:'self.saved=true;'}];bridge.accept({type:'scripts',scripts});assert.deepEqual(await first,scripts);
+    const pending=assert.rejects(bridge.scripts(),{name:'AbortError'});bridge.close();await pending;
+  }finally{bridge.close();}
+});

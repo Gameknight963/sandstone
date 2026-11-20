@@ -3,7 +3,7 @@ import {create_service_worker_dispatcher} from './dispatcher.mjs';
 
 // The owner supplies this private transport. Pages never receive the control
 // port: authored postMessage traffic is delivered as ExtendableMessageEvent.
-export function create_service_worker_runtime({profile,target=globalThis,send,requestMetadata,responseMetadata}){
+export function create_service_worker_runtime({profile,target=globalThis,send,scripts=()=>[],requestMetadata,responseMetadata}){
   const events=create_service_worker_events({requestMetadata,responseMetadata});
   const jobs=new Map(),readers=new Map(),commands=new Map(),queued=[];
   let ready=false,closed=false,nextCommand=0;
@@ -57,6 +57,7 @@ export function create_service_worker_runtime({profile,target=globalThis,send,re
     }
     if(!ready){queued.push(packet);return;}
     try{
+      if(packet.type==='scripts'){reply(packet.id,'scripts',{scripts:scripts()});return;}
       if(packet.type==='dispatch'){await dispatch(packet);return;}
       if(packet.type==='handled'){
         const job=jobs.get(packet.id);if(!job?.fetch)return;

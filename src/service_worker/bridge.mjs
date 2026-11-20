@@ -36,6 +36,12 @@ export class ServiceWorkerBridge{
     return pending.promise;
   }
   handled(id,error){this.job(id);this.send({type:'handled',id,...(error?{error:{name:error.name||'Error',message:error.message||String(error)}}:{})});}
+  scripts(){
+    if(this.scriptRequest)return this.scriptRequest.promise;
+    const pending=this.scriptRequest=this.deferred();
+    try{this.send({type:'scripts'});}catch(error){this.scriptRequest=null;pending.reject(error);}
+    return pending.promise;
+  }
   release(id){
     const job=this.jobs.get(id);if(!job)return;
     const error=new DOMException('Service worker event was released','AbortError');
@@ -45,6 +51,7 @@ export class ServiceWorkerBridge{
   accept(packet){
     if(this.closed||!packet||typeof packet!=='object')return;
     if(packet.type==='ready'){this.startup.resolve();return;}
+    if(packet.type==='scripts'){this.scriptRequest?.resolve(packet.scripts);this.scriptRequest=null;return;}
     if(packet.type==='command'){
       Promise.resolve().then(()=>{
         if(!this.command)throw new DOMException('Service worker owner command is unavailable','NotSupportedError');
@@ -65,6 +72,7 @@ export class ServiceWorkerBridge{
   }
   close(reason=new DOMException('Service worker was terminated','AbortError')){
     if(this.closed)return;this.closed=true;this.startup.reject(reason);
+    this.scriptRequest?.reject(reason);this.scriptRequest=null;
     for(const job of this.jobs.values())for(const pending of [job.result,job.lifetime,job.read,job.cancel])pending?.reject(reason);
     this.jobs.clear();this.terminate();
   }

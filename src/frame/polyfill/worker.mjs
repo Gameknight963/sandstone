@@ -12,6 +12,8 @@ import {parse_referrer_policy,default_referrer_policy} from '../../referrer.mjs'
 import {validate_module_response} from '../modules.mjs';
 import {create_service_worker_runtime,install_service_worker_globals} from '../../service_worker/runtime.mjs';
 import {bind_native_property} from '../global_functions.mjs';
+import {ServiceWorkerScripts} from '../../service_worker/scripts.mjs';
+import {configure_service_worker_scripts,service_worker_script_snapshot,remember_service_worker_script} from '../service_worker_scripts.mjs';
 
 const NativeWorker = globalThis.Worker;
 const native_import_scripts = globalThis.importScripts?.bind(globalThis);
@@ -61,11 +63,17 @@ export function fakeImportScripts(...paths) {
   const urls = paths.map(path => convert_url(String(path), loader.url));
   const blobs = urls.map(url => {
     let source = network.resource_cache[url];
+    if(source===undefined&&worker_options?.service_worker?.restoring)throw new DOMException('Script is absent from the installed service worker','NetworkError');
     if (source === undefined && /^(data|blob):/.test(url) && NativeXHR) {
       const request = new NativeXHR();
       request.open("GET", url, false);
       request.send();
       source = request.responseText;
+      if(worker_options?.service_worker){
+        const headers={};const mime=request.getResponseHeader('content-type');if(mime)headers['content-type']=mime;
+        try{validate_module_response(new Response(source,{headers}),'javascript',url);}catch{throw new DOMException('Invalid imported service worker script','NetworkError');}
+        remember_service_worker_script({url,source,headers:[...new Headers(headers)]});
+      }
       network.cache_put(url, source);
     }
     if (source === undefined && worker_options?.probe) {
@@ -90,7 +98,8 @@ export function initialize_worker(options) {
   worker_options = options;
   loader.set_worker_context(options);
   update_ctx();
-  const service=options.service_worker&&create_service_worker_runtime({profile:options.service_worker,target:ctx.self,send:packet=>native_post({sandstone_service_worker:options.token,...packet})});
+  if(options.service_worker)configure_service_worker_scripts(options.service_worker);
+  const service=options.service_worker&&create_service_worker_runtime({profile:options.service_worker,target:ctx.self,scripts:service_worker_script_snapshot,send:packet=>native_post({sandstone_service_worker:options.token,...packet})});
   if(service){
     install_service_worker_globals(service,{target:ctx.self,names:ctx_vars});
     for(const type of ['install','activate','fetch','message','messageerror'])bind_native_property(ctx.self,'on'+type);
@@ -184,10 +193,12 @@ export class FakeWorker extends EventTarget {
   #source_cross_origins=new Map();
   #referrerPolicy;
   #serviceProfile;
+  #serviceScripts;
 
   constructor(url, options = {}) {
     super();
     this.#serviceProfile=options[service_profile];
+    if(this.#serviceProfile)this.#serviceScripts=new ServiceWorkerScripts(this.#serviceProfile.scripts,{restoring:!!this.#serviceProfile.restoring});
     this.#url = convert_url(String(url), ctx.document?.baseURI || ctx.location.href);
     this.#options = {...options, type: options.type || "classic", credentials: options.credentials || "same-origin"};
     if (!["classic", "module"].includes(this.#options.type)) throw new TypeError("Invalid worker type");
@@ -216,7 +227,7 @@ export class FakeWorker extends EventTarget {
       crypto_available: loader.crypto_available,
       referrer_policy: this.#referrerPolicy,
       origin: new URL(url).protocol === "data:" ? "null" : ctx.origin,
-      ...(this.#serviceProfile?{service_worker:{scope:this.#serviceProfile.scope,scriptURL:this.#url,updateViaCache:this.#serviceProfile.updateViaCache||'imports'}}:{})
+      ...(this.#serviceProfile?{service_worker:{scope:this.#serviceProfile.scope,scriptURL:this.#url,updateViaCache:this.#serviceProfile.updateViaCache||'imports',restoring:!!this.#serviceProfile.restoring,scripts:this.#serviceScripts.snapshot()}}:{})
     };
   }
 
@@ -264,20 +275,23 @@ export class FakeWorker extends EventTarget {
   }
 
   async #fetch_script(resource,url){
-    const response=await network.fetch(resource,{signal:this.#controller.signal,mode:'no-cors',credentials:'include',destination:'script',referrer:url,referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(resource)?{sandstone_worker_script:this.#id}:{})});
+    const options={signal:this.#controller.signal,mode:'no-cors',credentials:'include',destination:'script',referrer:url,referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(resource)?{sandstone_worker_script:this.#id}:{})};
+    const response=await(this.#serviceScripts?this.#serviceScripts.fetch(resource,options,'javascript',network.fetch):network.fetch(resource,options));
     this.#source_cross_origins.set(resource,response.request_cross_origin??response.type==='opaque');
     return response;
   }
 
   async #start() {
     const credentials = this.#options.type === "classic" ? "same-origin" : this.#options.credentials;
-    const response = this.#serviceProfile?new Response(this.#serviceProfile.source,{headers:{'content-type':'text/javascript','referrer-policy':this.#serviceProfile.referrerPolicy||this.#referrerPolicy}}):await network.fetch(this.#url, {credentials,destination:'worker',referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(this.#url)?{mode:'same-origin'}:{}), signal: this.#controller.signal});
+    const serviceEntry=this.#serviceProfile?{url:this.#url,headers:[['content-type','text/javascript'],['referrer-policy',this.#serviceProfile.referrerPolicy||this.#referrerPolicy]],...this.#serviceScripts.entries.get(this.#url),source:this.#serviceProfile.source}:null;
+    const response = serviceEntry?this.#serviceScripts.response(serviceEntry,'javascript'):await network.fetch(this.#url, {credentials,destination:'worker',referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(this.#url)?{mode:'same-origin'}:{}), signal: this.#controller.signal});
     if (!response.ok) throw new TypeError(`Worker request failed: ${response.status}`);
     if(this.#options.type==='module')validate_module_response(response,'javascript',this.#url);
     const network_script=/^https?:/.test(response.url||this.#url);
     this.#referrerPolicy=parse_referrer_policy(response.headers.get('referrer-policy'),network_script?default_referrer_policy:this.#referrerPolicy);
     const source = await response.text();
     const url = response.url || this.#url;
+    if(this.#serviceScripts)this.#serviceScripts.set({...serviceEntry,url,source,responseURL:url,status:response.status,statusText:response.statusText,headers:[...response.headers],redirected:response.redirected,request_cross_origin:false});
     if (this.#terminated) return;
     const register = rpc.create_rpc_wrapper(rpc.host, "frame_register");
     const registration = await register(loader.frame_id, this.#id, url, {worker: true});
@@ -285,10 +299,16 @@ export class FakeWorker extends EventTarget {
     if (this.#terminated) { this.#unregister(); return; }
     this.#source_cross_origins.set(url,false);
     let sources = new Map();
+    if(this.#serviceScripts)for(const script of this.#serviceScripts.snapshot()){
+      if(this.#options.type==='classic')this.#serviceScripts.response(script,'javascript');
+      if(this.#serviceProfile.restoring)sources.set(script.url,script.source);
+      this.#source_urls.set(script.url,script.responseURL||script.url);
+      this.#source_cross_origins.set(script.url,script.request_cross_origin??new URL(script.responseURL||script.url).origin!==ctx.origin);
+    }
     if (this.#options.type === "classic") {
       const prefetched = await prefetch_worker_scripts(source, url, resource => this.#fetch_script(resource,url),sources,this.#source_urls);
       sources = prefetched.cache;
-      if (prefetched.dynamic) await this.#probe(source, url, sources);
+      if (prefetched.dynamic&&!this.#serviceProfile?.restoring) await this.#probe(source, url, sources);
     }
     if (this.#terminated) return;
     this.#bootstrap = this.#blob({...this.#payload(source, url, sources),beacon_context:registration.beacon_context});
