@@ -3,12 +3,14 @@ import {documentSites,interactDocumentTool} from './live-documents.mjs';
 import {gameSites,interactGame} from './live-games.mjs';
 import {search_sites,interactSearchPortal} from './live-search.mjs';
 import {scratchSites,interactScratch} from './live-scratch.mjs';
+import {paintFileSites,interactPaintFiles} from './live-paint-files.mjs';
 
 export const tool_sites=[
   ...documentSites,
   ...gameSites,
   ...search_sites,
   ...scratchSites,
+  ...paintFileSites,
   {id:'squoosh',url:'https://squoosh.app/',editor:true},
   {id:'sqlime',url:'https://sqlime.org/',editor:true}
 ];
@@ -18,6 +20,7 @@ export async function interact_tool(page,proxy,site,{surface,read,wait}){
   if(gameSites.some(game=>game.id===site.id))return interactGame(page,proxy,site,{surface,read,wait});
   if(search_sites.some(search=>search.id===site.id))return interactSearchPortal(page,proxy,{surface,read,wait});
   if(scratchSites.some(editor=>editor.id===site.id))return interactScratch(page,proxy,{surface,read,wait});
+  if(paintFileSites.some(editor=>editor.id===site.id))return interactPaintFiles(page,proxy,{surface,read,wait});
   if(site.id==='sqlime'){
     const editor=surface.locator('#editor');await editor.fill("create table numbers(value); insert into numbers values (6),(7); select sum(value) as answer from numbers;");
     await surface.getByRole('button',{name:'run',exact:true}).click();
