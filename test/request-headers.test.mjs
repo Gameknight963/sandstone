@@ -5,6 +5,14 @@ import {fetch_with_cookies} from '../src/host/request.mjs';
 import {SiteDataStore} from '../src/host/site_data.mjs';
 import {serialize_request} from '../src/frame/polyfill/request.mjs';
 
+test('Blob navigation retains origin comparisons and HTTPS downgrade referrer rules',()=>{
+  for(const scheme of ['http','https']){
+    const origin=scheme+'://referrer.test/',source=origin+'path/page?query=yes',target='blob:'+origin+'id';
+    const expected={'no-referrer':'','same-origin':source,origin,'strict-origin':scheme==='https'?'':origin,'origin-when-cross-origin':scheme==='https'?'':source,'strict-origin-when-cross-origin':scheme==='https'?'':source,'no-referrer-when-downgrade':scheme==='https'?'':source,'unsafe-url':source};
+    for(const [policy,value] of Object.entries(expected))assert.equal(request_referrer(source+'#secret',target,policy),value,scheme+' '+policy);
+  }
+});
+
 test('CORS script resources retain Origin on same-origin GETs without changing fetch API or no-CORS requests',async()=>{
   const seen=[],store=new SiteDataStore(),context={url:'https://site.test/page'};
   const fetch=options=>fetch_with_cookies(async(url,init)=>{seen.push(init.headers);return new Response('ok')},store,'https://site.test/script.js',options,context);

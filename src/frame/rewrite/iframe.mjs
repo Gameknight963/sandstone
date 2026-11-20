@@ -15,7 +15,7 @@ import {resource_attribute} from '../resource_attributes.mjs';
 import {register_media_attributes,render_media_attribute,render_internal_media_attribute,media_attribute_mirror,raw_media_attribute} from '../media_attributes.mjs';
 import {iframe_focus_policy} from '../iframe_focus_policy.mjs';
 import {delay_script_load} from '../script_lifetime.mjs';
-import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../../bootstrap.mjs';
+import {bootstrap_html,bootstrap_xml,create_bootstrap_nonce,runtime_seed} from '../../bootstrap.mjs';
 import {on_shadow_root} from '../shadow_roots.mjs';
 import {cookie_snapshot} from '../polyfill/cookie.mjs';
 import {storage_entries} from '../polyfill/storage.mjs';
@@ -23,7 +23,7 @@ import {service_worker_snapshot} from '../polyfill/service_worker.mjs';
 import {navigation_activation} from '../user_activation.mjs';
 import {decode_document_response} from '../../text_encoding.mjs';
 import {native_dom} from '../dom_operations.mjs';
-import {mime_essence} from '../../mime.mjs';
+import {mime_essence,xml_document_type} from '../../mime.mjs';
 
 const relayed_source=value=>util.url_is_http(value)||/^(?:blob|data):/i.test(String(value));
 
@@ -223,7 +223,8 @@ export function rewrite_iframe(iframe_element) {
     console.log("navigating iframe to", target_url);
     let final_url = target_url;
     let error; //possible network error
-    let html,character_encoding='UTF-8';
+    let html,character_encoding='UTF-8',content_type='text/html';
+    const shares_origin=url=>authored.get('srcdoc')===null&&!url.startsWith('data:')&&(blob||new URL(url).origin===ctx.origin)&&!(authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'));
     let referrer_policy, document_referrer,request_metadata_token;
     if(inline){html=authored.get('srcdoc');referrer_policy=document_referrer_policy();document_referrer=loader.document_referrer;}
     else try {
@@ -240,9 +241,11 @@ export function rewrite_iframe(iframe_element) {
         method: "POST", headers: form_data.headers || {"Content-Type": form_data.enctype}, body: form_data.body
       } : {})});
       if(!current())return;
-      // Keep native rendering for non-HTML local documents. HTML must install
-      // the runtime before authored code can access storage or network APIs.
-      if(local&&mime_essence(response.headers.get('content-type'))!=='text/html'){
+      content_type=xml_document_type(response.headers.get('content-type'))||'text/html';
+      // Opaque/cross-origin XML can use its native parser behind the relay.
+      // Shared-origin XML needs a separate native-origin navigation strategy.
+      const isolated_xml=content_type!=='text/html'&&!shares_origin(response.url||target_url);
+      if(local&&mime_essence(response.headers.get('content-type'))!=='text/html'&&!isolated_xml){
         await response.body?.cancel();if(!current())return;
         retire();runtime_sandbox=false;render_sandbox();
         render_media_attribute(iframe_element,'src',target_url);return;
@@ -258,7 +261,7 @@ export function rewrite_iframe(iframe_element) {
       html=decoded.text;character_encoding=decoded.encoding;
       final_url = response.url||target_url;
       referrer_policy = local?document_referrer_policy():parse_referrer_policy(response.headers.get('referrer-policy'));
-      document_referrer = local?request_referrer(loader.cookie_url||loader.url,blob&&ctx.origin!=='null'?ctx.origin+'/':target_url,iframe_element.referrerPolicy||document_referrer_policy()):response.request_referrer || '';
+      document_referrer = local?request_referrer(loader.cookie_url||loader.url,blob&&ctx.origin!=='null'?'blob:'+ctx.origin+'/':target_url,iframe_element.referrerPolicy||document_referrer_policy()):response.request_referrer || '';
       request_metadata_token=network.navigation_metadata(response);
     }
     catch (e) {
@@ -275,10 +278,12 @@ export function rewrite_iframe(iframe_element) {
       if(!current())return;
 
       //load the frame runtime
-      const bootstrap_nonce=create_bootstrap_nonce(),runtime_source=bootstrap_html(loader.frame_html,bootstrap_nonce,2);
+      const bootstrap_nonce=create_bootstrap_nonce();
       policy_url=/^about:(?:blank|srcdoc)(?:[?#]|$)/.test(final_url)?ctx.location.href:final_url;render_focus();
       const use_inline=authored.get('srcdoc')!==null;
-      const share_origin=!use_inline&&!final_url.startsWith('data:')&&(blob||new URL(final_url).origin===ctx.origin)&&!(authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'));
+      const share_origin=shares_origin(final_url);
+      const mime=error||share_origin?'text/html':content_type;
+      const runtime_source=mime==='text/html'?bootstrap_html(loader.frame_html,bootstrap_nonce,2):bootstrap_xml(loader.runtime_src,mime,bootstrap_nonce,2);
       const runtime_url=use_inline?'about:srcdoc#'+crypto.randomUUID():share_origin?'about:blank?'+crypto.randomUUID():runtime_seed(bootstrap_nonce);
       const runtime_html=use_inline?runtime_source.replace(/(<head[^>]*>)/i,'$1<script>history.replaceState(null,"",'+JSON.stringify(runtime_url)+');document.currentScript.remove();<\/script>'):undefined;
       await new Promise((resolve) => {
@@ -312,7 +317,7 @@ export function rewrite_iframe(iframe_element) {
       try{
         await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:runtime_url,nonce:bootstrap_nonce});
         if(!use_inline&&!share_origin){
-          const prepared=await rpc.load_frame_runtime(iframe_element,runtime_source,bootstrap_nonce,{signal:controller.signal});
+          const prepared=await rpc.load_frame_runtime(iframe_element,runtime_source,bootstrap_nonce,{signal:controller.signal,mime});
           if(!current())return;
           rpc.commit_frame_runtime(iframe_element,prepared,bootstrap_nonce);
           await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:prepared,nonce:bootstrap_nonce});

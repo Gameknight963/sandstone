@@ -17,6 +17,9 @@ export function request_referrer(input, destination, policy = default_referrer_p
   const origin = source.origin + '/';
   const full = source.href.length > 4096 ? origin : source.href;
   const downgrade = source.protocol === 'https:' && target.protocol !== 'https:';
+  // Chromium treats Blob navigation as a non-cryptographic destination even
+  // when its embedded origin matches. Preserve that scheme during comparison.
+  if(target.protocol==='blob:'&&downgrade&&!['same-origin','origin','unsafe-url'].includes(policy))return '';
   switch (policy) {
     case 'no-referrer': return '';
     case 'same-origin': return same ? full : '';
