@@ -26,6 +26,7 @@ import {verifyServiceWorkerManager} from './service-worker-manager.playwright.mj
 import {verifyServiceWorkerFetch} from './service-worker-fetch.playwright.mjs';
 import {verifyServiceWorkerRedirects} from './service-worker-redirect.playwright.mjs';
 import {verifyServiceWorkerClients} from './service-worker-clients.playwright.mjs';
+import {verifyServiceWorkerWorkerClients} from './service-worker-worker-clients.playwright.mjs';
 import {verifyServiceWorkerNavigation} from './service-worker-navigation.playwright.mjs';
 import {verifyPublicServiceWorker} from './service-worker-public.playwright.mjs';
 import {verifyServiceWorkerWindowClients} from './service-worker-window-clients.playwright.mjs';
@@ -380,6 +381,7 @@ try {
     result.passed.push(...await timed(verifyServiceWorkerFetch(page), 'Service worker fetch fixture'));
     result.passed.push(...await timed(verifyServiceWorkerRedirects(page), 'Service worker redirect fixture'));
     result.passed.push(...await timed(verifyServiceWorkerClients(page), 'Service worker client fixture'));
+    result.passed.push(...await timed(verifyServiceWorkerWorkerClients(page), 'Dedicated-worker service worker client fixture'));
     result.passed.push(...await timed(verifyServiceWorkerNavigation(page), 'Service worker navigation fixture'));
     result.passed.push(...await timed(verifyPublicServiceWorker(page), 'Public service worker fixture'));
     result.passed.push(...await timed(verifyServiceWorkerWindowClients(page), 'Service worker window clients fixture'));

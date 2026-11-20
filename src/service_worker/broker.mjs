@@ -74,11 +74,12 @@ export class ServiceWorkerBroker{
   }
   async clientInfo(client){
     const frame=this.frames()[client.frame];if(!frame||frame.document_context!==client.id||this.manager.clients.get(client.id)!==client)return;
+    if(client.type==='worker')return {id:client.id,url:client.url,type:'worker',frameType:'none'};
     let state;try{state=await this.inspectWindow(frame,client.id);}catch{return;}
     if(this.frames()[client.frame]!==frame||frame.document_context!==client.id||this.manager.clients.get(client.id)!==client)return;
     return {id:client.id,url:client.url,type:client.type||'window',frameType:frame.parent_id?'nested':'top-level',visibilityState:state.visibilityState,focused:!!state.focused};
   }
-  eligible(record,client){return client&&new URL(client.creationURL).origin===record.origin;}
+  eligible(record,client){return client&&(client.origin||new URL(client.creationURL).origin)===record.origin;}
   async workerCommand(record,worker,method,args){
     this.manager.valid(record);
     if(method==='clients.get'){
@@ -89,7 +90,7 @@ export class ServiceWorkerBroker{
     if(method==='clients.matchAll')return (await Promise.all([...this.manager.clients.values()].filter(client=>!client.reserved&&this.eligible(record,client)&&(args[0].includeUncontrolled||client.controller===worker)&&['all',client.type||'window'].includes(args[0].type)).map(client=>this.clientInfo(client)))).filter(Boolean);
     if(method==='client.navigate'){
       const client=this.manager.clients.get(args[0]),frame=this.frames()[client?.frame],url=new URL(args[1],worker.scriptURL);
-      if(!this.eligible(record,client)||client.reserved||client.controller!==worker||!frame||frame.document_context!==client.id)throw new TypeError('Client is not controlled by this worker');
+      if(!this.eligible(record,client)||client.type==='worker'||client.reserved||client.controller!==worker||!frame||frame.document_context!==client.id)throw new TypeError('Client is not controlled by this worker');
       if(!/^https?:$/.test(url.protocol))throw new TypeError('Unsupported client navigation URL');
       if(!this.navigateWindow)throw new DOMException('Client navigation is unavailable','NotSupportedError');
       const navigation=await this.navigateWindow(frame,url.href);

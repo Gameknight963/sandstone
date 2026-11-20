@@ -8,23 +8,26 @@ export class ServiceWorkerClients{
   disconnect(frame){for(const client of this.manager.clients.values())if(client.frame===frame)this.manager.removeClient(client.id);}
   async bind(frame,signal){
     const frames=this.frames(),id=frame.document_context,origin=frame.origin||frame.url?.origin;
-    if(!id||frame.worker||frame.service_worker_host||frames[frame.root_id]?.service_worker_host||frame.broadcast_origin?.startsWith('opaque:')||!origin||origin==='null')return null;
+    if(!id||frame.service_worker_host||frames[frame.root_id]?.service_worker_host||frame.broadcast_origin?.startsWith('opaque:')||!origin||origin==='null')return null;
     if(!trustworthy_url(new URL(origin)))return null;
-    const inherited=frame.url.protocol==='about:'&&['blank','srcdoc'].includes(frame.url.pathname)&&!frame.url.search;
+    // Blob URLs created inside the physical opaque sandbox have a null URL
+    // origin. The authenticated worker frame retains its creator's origin.
+    const blobWorker=frame.worker&&frame.url.protocol==='blob:'&&[origin,'null'].includes(frame.url.origin);
+    const inherited=blobWorker||frame.url.protocol==='about:'&&['blank','srcdoc'].includes(frame.url.pathname)&&!frame.url.search;
     if(!inherited&&(!/^https?:$/.test(frame.url.protocol)||frame.url.origin!==origin))return null;
     const parent=this.manager.clients.get(frame.parent_context);
-    const creationURL=inherited?frame.request_url||parent?.creationURL:frame.url.href;
-    if(!creationURL||new URL(creationURL).origin!==origin)return null;
+    const creationURL=inherited&&!blobWorker?frame.request_url||parent?.creationURL:frame.url.href;
+    if(!creationURL||!blobWorker&&new URL(creationURL).origin!==origin)return null;
     const existing=this.manager.clients.get(id);
     if(existing?.navigation_committed&&existing.frame===frame.id)return existing;
-    const client=this.manager.addClient({id,frame:frame.id,url:frame.url.href,creationURL,type:'window'});
+    const client=this.manager.addClient({id,frame:frame.id,url:frame.url.href,creationURL,origin,type:frame.worker?'worker':'window'});
     const current=()=>this.frames()[frame.id]===frame&&frame.document_context===id&&this.manager.clients.get(id)===client&&!signal?.aborted;
     const retire=()=>{if(this.manager.clients.get(id)===client)this.manager.removeClient(id);};
     signal?.addEventListener('abort',retire,{once:true});
     try{
       if(!current()){retire();return null;}
       if(inherited){
-        if(parent?.controller&&!parent.registration?.revoked&&new URL(parent.creationURL).origin===origin)this.manager.control(client,parent.registration,parent.controller);
+        if(parent?.controller&&!parent.registration?.revoked&&(parent.origin||new URL(parent.creationURL).origin)===origin)this.manager.control(client,parent.registration,parent.controller);
       }else{
         const records=await this.manager.list(origin);
         if(!current()){retire();return null;}

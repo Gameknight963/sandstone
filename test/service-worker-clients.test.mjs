@@ -38,14 +38,26 @@ test('Superseded and aborted document lookups cannot reinsert or control their o
   release([{scope:'https://app.test/',active:{id:'worker'}}]);assert.equal(await pending,null);assert.equal(api.clients.size,0);
   const other=api.binder.bind(frame);api.binder.disconnect(frame.id);frame.document_context='replacement';release([]);assert.equal(await other,null);
 });
-test('Owner workers, ordinary workers and insecure/opaque documents never become window clients',async()=>{
+test('Owner workers and insecure/opaque documents never become clients',async()=>{
   const api=environment();
-  for(const changes of [{worker:true},{service_worker_host:true},{origin:'null'},{broadcast_origin:'opaque:test'}]){
+  for(const changes of [{service_worker_host:true},{origin:'null'},{broadcast_origin:'opaque:test'}]){
     const frame=Object.assign(api.frame(),changes);assert.equal(await api.binder.bind(frame),null);
   }
   assert.equal(await api.binder.bind(api.frame('http','http://insecure.test/page')),null);assert.equal(api.clients.size,0);
   const owner=api.frame('owner');owner.service_worker_host=true;const child=api.frame('child');child.root_id=owner.id;
   assert.equal(await api.binder.bind(child),null);
+});
+
+test('HTTP workers select their script scope while blob workers inherit the creator controller',async()=>{
+  const api=environment(),parent=api.frame(undefined,'https://app.test/app/page');
+  const record={scope:'https://app.test/app/',active:{id:'active'}};api.records.push(record);
+  await api.binder.bind(parent);
+  for(const [name,url,controlled] of [['scoped','https://app.test/app/worker.js',true],['outside','https://app.test/worker.js',false],['blob','blob:https://app.test/id',true],['opaqueBlob','blob:null/id',true]]){
+    const frame=api.frame(name,url,name);Object.assign(frame,{worker:true,origin:parent.origin,broadcast_origin:parent.origin,parent_context:parent.document_context,root_id:parent.id});
+    const client=await api.binder.bind(frame);assert.equal(client.type,'worker');assert.equal(client.creationURL,url);assert.equal(client.controller,controlled?record.active:null);
+    api.binder.disconnect(frame.id);assert.equal(api.clients.has(name),false);
+  }
+  const data=api.frame('data','data:text/javascript,','data');data.worker=true;assert.equal(await api.binder.bind(data),null);
 });
 test('Unavailable registration storage leaves ordinary document clients usable for later claims',async()=>{
   const api=environment(),error=new Error('Storage unavailable');api.list=async()=>{throw error;};

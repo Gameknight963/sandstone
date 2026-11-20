@@ -44,6 +44,15 @@ test('Client snapshots cannot complete after their inspected document is replace
   broker.inspectWindow=()=>new Promise(resolve=>release=resolve);const pending=broker.clientInfo(client);frames.frame.document_context='new';release({visibilityState:'hidden',focused:true});assert.equal(await pending,undefined);
 });
 
+test('Dedicated-worker clients are listed without inspecting a document and cannot navigate',async()=>{
+  const {broker,client,record}=environment();client.type='worker';
+  broker.inspectWindow=()=>{throw new Error('Workers have no document');};
+  assert.deepEqual(await broker.clientInfo(client),{id:client.id,url:client.url,type:'worker',frameType:'none'});
+  assert.equal((await broker.workerCommand(record,record.active,'clients.matchAll',[{type:'worker',includeUncontrolled:false}])).length,1);
+  assert.deepEqual(await broker.workerCommand(record,record.active,'clients.matchAll',[{type:'window',includeUncontrolled:true}]),[]);
+  await assert.rejects(broker.workerCommand(record,record.active,'client.navigate',[client.id,'/new']),TypeError);
+});
+
 test('Discarded incoming clients settle pending lookups and closed documents release broker handles',async()=>{
   const {broker,manager,record}=environment();const client={id:'incoming',reserved:true,creationURL:'https://app.test/new'};manager.clients.set(client.id,client);
   const pending=broker.workerCommand(record,record.active,'clients.get',[client.id]);manager.clients.delete(client.id);broker.notify({event:'clientgone',client});assert.equal(await pending,undefined);
