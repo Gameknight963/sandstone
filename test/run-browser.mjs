@@ -53,6 +53,7 @@ import {verifySQLiteFiles} from './sqlite-filesystem.playwright.mjs';
 import {verifyWorkerRuntimeImports} from './worker-runtime-imports.playwright.mjs';
 import {verifyIsolatedWorkerLoaders} from './worker-isolated-loaders.playwright.mjs';
 import {verifyLinkPreloads} from './link-preloads.playwright.mjs';
+import {verifyWorkerBundles} from './worker-bundles.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -256,8 +257,6 @@ const navigationLifetimeTest=await readFile(new URL('navigation-lifetime.playwri
 const verifyNavigationLifetime=runInThisContext(`(${navigationLifetimeTest})`);
 const scriptLabelsTest=await readFile(new URL('script-labels.playwright.js',import.meta.url),'utf8');
 const verifyScriptLabels=runInThisContext(`(${scriptLabelsTest})`);
-const workerBundlesTest=await readFile(new URL('worker-bundles.playwright.js',import.meta.url),'utf8');
-const verifyWorkerBundles=runInThisContext(`(${workerBundlesTest})`);
 const frameReadinessTest=await readFile(new URL('frame-readiness.playwright.js',import.meta.url),'utf8');
 const verifyFrameReadiness=runInThisContext(`(${frameReadinessTest})`);
 const childReadinessTest=await readFile(new URL('child-readiness.playwright.js',import.meta.url),'utf8');
