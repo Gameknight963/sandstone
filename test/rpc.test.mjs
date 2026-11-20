@@ -142,3 +142,13 @@ test('Runtime preparation accepts only the intended seed reply and abort removes
   const controller=new AbortController(),waiting=rpc.load_frame_runtime({contentWindow:target},'runtime html','next-secret',{signal:controller.signal});
   controller.abort();await assert.rejects(waiting,{name:'AbortError'});assert.equal(events.listeners(),0);
 });
+
+test('Runtime preparation forwards XML MIME types and rejects unsupported types without installing a waiter',async t=>{
+  const events=window_events(t),messages=[],target={postMessage:message=>messages.push(message)};
+  assert.throws(()=>rpc.load_frame_runtime({contentWindow:target},'runtime','nonce',{mime:'application/javascript'}),TypeError);
+  assert.equal(messages.length,0);assert.equal(events.listeners(),0);
+  const pending=rpc.load_frame_runtime({contentWindow:target},'<svg/>','xml-secret',{mime:'image/svg+xml'});
+  const request=messages[0];assert.equal(request.mime,'image/svg+xml');
+  events.emit({sandstone_bootstrap:1,type:'runtime_url',id:request.id,nonce:'xml-secret',url:'blob:xml'},target);
+  assert.equal(await pending,'blob:xml');assert.equal(events.listeners(),0);
+});

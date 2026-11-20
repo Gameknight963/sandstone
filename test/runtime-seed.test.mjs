@@ -17,3 +17,15 @@ test('Serialized runtime seeds execute independently and authenticate installati
   deliver({sandstone_bootstrap:1,type:'commit_runtime',nonce:'nonce',url:'blob:wrong'});assert.equal(navigated.length,0);
   deliver({sandstone_bootstrap:1,type:'commit_runtime',nonce:'nonce',url:'blob:seed/runtime'});assert.deepEqual(navigated,['blob:seed/runtime']);assert.equal(removed[0][1],receive);
 });
+
+test('Runtime seeds preserve supported XML MIME types and reject other types before creating a URL',async()=>{
+  for(const mime of ['image/svg+xml','application/xhtml+xml','application/xml','text/xml']){
+    let receive;const created=[],parent={postMessage(){}};
+    const url=runtime_seed('xml-secret'),html=decodeURIComponent(url.slice(url.indexOf(',')+1));
+    const realm=createContext({parent,Blob,URL:{createObjectURL(blob){created.push(blob);return 'blob:xml/runtime'}},location:{href:url},addEventListener(type,callback){receive=callback;}});
+    new Script(html.match(/<script[^>]*>([\s\S]*)<\/script>/)[1]).runInContext(realm);
+    const deliver=message=>receive({isTrusted:true,source:parent,data:{sandstone_bootstrap:1,type:'runtime',nonce:'xml-secret',html:'<xml/>',...message},ports:[],stopImmediatePropagation(){}});
+    deliver({mime:'image/png'});deliver({mime:'text/html;charset=shift_jis'});deliver({mime,nonce:'wrong'});assert.equal(created.length,0);
+    deliver({mime});assert.equal(created.length,1);assert.equal(created[0].type,mime);assert.equal(await created[0].text(),'<xml/>');
+  }
+});

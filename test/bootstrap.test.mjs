@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {runInNewContext} from 'node:vm';
-import {bootstrap_html,bootstrap_worker,bootstrap_attribute,create_bootstrap_nonce,runtime_seed} from '../src/bootstrap.mjs';
+import {bootstrap_html,bootstrap_xml,bootstrap_worker,bootstrap_attribute,create_bootstrap_nonce,runtime_seed,runtime_content_type} from '../src/bootstrap.mjs';
 
 test('Bootstrap nonces use native random bytes without requiring randomUUID',()=>{
   let calls=0;
@@ -24,6 +24,22 @@ test('HTML bootstrap binds the existing runtime script without adding executable
 test('Worker bootstrap configuration exists before runtime evaluation',()=>{
   const context={};runInNewContext(bootstrap_worker('globalThis.observed=globalThis.__sandstone_bootstrap__;','worker-secret'),context);
   assert.equal(context.observed.nonce,'worker-secret');assert.equal(context.observed.channels,1);
+});
+
+test('XML runtime markup retains script text across CDATA terminators and binds its nonce',()=>{
+  const source='globalThis.sample="</script>]]>";';
+  for(const type of ['image/svg+xml','application/xhtml+xml','application/xml','text/xml']){
+    const markup=bootstrap_xml(source,type,'xml-secret',2);
+    const config=JSON.parse(decodeURIComponent(markup.match(/data-sandstone-bootstrap="([^"]+)"/)[1]));
+    assert.deepEqual(config,{nonce:'xml-secret',channels:2});
+    assert.ok(markup.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
+    const script=markup.match(/<script[^>]*>([\s\S]*)<\/script>/)[1];
+    const text=[...script.matchAll(/<!\[CDATA\[([\s\S]*?)\]\]>/g)].map(match=>match[1]).join('');
+    assert.equal(text,source);
+    assert.ok(markup.includes(type==='image/svg+xml'?'<svg xmlns="http://www.w3.org/2000/svg">':'<html xmlns="http://www.w3.org/1999/xhtml">'));
+  }
+  for(const type of ['image/png','application/javascript','text/html;charset=shift_jis'])assert.throws(()=>runtime_content_type(type),TypeError);
+  assert.throws(()=>bootstrap_xml(source,'text/html','nonce'),TypeError);
 });
 
 test('Opaque runtime seeds authenticate parent messages before preparing a bundle URL',async()=>{

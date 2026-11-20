@@ -1,6 +1,6 @@
 import {unwrap_global_target} from './frame/global_functions.mjs';
 import {listen_runtime,unlisten_runtime,runtime_message,stop_runtime_message,post_bootstrap_message} from './frame/runtime_events.mjs';
-import {bootstrap_attribute,bootstrap_global} from './bootstrap.mjs';
+import {bootstrap_attribute,bootstrap_global,runtime_content_type} from './bootstrap.mjs';
 
 const native_timeout=globalThis.setTimeout.bind(globalThis),native_clear_timeout=globalThis.clearTimeout.bind(globalThis);
 
@@ -228,7 +228,8 @@ export function set_host(frame, msg_port, {nonce}={}) {
   post_bootstrap_message(msg_target,msg,[msg_port],!window_frame);
 }
 
-export function load_frame_runtime(frame,html,nonce,{signal}={}){
+export function load_frame_runtime(frame,html,nonce,{signal,mime='text/html'}={}){
+  mime=runtime_content_type(mime);
   const id='runtime:'+Math.random()+':'+Math.random();
   return new Promise((resolve,reject)=>{
     const cleanup=()=>{bootstrap_waiters.delete(receive);release_bootstrap();signal?.removeEventListener('abort',abort);};
@@ -239,7 +240,7 @@ export function load_frame_runtime(frame,html,nonce,{signal}={}){
     };
     if(signal?.aborted){abort();return;}
     bootstrap_waiters.add(receive);listen_bootstrap();signal?.addEventListener('abort',abort,{once:true});
-    try{post_bootstrap_message(unwrap_global_target(frame.contentWindow),{type:'runtime',sandstone_bootstrap:1,id,html,nonce});}catch(error){cleanup();reject(error);}
+    try{post_bootstrap_message(unwrap_global_target(frame.contentWindow),{type:'runtime',sandstone_bootstrap:1,id,html,nonce,mime});}catch(error){cleanup();reject(error);}
   });
 }
 export function commit_frame_runtime(frame,url,nonce){post_bootstrap_message(unwrap_global_target(frame.contentWindow),{type:'commit_runtime',sandstone_bootstrap:1,url,nonce});}
