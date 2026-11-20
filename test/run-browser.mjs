@@ -290,11 +290,24 @@ const cacheStorageTest=await readFile(new URL('cache-storage.playwright.js',impo
 const verifyCacheStorage=runInThisContext(`(${cacheStorageTest})`);
 const artifact = fileURLToPath(new URL("../example/bundled.html", import.meta.url));
 const target = process.argv[2] || pathToFileURL(artifact).href;
-let activeStorageMode;
+let activeStorageMode,activePage,completedFixtures=0;
+async function collectNavigationGarbage(){
+  if(++completedFixtures%10!==0)return;
+  const root=activePage?.frames().find(frame=>frame.parentFrame()===activePage.mainFrame());
+  if(!root)return;
+  // Hundreds of rapid runtime replacements can leave gigabytes of dead code
+  // pending collection. In stress runs a fresh worker allocation can fail
+  // before the old frame's heap is collected.
+  // Collection preserves live objects and keeps this stress suite bounded.
+  const client=await activePage.context().newCDPSession(root);
+  try{await client.send('HeapProfiler.collectGarbage');}
+  finally{await client.detach();}
+}
 async function timed(operation, label) {
   console.log(JSON.stringify({storageDenied:activeStorageMode,fixture:label}));
   let timer;
-  try { return await Promise.race([operation, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label + " timed out")), 30000); })]); }
+  const completed=Promise.resolve(operation).then(async result=>{await collectNavigationGarbage();return result;});
+  try { return await Promise.race([completed, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label + " timed out")), 30000); })]); }
   finally { clearTimeout(timer); }
 }
 const browserChannel = process.env.BROWSER_CHANNEL || "chrome";
@@ -313,7 +326,7 @@ try {
       Object.defineProperty(window, "indexedDB", {get() { throw new DOMException("Storage denied", "SecurityError"); }});
       Object.defineProperty(window,'caches',{configurable:true,get(){throw new DOMException('Storage denied','SecurityError');}});
     });
-    const page = await context.newPage();
+    const page = await context.newPage();activePage=page;completedFixtures=0;
     const browserErrors = [];
     const expectedDiagnostics=new Set();
     page.on("pageerror", error => { browserErrors.push(error.message); console.error("Browser error:", error.message); });
