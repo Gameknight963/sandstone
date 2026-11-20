@@ -12,7 +12,8 @@ import {child_message_parent} from '../window_messages.mjs';
 import {track_iframe,reconcile_iframes} from '../iframe_lifecycle.mjs';
 import {sandbox_tokens} from '../../navigation_policy.mjs';
 import {resource_attribute} from '../resource_attributes.mjs';
-import {register_media_attributes,render_media_attribute,media_attribute_mirror,raw_media_attribute} from '../media_attributes.mjs';
+import {register_media_attributes,render_media_attribute,render_internal_media_attribute,media_attribute_mirror,raw_media_attribute} from '../media_attributes.mjs';
+import {iframe_focus_policy} from '../iframe_focus_policy.mjs';
 import {delay_script_load} from '../script_lifetime.mjs';
 import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../../bootstrap.mjs';
 import {on_shadow_root} from '../shadow_roots.mjs';
@@ -33,6 +34,13 @@ on_shadow_root(root=>listen_runtime(root,'load',capture_runtime_load,true));
 const inline_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'srcdoc');
 const source_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'src');
 const sandbox_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'sandbox');
+const allow_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'allow');
+const policy_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'featurePolicy');
+const focus_allowlist=globalThis.document?.featurePolicy&&Object.getPrototypeOf(document.featurePolicy).getAllowlistForFeature;
+if(allow_descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'allow',{...allow_descriptor,
+  get(){const state=inline_frames.get(this);return state?state.allow():allow_descriptor.get.call(this);},
+  set(value){const state=inline_frames.get(this);return state?state.set_allow(`${value}`):allow_descriptor.set.call(this,value);}
+});
 if(inline_descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'srcdoc',{...inline_descriptor,
   get(){return inline_frames.get(this)?.source()??inline_descriptor.get.call(this);},
   set(value){const state=inline_frames.get(this);return state?state.set(`${value}`):inline_descriptor.set.call(this,value);}
@@ -64,13 +72,25 @@ export function rewrite_iframe(iframe_element) {
   let registered = false;
   let iframe_src = iframe_element.src;
   let authored_src = iframe_element.getAttribute('src');
-  const authored=new Map(['src','srcdoc','sandbox'].map(key=>[key,iframe_element.getAttribute(key)]));
+  const authored=new Map(['src','srcdoc','sandbox','allow'].map(key=>[key,iframe_element.getAttribute(key)]));
   const blank_url=()=>{
     if(authored.get('srcdoc')!==null)return;
     if(!authored_src)return 'about:blank';
     try{const url=new URL(authored_src,ctx.document.baseURI);if(url.protocol==='about:'&&url.pathname==='blank'&&!url.search)return url.href;}catch{}
   };
   let physical_inline='',finish_load,active_target,native_runtime_load,set_src;
+  let policy_url=ctx.location.href;
+  const render_focus=()=>{
+    render_internal_media_attribute(iframe_element,'allow',authored.get('allow'));
+    let defaultAll=false;
+    try{defaultAll=focus_allowlist?.call(policy_descriptor.get.call(iframe_element),'focus-without-user-activation').includes('*')||false;}catch{}
+    let source=ctx.location.href;
+    if(authored_src&&authored.get('srcdoc')===null)try{source=new URL(authored_src,ctx.document.baseURI).href;}catch{source='about:invalid';}
+    render_internal_media_attribute(iframe_element,'allow',iframe_focus_policy(authored.get('allow'),{
+      parent:ctx.origin,document:policy_url,source,
+      opaque:ctx.origin==='null'||authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'),defaultAll
+    }));
+  };
   let runtime_sandbox=authored.get('srcdoc')!==null||!!blank_url();
   let ensure_blank=()=>false,initializing_blank=false,blank_ready=false,blank_runtime,blank_load_pending=true;
   runtime_loads.set(iframe_element,event=>{
@@ -84,8 +104,10 @@ export function rewrite_iframe(iframe_element) {
   };
   const update_inline=(key,value)=>{
     if(key==='src')return set_src(value);
+    if(key==='allow')render_internal_media_attribute(iframe_element,key,authored.get(key));
     authored.set(key,value);
-    if(key==='sandbox'){render_sandbox();return;}
+    if(key==='sandbox'){render_sandbox();render_focus();return;}
+    if(key==='allow'){render_media_attribute(iframe_element,key,value);render_focus();return;}
     // Never install authored markup in the physical document.
     render_media_attribute(iframe_element,'srcdoc',value===null?'':physical_inline);
     if(value!==null){runtime_sandbox=true;render_sandbox();fetch_src('about:srcdoc',null,{srcdoc:true}).catch(console.error);}
@@ -94,10 +116,11 @@ export function rewrite_iframe(iframe_element) {
   register_media_attributes(iframe_element,authored,update_inline,key=>update_inline(key,null));
   const mirror=media_attribute_mirror(iframe_element),sandbox=sandbox_descriptor.get.call(mirror);
   const source_url=()=>{if(authored_src===null)return '';try{return convert_url(authored_src,ctx.document.baseURI,loader.character_encoding);}catch{return authored_src;}};
-  inline_frames.set(iframe_element,{source:()=>authored.get('srcdoc')??'',set:value=>update_inline('srcdoc',value),url:source_url,set_src:value=>set_src(value),sandbox,set_sandbox:value=>update_inline('sandbox',value)});
+  inline_frames.set(iframe_element,{source:()=>authored.get('srcdoc')??'',set:value=>update_inline('srcdoc',value),url:source_url,set_src:value=>set_src(value),sandbox,set_sandbox:value=>update_inline('sandbox',value),allow:()=>authored.get('allow')??'',set_allow:value=>update_inline('allow',value)});
   sandbox_lists.set(sandbox,()=>update_inline('sandbox',mirror.getAttribute('sandbox')));
   for(const key of authored.keys())resource_attribute(iframe_element,key,()=>authored.get(key));
   render_sandbox();
+  render_focus();
   if(authored.get('srcdoc')!==null){render_media_attribute(iframe_element,'src','');render_media_attribute(iframe_element,'srcdoc','');}
   const authored_internal=iframe_element.getAttribute('__src');
   resource_attribute(iframe_element,'src',()=>authored_src);
@@ -239,6 +262,7 @@ export function rewrite_iframe(iframe_element) {
 
       //load the frame runtime
       const bootstrap_nonce=create_bootstrap_nonce(),runtime_source=bootstrap_html(loader.frame_html,bootstrap_nonce,2);
+      policy_url=/^about:(?:blank|srcdoc)(?:[?#]|$)/.test(final_url)?ctx.location.href:final_url;render_focus();
       const use_inline=authored.get('srcdoc')!==null;
       const share_origin=!use_inline&&new URL(final_url).origin===ctx.origin&&!(authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'));
       const runtime_url=use_inline?'about:srcdoc#'+crypto.randomUUID():share_origin?'about:blank?'+crypto.randomUUID():runtime_seed(bootstrap_nonce);

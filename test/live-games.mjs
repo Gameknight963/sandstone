@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 export const gameSites=[
   {id:'xtype',url:'https://phoboslab.org/xtype/',editor:true,timeout:60000},
-  {id:'swooop',url:'https://playcanv.as/apps/R2axJfsc/index.html',editor:true,timeout:90000}
+  {id:'swooop',url:'https://playcanv.as/p/JtL2iqIH/',editor:true,timeout:90000}
 ];
 export async function interactGame(page,proxy,site,{surface,read,wait}){
   if(site.id==='swooop'){
+    await surface.locator('iframe').first().waitFor();
+    surface=surface.frameLocator('iframe');
+    const outerRead=read,outerWait=wait,child=source=>'document.querySelector("iframe").contentWindow.eval('+JSON.stringify(source)+')';
+    read=(page,proxy,source)=>outerRead(page,proxy,child(source));
+    wait=(page,proxy,source)=>outerWait(page,proxy,child(source));
     const game='pc.Application.getApplication().root.findByName("Game").script.game';
     await wait(page,proxy,'!!globalThis.pc?.Application?.getApplication()?.root.findByName("Game")?.script?.game?.player');
     // This engine samples key state once per frame; keep Enter down long enough

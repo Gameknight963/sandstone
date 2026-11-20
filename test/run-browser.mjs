@@ -13,6 +13,7 @@ import {verifyHTMLURLs} from './html-urls.playwright.mjs';
 import {verifyURLSurfaces} from './url-surfaces.playwright.mjs';
 import {verifyImageLoads} from './image-loads.playwright.mjs';
 import {verifyFrameFocus} from './frame-focus.playwright.mjs';
+import {verifyIframeFocusPolicy} from './iframe-focus-policy.playwright.mjs';
 import {verifyBodyHandlers} from './body-handlers.playwright.mjs';
 import {verifyMediaMuted} from './media-muted.playwright.mjs';
 import {verifyMediaPlayback,verifyMediaSources} from './media-playback.playwright.mjs';
@@ -468,6 +469,8 @@ try {
     result.passed.push(...await timed(verifyMedia(page), "Media fixture"));
     result.passed.push(...await timed(verifyImageLoads(page), 'Image load completion fixture'));
     result.passed.push(...await timed(verifyFrameFocus(page), 'Virtual top-level focus fixture'));
+    try{result.passed.push(...await timed(verifyIframeFocusPolicy(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Iframe focus permissions fixture'));}
+    finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyBodyHandlers(page), 'Body window handler fixture'));
     result.passed.push(...await timed(verifyNodeDocuments(page), 'Node document identity fixture'));
     result.passed.push(...await timed(verifyMediaMuted(page), 'Initial media mutedness fixture'));
