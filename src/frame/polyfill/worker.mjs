@@ -320,7 +320,7 @@ export class FakeWorker extends EventTarget {
   async #start() {
     const credentials = this.#options.type === "classic" ? "same-origin" : this.#options.credentials;
     const serviceEntry=this.#serviceProfile?{url:this.#url,headers:[['content-type','text/javascript'],['referrer-policy',this.#serviceProfile.referrerPolicy||this.#referrerPolicy]],...this.#serviceScripts.entries.get(this.#url),source:this.#serviceProfile.source}:null;
-    const response = serviceEntry?this.#serviceScripts.response(serviceEntry,'javascript'):await network.fetch(this.#url, {credentials,destination:'worker',referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(this.#url)?{mode:'same-origin'}:{}), signal: this.#controller.signal});
+    const response = serviceEntry?this.#serviceScripts.response(serviceEntry,'javascript'):await network.fetch(this.#url, {credentials,destination:'worker',referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(this.#url)?{mode:'same-origin',sandstone_worker_entry:this.#id}:{}), signal: this.#controller.signal});
     if (!response.ok) throw new TypeError(`Worker request failed: ${response.status}`);
     if(this.#options.type==='module')validate_module_response(response,'javascript',this.#url);
     const network_script=/^https?:/.test(response.url||this.#url);
@@ -330,7 +330,7 @@ export class FakeWorker extends EventTarget {
     if(this.#serviceScripts)this.#serviceScripts.set({...serviceEntry,url,source,responseURL:url,status:response.status,statusText:response.statusText,headers:[...response.headers],redirected:response.redirected,request_cross_origin:false});
     if (this.#terminated) return;
     const register = rpc.create_rpc_wrapper(rpc.host, "frame_register");
-    const registration = await register(loader.frame_id, this.#id, url, {worker: true});
+    const registration = await register(loader.frame_id, this.#id, url, {worker: true,worker_context:network.worker_context(response)});
     this.#registered = true;
     if (this.#terminated) { this.#unregister(); return; }
     this.#source_cross_origins.set(url,false);
@@ -381,6 +381,7 @@ export class FakeWorker extends EventTarget {
   }
 
   #unregister() {
+    rpc.create_rpc_wrapper(rpc.host,'worker_entry_cancel')(loader.frame_id,this.#id).catch(()=>{});
     if (!this.#registered) return;
     this.#registered = false;
     rpc.create_rpc_wrapper(rpc.host, "frame_unregister")(this.#id).catch(() => {});

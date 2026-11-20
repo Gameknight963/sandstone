@@ -29,7 +29,7 @@ export class ServiceWorkerFetch{
     const race=operation=>Promise.race([operation,abortPromise]);
     signal?.addEventListener('abort',abort,{once:true});
     try{
-      const starting=Promise.resolve(this.manager.dispatch(record,worker,{event:'fetch',request,request_context:context,clientId:context.navigation?context.navigation_previous||'':client.id,resultingClientId:context.navigation?client.id:''},{waitHandled:true})).then(value=>{job=value;if(aborted)stop(signal.reason);return value;});
+      const starting=Promise.resolve(this.manager.dispatch(record,worker,{event:'fetch',request,request_context:context,clientId:context.service_worker_entry?context.service_worker_entry_parent:context.navigation?context.navigation_previous||'':client.id,resultingClientId:context.navigation||context.service_worker_entry?client.id:''},{waitHandled:true})).then(value=>{job=value;if(aborted)stop(signal.reason);return value;});
       job=await race(starting);
       const result=await race(job.result);
       if(result.type==='fallback'){
@@ -58,12 +58,12 @@ export class ServiceWorkerFetch{
       if(location&&[301,302,303,307,308].includes(metadata.status)){
         await response.body?.cancel();cleanup();
         if(request.redirect==='error')throw new TypeError('Redirect disallowed');
-        if(request.redirect==='manual'&&!context.navigation){
+        if(request.redirect==='manual'&&!context.navigation&&!context.service_worker_entry){
           const manual=Response.error();
           Object.defineProperties(manual,{type:{value:'opaqueredirect'},url:{value:url.href}});
           return remember_response(manual,{type:'opaqueredirect',url:url.href});
         }
-        if(context.navigation)return response;
+        if(context.navigation||context.service_worker_entry)return response;
         if(depth===20)throw new TypeError('Too many redirects');
         const next=new URL(location,url);
         if(!/^https?:$/.test(next.protocol)||next.username||next.password)throw new TypeError('Invalid redirect URL');

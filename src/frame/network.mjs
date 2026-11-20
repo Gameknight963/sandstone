@@ -8,6 +8,8 @@ import {reserve_keepalive} from './keepalive_budget.mjs';
 import {remember_response} from '../response_metadata.mjs';
 const native_fetch=globalThis.fetch;
 const navigation_data=new WeakMap(),metadata_get=WeakMap.prototype.get,metadata_set=WeakMap.prototype.set,apply=Reflect.apply;
+const worker_data=new WeakMap();
+export function worker_context(response){return apply(metadata_get,worker_data,[response]);}
 export function navigation_metadata(response){return apply(metadata_get,navigation_data,[response]);}
 
 export const rpc_fetch = rpc.create_rpc_wrapper(rpc.host, "fetch");
@@ -120,6 +122,7 @@ function restore_response(data) {
   if (data.request_referrer !== undefined) Object.defineProperty(response,'request_referrer',{value:data.request_referrer});
   if(data.request_cross_origin!==undefined)Object.defineProperty(response,'request_cross_origin',{value:data.request_cross_origin});
   if(data.navigation_metadata)apply(metadata_set,navigation_data,[response,data.navigation_metadata]);
+  if(data.worker_context)apply(metadata_set,worker_data,[response,data.worker_context]);
   const clone = response.clone.bind(response);
   Object.defineProperty(response, "clone", {value: () => {
     const copy = clone();

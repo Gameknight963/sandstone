@@ -22,6 +22,10 @@ export {broadcast_channels};
 export const ws_connections = {};
 let service_worker_fetch,service_worker_disconnect,service_worker_bind,service_worker_navigation={};
 let service_worker_request_context;
+let worker_entries={};
+export function set_worker_entries(callbacks){worker_entries=callbacks;}
+export function commit_worker_client(frame,token){return worker_entries.commit?.(frame,token);}
+export function reserved_worker_client(token){return worker_entries.reserved?.(token);}
 export function set_service_worker_request_context(callback){service_worker_request_context=callback;}
 export function set_service_worker_fetch(fetch,disconnect,bind,navigation={}){service_worker_fetch=fetch;service_worker_disconnect=disconnect;service_worker_bind=bind;service_worker_navigation=navigation;}
 export function bind_service_worker_client(frame,signal){return service_worker_bind?.(frame,signal);}
@@ -68,6 +72,7 @@ rpc_handlers.fetch_worker_request=(parent_id,worker_id,request_id,url,options)=>
   if(options?.mode==='navigate'||options?.keepalive)throw new TypeError('Invalid synchronous worker request');
   return rpc_handlers.fetch(worker_id,request_id,url,{...options,destination:'',mode:'cors',sandstone_request_context:undefined});
 };
+rpc_handlers.worker_entry_cancel=(parent,target)=>worker_entries.cancel?.(parent,target,iframes[parent]?.document_context);
 
 //handle fetch api requests
 rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navigation_source) {
@@ -97,10 +102,14 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
   const metadataScope=source_context.navigation&&metadataTarget&&metadataParent?navigation_metadata.capture(metadataParent,metadataTarget):undefined;
   if(metadataScope)Object.assign(source_context,{navigation_target:metadataTarget,navigation_owner:metadataParent,navigation_previous:metadataFrame?.document_context||frame.document_context,navigation_opaque:!!options?.sandstone_navigation_opaque});
   const request = {frame_id, controller: new AbortController(), reader: null};
+  if(options?.sandstone_worker_entry){
+    if(options.keepalive||options.mode!=='same-origin'||options.destination!=='worker'||options.method&&options.method!=='GET')throw new TypeError('Invalid worker entry request');
+    source_context.worker_entry_target=options.sandstone_worker_entry;
+  }
   requests.set(key, request);
   let response;
   try {
-    const {sandstone_navigation_activation,sandstone_navigation_target,sandstone_navigation_opaque,sandstone_request_context,...request_options}=options||{};
+    const {sandstone_navigation_activation,sandstone_navigation_target,sandstone_navigation_opaque,sandstone_request_context,sandstone_worker_entry,...request_options}=options||{};
     response = await fetch(url, {...request_options, signal: request.controller.signal},source_context);
     request.reader = response.body?.getReader();
   } catch (error) {
@@ -111,6 +120,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
   var payload = {
     request_referrer: response.request_referrer,
     request_cross_origin:response.request_cross_origin,
+    worker_context:worker_entries.response?.(response),
     navigation_metadata:navigation_metadata.issue(metadataScope,response.url,response.request_metadata,navigation_client(response)),
     has_body: !!request.reader,
     headers: [],

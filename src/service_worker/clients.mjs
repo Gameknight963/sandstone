@@ -19,7 +19,7 @@ export class ServiceWorkerClients{
     const creationURL=inherited&&!blobWorker?frame.request_url||parent?.creationURL:frame.url.href;
     if(!creationURL||!blobWorker&&new URL(creationURL).origin!==origin)return null;
     const existing=this.manager.clients.get(id);
-    if(existing?.navigation_committed&&existing.frame===frame.id)return existing;
+    if((existing?.navigation_committed||existing?.worker_committed)&&existing.frame===frame.id){if(existing.worker_committed)this.manager.notify?.({event:'clientready',client:existing});return existing;}
     const client=this.manager.addClient({id,frame:frame.id,url:frame.url.href,creationURL,origin,type:frame.worker?'worker':'window'});
     const current=()=>this.frames()[frame.id]===frame&&frame.document_context===id&&this.manager.clients.get(id)===client&&!signal?.aborted;
     const retire=()=>{if(this.manager.clients.get(id)===client)this.manager.removeClient(id);};

@@ -11,6 +11,7 @@ import {ServiceWorkerClients} from '../service_worker/clients.mjs';
 import {ServiceWorkerNavigations} from '../service_worker/navigation.mjs';
 import {ServiceWorkerRequests} from '../service_worker/requests.mjs';
 import {ServiceWorkerBroker} from '../service_worker/broker.mjs';
+import {ServiceWorkerWorkerRequests} from '../service_worker/worker_requests.mjs';
 
 let factory;try{factory=globalThis.indexedDB;}catch{}
 export const registrations=new ServiceWorkerStorage(factory,{onCatalog:catalog=>site_data.serviceWorkers=catalog});
@@ -19,6 +20,7 @@ export const manager=new ServiceWorkerManager({storage:registrations,createWorke
   fetch:(url,options,context)=>network.fetch(url,options,{...context,service_worker_bypass:true,url:context.url||context.base||url,top_url:context.top_url||context.url||context.base||url})});
 export const fetch_router=new ServiceWorkerFetch({manager,client:context=>{
   if(context.service_worker_navigation)return context.service_worker_navigation;
+  if(context.service_worker_entry)return context.service_worker_entry;
   const frame=iframes[context.frame_id];
   if(!frame||frame.service_worker_host||iframes[frame.root_id]?.service_worker_host)return null;
   const client=manager.clients.get(context.service_worker_client);
@@ -44,8 +46,10 @@ export const broker=new ServiceWorkerBroker({manager,frames:()=>iframes,
     return frame.navigate_to(url,null,{initiated:true,result_document:true,activation:{transient:false,sticky:false}});
   }});
 export const navigations=new ServiceWorkerNavigations({manager,frames:()=>iframes,route:(...args)=>fetch_router.fetch(...args)});
-network.set_service_worker_fetch((url,options,context,network)=>context?.navigation?navigations.fetch(url,options,context,network):fetch_router.fetch(url,options,context,network),
-  (frame,options)=>{clients.disconnect(frame);navigations.disconnect(frame,options);broker.disconnect(frame);},(frame,signal)=>clients.bind(frame,signal),
+export const worker_entries=new ServiceWorkerWorkerRequests({manager,frames:()=>iframes,route:(...args)=>fetch_router.fetch(...args)});
+network.set_worker_entries(Object.fromEntries(['response','commit','cancel','reserved'].map(key=>[key,worker_entries[key].bind(worker_entries)])));
+network.set_service_worker_fetch((url,options,context,network)=>context?.worker_entry_target?worker_entries.fetch(url,options,context,network):context?.navigation?navigations.fetch(url,options,context,network):fetch_router.fetch(url,options,context,network),
+  (frame,options)=>{clients.disconnect(frame);navigations.disconnect(frame,options);worker_entries.disconnect(frame);broker.disconnect(frame);},(frame,signal)=>clients.bind(frame,signal),
   Object.fromEntries(['response','commit','cancel','reserved'].map(key=>[key,navigations[key].bind(navigations)])));
 rpc.rpc_handlers.service_worker_open=async(id,token,port)=>{
   Object.getOwnPropertyDescriptor(MessagePort.prototype,'onmessage').get.call(port);

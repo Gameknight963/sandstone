@@ -336,7 +336,7 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
   const parent = iframes[parent_id];
   if (!parent || iframes[child_id]) throw new TypeError("Invalid child frame");
   if(options.beacon_context!==undefined&&(typeof options.beacon_context!=='string'||!/^[a-f0-9]{32}$/.test(options.beacon_context)||network.beacons.contexts.has(options.beacon_context)))throw new TypeError('Invalid document context');
-  if(options.beacon_context&&network.reserved_navigation_client(options.beacon_context))throw new TypeError('Reserved document context');
+  if(options.beacon_context&&(network.reserved_navigation_client(options.beacon_context)||network.reserved_worker_client(options.beacon_context)))throw new TypeError('Reserved document context');
   const root = iframes[parent.root_id];
   const saved = saved_child_histories.get(child_id);
   saved_child_histories.delete(child_id);
@@ -382,10 +382,12 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
     }
   };
   iframes[child_id] = child;
+  let worker_context;
+  try{worker_context=network.commit_worker_client(child,options.worker_context);}catch(error){delete iframes[child_id];throw error;}
   const receipt=network.navigation_metadata.take(options.request_metadata_token,parent_id,child_id,url);
   if(!receipt?.attachment)network.cancel_navigation_client(child_id,parent_id,parent.document_context);
   child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push",request_metadata:receipt?.metadata});
-  child.document_context=network.beacons.register(child_id, {url:child.request_url||(child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href),cookie_url:child.cookie_url,referrer_url:child.referrer_url,top_url:root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id},network.commit_navigation_client(child,receipt?.attachment)||options.beacon_context);
+  child.document_context=network.beacons.register(child_id, {url:child.request_url||(child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href),cookie_url:child.cookie_url,referrer_url:child.referrer_url,top_url:root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id},worker_context||network.commit_navigation_client(child,receipt?.attachment)||options.beacon_context);
   root.rpc_policy.document(child_id,child.document_context,parent.document_context);
   await network.bind_service_worker_client(child);
   if(iframes[child_id]!==child||iframes[parent_id]!==parent||parent.document_context!==child.parent_context)throw new DOMException('Frame was superseded','AbortError');

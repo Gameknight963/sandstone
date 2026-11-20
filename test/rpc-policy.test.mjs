@@ -14,6 +14,13 @@ function fixture(){
   return {frames,contexts,policy,port,call,child};
 }
 
+test('Worker entry cancellation requires the active creator port',()=>{
+  const {call,child,policy,port,contexts}=fixture(),nested={};policy.attach(port,nested,'child');child('child');
+  assert.deepEqual(call('worker_entry_cancel',['root','incoming']),['root','incoming']);
+  assert.throws(()=>call('worker_entry_cancel',['root','incoming'],nested),{name:'SecurityError'});
+  contexts.get('root-document').retired=true;assert.throws(()=>call('worker_entry_cancel',['root','incoming']),{name:'SecurityError'});
+});
+
 test('Service worker owner commands require the active owner port and cannot be supplied by its worker',()=>{
   const {call,frames,policy,port,child,contexts}=fixture(),worker={};
   const args=['root','skipWaiting',[]];
