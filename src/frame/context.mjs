@@ -89,12 +89,12 @@ export class CustomCTX {
   }
 
   fetch() {return polyfill.fetch(...arguments)}
-  postMessage(){return is_worker?native_worker_post(...arguments):self_post_message(...arguments)}
+  get postMessage(){return loader.service_worker?undefined:is_worker?native_worker_post:self_post_message;}
   get Request() {return polyfill.FakeRequest}
   get Function(){return Object.hasOwn(internal,'Function')?internal.Function:polyfill.Function;}
   set Function(value){internal.Function=value;}
   get URL() {return polyfill.FakeURL}
-  get Worker() {return polyfill.FakeWorker}
+  get Worker() {return loader.service_worker?undefined:polyfill.FakeWorker}
   get importScripts() {return is_worker ? polyfill.fakeImportScripts : undefined}
   get XMLHttpRequest() {return polyfill.FakeXMLHttpRequest}
   get EventSource() {return polyfill.FakeEventSource}

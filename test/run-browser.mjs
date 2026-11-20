@@ -18,6 +18,7 @@ import {verifyMediaMuted} from './media-muted.playwright.mjs';
 import {verifyMediaPlayback,verifyMediaSources} from './media-playback.playwright.mjs';
 import {verifyMutationQueues} from './mutation-observer.playwright.mjs';
 import {verifyNodeDocuments} from './node-documents.playwright.mjs';
+import {verifyServiceWorkerRuntime} from './service-worker-runtime.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -359,6 +360,7 @@ try {
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
+    result.passed.push(...await timed(verifyServiceWorkerRuntime(page), 'Service worker runtime fixture'));
     result.passed.push(...await timed(verifyWorkerCycles(page), 'Cyclic worker module fixture'));
     result.passed.push(...await timed(verifyWorkerNames(page), 'Worker function name fixture'));
     result.passed.push(...await timed(verifyWorkerScopes(page), 'Worker script scope fixture'));

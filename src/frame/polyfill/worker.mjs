@@ -3,13 +3,15 @@ import * as loader from "../loader.mjs";
 import * as rpc from "../../rpc.mjs";
 import {bootstrap_worker,create_bootstrap_nonce} from '../../bootstrap.mjs';
 import * as parser from "../parser.mjs";
-import { ctx, update_ctx, convert_url } from "../context.mjs";
+import { ctx, ctx_vars, update_ctx, convert_url } from "../context.mjs";
 import { modules,evaluate_worker_module } from "./module.mjs";
 import { prefetch_worker_scripts } from "../worker_scripts.mjs";
 import {on_document_unload} from '../runtime_events.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {parse_referrer_policy,default_referrer_policy} from '../../referrer.mjs';
 import {validate_module_response} from '../modules.mjs';
+import {create_service_worker_runtime,install_service_worker_globals} from '../../service_worker/runtime.mjs';
+import {bind_native_property} from '../global_functions.mjs';
 
 const NativeWorker = globalThis.Worker;
 const native_import_scripts = globalThis.importScripts?.bind(globalThis);
@@ -19,6 +21,11 @@ const NativeMessageEvent=globalThis.MessageEvent,NativeErrorEvent=globalThis.Err
 const native_timeout=globalThis.setTimeout.bind(globalThis),native_clear_timeout=globalThis.clearTimeout.bind(globalThis);
 const native_dispatch=globalThis.dispatchEvent?.bind(globalThis);
 const imported_blobs = new Map();
+const service_profile=Symbol('private service worker profile');
+export function create_service_worker(profile){
+  if(typeof profile?.source!=='string')throw new TypeError('A validated service worker script is required');
+  return new FakeWorker(profile.scriptURL,{type:profile.type||'classic',[service_profile]:profile});
+}
 function replace_worker_method(name,value){
   let owner=globalThis;
   while(owner&&!Object.hasOwn(owner,name))owner=Object.getPrototypeOf(owner);
@@ -83,6 +90,11 @@ export function initialize_worker(options) {
   worker_options = options;
   loader.set_worker_context(options);
   update_ctx();
+  const service=options.service_worker&&create_service_worker_runtime({profile:options.service_worker,target:ctx.self,send:packet=>native_post({sandstone_service_worker:options.token,...packet})});
+  if(service){
+    install_service_worker_globals(service,{target:ctx.self,names:ctx_vars});
+    for(const type of ['install','activate','fetch','message','messageerror'])bind_native_property(ctx.self,'on'+type);
+  }
   replace_worker_method('importScripts',fakeImportScripts);
   for (const [url, source] of Object.entries(options.sources || {})) network.cache_put(url, source);
   if(typeof options.source==='string')network.cache_put(options.url,options.source);
@@ -118,6 +130,7 @@ export function initialize_worker(options) {
         fakeImportScripts(options.url);
       }
       mark_worker_started();
+      service?.start();
     } catch (error) {
       native_post({sandstone_worker: options.token, type: "error", message: error.message, name: error.name, stack: error.stack});
     }
@@ -128,14 +141,18 @@ export function initialize_worker(options) {
     event.stopImmediatePropagation();
     globalThis.removeEventListener("message", connect);
     port = event.ports[0];
-    port.onmessage = event => { message_queue.push(event); pump(); };
+    port.onmessage = event => { if(service)void service.receive(event.data);else{message_queue.push(event);pump();} };
     port.onmessageerror = event => { message_queue.push(event); pump(); };
     port.start();
     start();
   };
   globalThis.addEventListener("message", connect);
   const native_close = globalThis.close.bind(globalThis);
-  replace_worker_method('close',() => {
+  if(service){
+    for(const name of ['postMessage','close','Worker','DedicatedWorkerGlobalScope']){
+      let owner=globalThis;while(owner){Reflect.deleteProperty(owner,name);owner=Object.getPrototypeOf(owner);}
+    }
+  }else replace_worker_method('close',() => {
     native_post({sandstone_worker: options.token, type: "closed"});
     native_close();
   });
@@ -166,9 +183,11 @@ export class FakeWorker extends EventTarget {
   #source_urls=new Map();
   #source_cross_origins=new Map();
   #referrerPolicy;
+  #serviceProfile;
 
   constructor(url, options = {}) {
     super();
+    this.#serviceProfile=options[service_profile];
     this.#url = convert_url(String(url), ctx.document?.baseURI || ctx.location.href);
     this.#options = {...options, type: options.type || "classic", credentials: options.credentials || "same-origin"};
     if (!["classic", "module"].includes(this.#options.type)) throw new TypeError("Invalid worker type");
@@ -196,7 +215,8 @@ export class FakeWorker extends EventTarget {
       credentials: this.#options.credentials, runtime_src: loader.runtime_src,
       crypto_available: loader.crypto_available,
       referrer_policy: this.#referrerPolicy,
-      origin: new URL(url).protocol === "data:" ? "null" : ctx.origin
+      origin: new URL(url).protocol === "data:" ? "null" : ctx.origin,
+      ...(this.#serviceProfile?{service_worker:{scope:this.#serviceProfile.scope,scriptURL:this.#url,updateViaCache:this.#serviceProfile.updateViaCache||'imports'}}:{})
     };
   }
 
@@ -251,7 +271,7 @@ export class FakeWorker extends EventTarget {
 
   async #start() {
     const credentials = this.#options.type === "classic" ? "same-origin" : this.#options.credentials;
-    const response = await network.fetch(this.#url, {credentials,destination:'worker',referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(this.#url)?{mode:'same-origin'}:{}), signal: this.#controller.signal});
+    const response = this.#serviceProfile?new Response(this.#serviceProfile.source,{headers:{'content-type':'text/javascript','referrer-policy':this.#serviceProfile.referrerPolicy||this.#referrerPolicy}}):await network.fetch(this.#url, {credentials,destination:'worker',referrerPolicy:this.#referrerPolicy,...(/^https?:/.test(this.#url)?{mode:'same-origin'}:{}), signal: this.#controller.signal});
     if (!response.ok) throw new TypeError(`Worker request failed: ${response.status}`);
     if(this.#options.type==='module')validate_module_response(response,'javascript',this.#url);
     const network_script=/^https?:/.test(response.url||this.#url);

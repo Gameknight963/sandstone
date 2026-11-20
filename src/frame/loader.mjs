@@ -27,6 +27,7 @@ export let runtime_src = self.document?.currentScript?.innerHTML;
 export let worker_type;
 export let worker_origin;
 export let worker_probe = false;
+export let service_worker = false;
 export let url; //the proxied page url
 export let frame_id; //the current frame id
 export let beacon_context;
@@ -123,6 +124,7 @@ export function set_worker_context(options) {
   worker_type = options.type;
   worker_origin = options.origin;
   worker_probe = !!options.probe;
+  service_worker = !!options.service_worker;
   runtime_src = options.runtime_src;
   is_loaded = true;
 }
