@@ -21,6 +21,10 @@ globalThis.structuredClone=new Proxy(clone,{apply(target,receiver,args){return c
 configure_clone(globalThis.structuredClone);
 const data=Object.getOwnPropertyDescriptor(MessageEvent.prototype,'data'),decoded=new WeakMap();
 Object.defineProperty(MessageEvent.prototype,'data',{...data,get(){
-  const source=data.get.call(this),previous=decoded.get(this);if(previous?.source===source)return previous.value;
+  const source=data.get.call(this);
+  // Authored events retain the original object, including proxies and getters.
+  // Only browser-delivered messages have passed through structured cloning.
+  if(!this.isTrusted)return source;
+  const previous=decoded.get(this);if(previous?.source===source)return previous.value;
   const value=client.decode(source);decoded.set(this,{source,value});return value;
 }});

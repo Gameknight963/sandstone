@@ -4,6 +4,16 @@ async page=>{
   await context.route(url+'**',route=>route.fulfill({contentType:'text/html',body:html}));
   const source=`(async()=>{
     const results=[],capture=operation=>{try{return {value:operation()??null};}catch(error){return {error:error.name};}};
+    let messageReads=0;const authored={};Object.defineProperty(authored,'value',{enumerable:true,get(){messageReads++;return 1;}});
+    const synthetic=new MessageEvent('message',{data:authored});
+    results.push({syntheticIdentity:synthetic.data===authored,repeatedIdentity:synthetic.data===synthetic.data,messageReads});
+    authored.later=2;results.push({liveData:synthetic.data.later,messageReads});
+    const opaque=new Proxy({},{ownKeys(){throw new Error('Authored message data must not be traversed');}});
+    results.push(capture(()=>new MessageEvent('message',{data:opaque}).data===opaque));
+    const replacement={reinitialized:true};synthetic.initMessageEvent('message',false,false,replacement,'','',null);
+    results.push({reinitializedIdentity:synthetic.data===replacement});
+    const target=new EventTarget();let dispatched;target.addEventListener('message',event=>{dispatched=event.data===authored;});
+    target.dispatchEvent(new MessageEvent('message',{data:authored}));results.push({dispatched,messageReads});
     for(const value of [new Proxy({value:1},{}),new Proxy([1],{}),history,localStorage])results.push(capture(()=>structuredClone(value)));
     let tagReads=0;const tagged={value:'ordinary'};Object.defineProperty(tagged,Symbol.toStringTag,{get(){tagReads++;throw new Error('Symbol tags are not serialized');}});
     results.push(capture(()=>structuredClone(tagged)),{tagReads});
@@ -32,6 +42,6 @@ async page=>{
     await page.evaluate(({url,html})=>{const previous=sandstone.network.session.fetch;sandstone.network.session.fetch=(target,options)=>String(target).startsWith(url)?Promise.resolve(new Response(html,{headers:{'Content-Type':'text/html'}})):previous(target,options);},{url,html});
     await page.evaluate(url=>main_frame.navigate_to(url),url);const actual=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),source));
     if(JSON.stringify(actual)!==JSON.stringify(expected))throw new Error('Structured clone parity: '+JSON.stringify({expected,actual}));
-    return ['Native structured cloning preserves getter order, container semantics and clone failures','Nonextractable CryptoKeys retain identity, permissions and message interoperability without marker collisions'];
+    return ['Authored message events retain data identity without evaluating getters or proxies','Native structured cloning preserves getter order, container semantics and clone failures','Nonextractable CryptoKeys retain identity, permissions and message interoperability without marker collisions'];
   }finally{await context.close();}
 }

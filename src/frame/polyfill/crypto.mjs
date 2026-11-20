@@ -19,7 +19,9 @@ export function configure_crypto(available) {
   const data = Object.getOwnPropertyDescriptor(MessageEvent.prototype,'data');
   const decoded = new WeakMap();
   Object.defineProperty(MessageEvent.prototype,'data',{...data,get() {
-    const value=data.get.call(this),previous=decoded.get(this);
+    const value=data.get.call(this);
+    if(!this.isTrusted)return value;
+    const previous=decoded.get(this);
     // A window-message capture listener can replace a transport envelope with
     // its payload after an earlier internal listener inspected the same event.
     if(!previous||previous.source!==value)decoded.set(this,{source:value,value:client.decode(value)});
