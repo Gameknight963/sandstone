@@ -47,6 +47,7 @@ function replace_worker_method(name,value){
 }
 let worker_options;
 let sync_client;
+let file_sync_client;
 export function sync_worker_available(url){
   if(!worker_options||worker_options.service_worker||worker_options.probe)return false;
   return !!(NativeXHR&&/^(?:data|blob):/.test(url)||worker_options.sync_http&&NativeSharedBuffer);
@@ -158,7 +159,7 @@ export function initialize_worker(options) {
   loader.set_worker_context(options);
   if(options.sync_http&&!options.service_worker&&!options.probe&&NativeSharedBuffer){
     configure_filesystem_sync(command=>{
-      const response=sync_worker_request('sandstone-filesystem:command',{filesystem:command},0);
+      const response=file_sync_client('sandstone-filesystem:command',{filesystem:command},0);
       const result=JSON.parse(decodeURIComponent(new Headers(response.headers).get('x-sandstone-file-result')));
       if(result.error)throw new DOMException(result.error.message,result.error.name);
       return {...result,bytes:response.bytes};
@@ -196,6 +197,13 @@ export function initialize_worker(options) {
     started = true;
     network.enable_network();
     try {
+      if(options.sync_http&&!options.service_worker&&NativeSharedBuffer){
+        // A nested worker must still reach storage while its creator blocks in
+        // Atomics.wait(). The host routes its port to the owning renderer.
+        const channel=new MessageChannel(),post=channel.port1.postMessage.bind(channel.port1);
+        await rpc.call_procedure(rpc.host,'filesystem_sync_open',[loader.frame_id,loader.beacon_context,channel.port2],{transfer:[channel.port2]});
+        file_sync_client=create_sync_http_client({SharedBuffer:NativeSharedBuffer,post});
+      }
       if (options.type === "module") {
         modules.preamble = "__ctx__.__worker_module_started__();\n";
         const record = modules.record(options.url, "javascript", options.credentials);
@@ -388,12 +396,6 @@ export class FakeWorker extends EventTarget {
     // origins, where native module-worker construction rejects parent blobs.
     this.#worker = new NativeWorker(this.#bootstrap, {...this.#options, type: "classic"});
     if(NativeSharedBuffer&&native_isolated)this.#syncServer=create_sync_http_server({SharedBuffer:NativeSharedBuffer,fetch:async(url,options,signal)=>{
-      if(url==='sandstone-filesystem:command'){
-        let result,bytes;
-        try{const value=await rpc.call_procedure(rpc.host,'filesystem_worker_command',[loader.frame_id,this.#id,options.filesystem]);if(value?.bytes instanceof Uint8Array){bytes=value.bytes;result={};}else result={value};}
-        catch(error){result={error:{name:error.name,message:error.message}};}
-        return new Response(bytes,{headers:{'x-sandstone-file-result':encodeURIComponent(JSON.stringify(result))}});
-      }
       if(options.script===true)return network.fetch(url,{signal,sandstone_worker_script:this.#id,referrerPolicy:this.#referrerPolicy});
       const request=await serialize_request(url,{method:options.method,headers:options.headers,body:restore_sync_body(options.body),credentials:options.credentials,signal},this.#url);
       signal.throwIfAborted();return network.fetch(request.url,{...request.options,signal,sandstone_worker_request:this.#id,referrerPolicy:this.#referrerPolicy});

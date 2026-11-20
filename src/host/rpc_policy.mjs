@@ -1,3 +1,4 @@
+import {worker_renderer} from '../filesystem/worker_context.mjs';
 const self_calls=new Set(['navigate','navigate_target','history_mutate','history_go','window_name','storage_ready','cookies_ready','document_open','idb_command','idb_poll','idb_databases','cache_command','crypto','ws_new','ws_event','ws_send','ws_close','service_worker_open','service_worker_client','worker_entry_cancel']);
 const context_calls=new Set(['beacon','fetch_keepalive','fetch_keepalive_read','fetch_keepalive_abort','fetch_keepalive_done','download_request','download_blob','broadcast_open','broadcast_command','lock_open','lock_query','filesystem_command']);
 const denied=()=>{throw new DOMException('RPC source is not authorized','SecurityError');};
@@ -59,7 +60,13 @@ export class RPCSourcePolicy {
     if(procedure==='service_worker_command'){
       if(args[0]!==scope.id||!this.frames()[scope.id]?.service_worker_host)denied();return args;
     }
-    if(procedure==='fetch_worker_script'||procedure==='fetch_worker_request'||procedure==='filesystem_worker_command'){
+    if(procedure==='filesystem_sync_open'){
+      if(args[0]!==scope.id||args[1]!==scope.context||!this.frames()[scope.id]?.worker)denied();return args;
+    }
+    if(procedure==='filesystem_sync_command'){
+      if(args[0]!==scope.id||worker_renderer(this.frames(),args[1])?.id!==scope.id||this.frames()[args[1]]?.document_context!==args[2])denied();return args;
+    }
+    if(procedure==='fetch_worker_script'||procedure==='fetch_worker_request'){
       if(args[0]!==scope.id||!this.owns(scope,args[1])||!this.frames()[args[1]]?.worker)denied();return args;
     }
     if(procedure==='frame_register'){

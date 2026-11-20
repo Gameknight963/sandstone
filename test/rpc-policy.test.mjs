@@ -3,14 +3,39 @@ import assert from 'node:assert/strict';
 import {RPCSourcePolicy} from '../src/host/rpc_policy.mjs';
 
 test('Filesystem commands cannot borrow another document or worker capability',()=>{
-  const {call,child,policy,port,frames}=fixture(),nested={};policy.attach(port,nested,'child');child('child');
+  const {call,child,policy,port,frames,contexts}=fixture(),nested={};policy.attach(port,nested,'child');child('child');
   assert.deepEqual(call('filesystem_command',['root-document',{op:'root'}]),['root-document',{op:'root'}]);
   assert.throws(()=>call('filesystem_command',['child-document',{op:'root'}]),{name:'SecurityError'});
   assert.throws(()=>call('filesystem_command',['root-document',{op:'root'}],nested),{name:'SecurityError'});
-  assert.throws(()=>call('filesystem_worker_command',['root','child',{op:'syncSize'}]),{name:'SecurityError'});
+  assert.throws(()=>call('filesystem_sync_open',['child','child-document',{}],nested),{name:'SecurityError'});
   frames.child.worker=true;
-  assert.deepEqual(call('filesystem_worker_command',['root','child',{op:'syncSize'}]),['root','child',{op:'syncSize'}]);
-  assert.throws(()=>call('filesystem_worker_command',['root','child',{op:'syncSize'}],nested),{name:'SecurityError'});
+  assert.deepEqual(call('filesystem_sync_open',['child','child-document',{}],nested),['child','child-document',{}]);
+  assert.throws(()=>call('filesystem_sync_open',['child','child-document',{}]),{name:'SecurityError'});
+  assert.throws(()=>call('filesystem_sync_open',['root','root-document',{}],nested),{name:'SecurityError'});
+  assert.throws(()=>call('filesystem_sync_open',['child','root-document',{}],nested),{name:'SecurityError'});
+  contexts.get('child-document').retired=true;
+  assert.throws(()=>call('filesystem_sync_open',['child','child-document',{}],nested),{name:'SecurityError'});
+});
+
+test('Synchronous file relays are restricted to the live renderer of each worker tree',()=>{
+  const {call,child,policy,port,frames,contexts}=fixture(),iframe={};
+  child('parent');frames.parent.worker=true;
+  child('nested','parent','parent-document');frames.nested.worker=true;
+  const request=['root','nested','nested-document',{op:'syncSize'}];
+  assert.deepEqual(call('filesystem_sync_command',request),request);
+  assert.throws(()=>call('filesystem_sync_command',['root','nested','parent-document',{}]),{name:'SecurityError'});
+  policy.attach(port,iframe,'iframe');child('iframe');
+  child('other','iframe','iframe-document');frames.other.worker=true;
+  assert.throws(()=>call('filesystem_sync_command',['root','other','other-document',{}]),{name:'SecurityError'});
+  const other=['iframe','other','other-document',{}];
+  assert.deepEqual(call('filesystem_sync_command',other,iframe),other);
+  assert.throws(()=>call('filesystem_sync_command',request,iframe),{name:'SecurityError'});
+  frames.parent.document_context='replacement';
+  assert.throws(()=>call('filesystem_sync_command',request),{name:'SecurityError'});
+  frames.other.parent_id='other';frames.other.parent_context='other-document';
+  assert.throws(()=>call('filesystem_sync_command',other,iframe),{name:'SecurityError'});
+  contexts.get('iframe-document').retired=true;
+  assert.throws(()=>call('filesystem_sync_command',other,iframe),{name:'SecurityError'});
 });
 
 function fixture(){
