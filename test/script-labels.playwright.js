@@ -34,23 +34,30 @@ async page=>{
     return route.fulfill({contentType:path.endsWith('/index')?'text/html':'application/javascript',body:path.endsWith('/index')?nativeHTML:sources[path]||''});
   });
   const native=await nativeContext.newPage();
+  const stage=value=>console.log(JSON.stringify({fixture:'Script filenames',stage:value}));
+  const workerLog=message=>{if(message.text().startsWith('SCRIPT_LABEL '))stage(message.text());};
+  page.on('console',workerLog);native.on('console',workerLog);
   native.on('console',message=>{if(message.type()==='error')diagnostics.push(message.text());});
   native.on('requestfailed',request=>diagnostics.push({url:request.url(),error:request.failure()}));
   const evaluate=(proxy,source)=>proxy?page.evaluate(source=>main_frame.eval_js(source),source):native.evaluate(source=>eval(source),source);
   const snapshot=async proxy=>JSON.parse(await evaluate(proxy,`(async()=>{
     const workers={};
+    console.log('SCRIPT_LABEL '+${JSON.stringify(proxy?'proxy':'native')}+' snapshot started');
     for(const [path,type,count] of [['worker.js','classic',2],['worker.mjs','module',1]]){
       await new Promise((resolve,reject)=>{
         const worker=new Worker('${origin}/script-labels/assets/'+path,{type});let received=0;
-        const timer=setTimeout(()=>{worker.terminate();reject(new Error('Stack label worker timed out: '+path));},10000);
-        worker.onmessage=event=>{workers[event.data.kind]=event.data;if(++received===count){clearTimeout(timer);worker.terminate();resolve();}};
+        console.log('SCRIPT_LABEL '+${JSON.stringify(proxy?'proxy':'native')}+' constructed '+path);
+        const timer=setTimeout(()=>{console.log('SCRIPT_LABEL worker timeout '+path);worker.terminate();reject(new Error('Stack label worker timed out: '+path));},10000);
+        worker.onmessage=event=>{console.log('SCRIPT_LABEL message '+event.data.kind);workers[event.data.kind]=event.data;if(++received===count){clearTimeout(timer);worker.terminate();resolve();}};
         worker.onerror=event=>{clearTimeout(timer);event.preventDefault();worker.terminate();reject(new Error(event.message));};
       });
     }
     return JSON.stringify({scripts:stackLabels,workers});
   })()`));
   try{
-    await native.goto(start);const expected=await snapshot(false);
+    stage('native navigation');await native.goto(start);
+    stage('native workers');const expected=await snapshot(false);
+    stage('proxy navigation');
     await page.evaluate(async({origin,start,html,sources})=>{
       const previous=sandstone.network.session.fetch;
       globalThis.scriptLabelRequests=[];
@@ -63,10 +70,10 @@ async page=>{
       };
       await main_frame.navigate_to(start);
     },{origin,start,html,sources});
-    const actual=await snapshot(true);
+    stage('proxy workers');const actual=await snapshot(true);
     const requests=await page.evaluate(()=>scriptLabelRequests);
     if(!requests.includes('/script-labels/redirect')||!requests.includes('/script-labels/assets/redirected.js'))throw new Error('Script redirect chain was not exercised: '+JSON.stringify(requests));
     if(JSON.stringify(actual)!==JSON.stringify(expected))throw new Error('Virtual script filename parity: '+JSON.stringify({expected,actual,diagnostics}));
     return ['Virtual filenames and stack-derived asset URLs for classic/module scripts', 'Redirected script filenames, authored sourceURL labels and inline document URLs', 'Virtual filenames in classic/module workers and importScripts dependencies'];
-  }finally{await nativeContext.close();}
+  }finally{page.off('console',workerLog);stage('native context cleanup');await nativeContext.close();}
 }
