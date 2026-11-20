@@ -8,6 +8,8 @@ import {copy_resource_attributes,capture_resource_attributes} from './resource_a
 import {clone_style,capture_style} from './rewrite/style.mjs';
 import {import_declarative_host} from './declarative_html.mjs';
 import {is_svg_script} from './svg_scripts.mjs';
+import {rewrite_xml_stylesheet,copy_xml_stylesheet,capture_xml_stylesheet,is_xml_stylesheet} from './xml_stylesheets.mjs';
+import {unwrap_frame_document} from './document_identity.mjs';
 
 const N=globalThis.Node?.prototype,D=globalThis.Document?.prototype;
 const owner=N&&Object.getOwnPropertyDescriptor(N,'ownerDocument').get;
@@ -20,6 +22,7 @@ export const active_document=document=>!!document&&!!view.call(document);
 export const connected_node=node=>connected.call(node);
 
 export function walk_resources(node,callback,templates=false){
+  node=unwrap_frame_document(node);
   if(!globalThis.Node||!(node instanceof Node))return;
   const pending=[node];
   while(pending.length){
@@ -31,6 +34,7 @@ export function walk_resources(node,callback,templates=false){
 }
 export function prepare_resources(node){
   walk_resources(node,element=>{
+    if(is_xml_stylesheet(element))rewrite_xml_stylesheet(element);
     if(!(element instanceof Element))return;
     rewrite_event_attributes(element);
     observe_media_container(element);
@@ -44,6 +48,7 @@ export function mark_connected_scripts(node){walk_resources(node,element=>mark_s
 export function mark_fragment_scripts(node){walk_resources(node,element=>{if(element instanceof HTMLScriptElement||is_svg_script(element))element.__sandstone_inert__=true;},true);}
 export function copy_resource_node(source,copy,inactive=false,prime=false,serializing=false){
   if(source===copy)return;
+  copy_xml_stylesheet(source,copy);
   const restored=clone_media(source,copy,inactive)||clone_svg_resource(source,copy,inactive);
   if(restored&&!inactive)rewrite_event_attributes(copy);
   clone_script(source,copy,prime,serializing);
@@ -63,12 +68,14 @@ export function copy_resources(source,copy,inactive=false,prime=false){
 }
 
 export function capture_resources(source,shallow=false){
+  const instruction=capture_xml_stylesheet(source);
   const media=capture_media(source),svg=capture_svg_resource(source),script=capture_script(source),attributes=capture_resource_attributes(source),style=capture_style(source);
   const descendants=shallow?[]:[...children.call(source)].map(node=>capture_resources(node));
   const root=source instanceof Element&&clonable_shadow(source),shadow=root&&capture_resources(root),shadow_state=root&&capture_shadow_state(root);
   const template=source instanceof HTMLTemplateElement&&capture_resources(source.content);
   return (copy,inactive=false,prime=false)=>{
     if(copy===source)return;
+    instruction?.(copy);
     const restored=media?.(copy,inactive)||svg?.(copy,inactive);
     if(restored&&!inactive)rewrite_event_attributes(copy);
     script?.(copy,prime);attributes(copy);style?.(copy,shallow);

@@ -9,6 +9,7 @@ import {observe_media_container} from './media.mjs';
 import {inline_style_version,remember_inline_style} from '../style_sources.mjs';
 import {shadow_root} from '../shadow_roots.mjs';
 import {note_autofocus} from '../autofocus.mjs';
+import {is_xml_stylesheet,rewrite_xml_stylesheet} from '../xml_stylesheets.mjs';
 
 const rewritten_elements = new WeakSet();
 
@@ -66,6 +67,7 @@ function rewrite_element_single(element) {
 
 //a recursive wrapper for rewriting an element and its descendants
 export function rewrite_element(element) {
+  if(is_xml_stylesheet(element))return rewrite_xml_stylesheet(element);
   if (element instanceof DocumentFragment || element instanceof Document) {
     return Promise.all([...get_dom_property(element, "children")].map(child => rewrite_element(child)));
   }

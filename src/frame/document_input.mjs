@@ -133,9 +133,6 @@ export async function load_document_xml(source,{scriptingEnabled=true}={}){
     }
   };
   const insert=(node,parent)=>{
-    // An XML stylesheet PI starts a native request upon insertion. Keep it
-    // disconnected until the relay has a handler for this resource type.
-    if(node.nodeType===7&&node.target==='xml-stylesheet')throw new DOMException('XML stylesheet processing is not yet available','NotSupportedError');
     const script=node instanceof HTMLScriptElement||is_svg_script(node);
     const atomic=script||node instanceof HTMLStyleElement||globalThis.SVGStyleElement&&node instanceof SVGStyleElement||node instanceof HTMLTemplateElement;
     const copy=dom.clone.call(node,!!atomic);

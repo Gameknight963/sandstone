@@ -7,12 +7,15 @@ const take=Native?.prototype.takeRecords,observe=Native?.prototype.observe;
 const text_data=globalThis.CharacterData&&Object.getOwnPropertyDescriptor(CharacterData.prototype,'data');
 const native_create_text=globalThis.Document?.prototype.createTextNode;
 const internal_attributes=[];
+const internal_characters=[],authored_characters=new WeakMap(),character_values=document_states('character-record-values');
 const internal_writes=document_states('internal-attribute-writes');
 export const is_internal_attribute_mutation=(element,name)=>!!internal_writes.get(element)?.get(name);
 function collect(state,list){
   for(const record of list){
     const target=native_target.get.call(record);
-    if(target!==state.sentinel&&!internal_attributes.some(entry=>entry.element===target&&record.type==='attributes'&&record.attributeNamespace===null&&record.attributeName===entry.name))state.buffer.push(record);
+    if(target===state.sentinel||record.type==='characterData'&&internal_characters.includes(target)||internal_attributes.some(entry=>entry.element===target&&record.type==='attributes'&&record.attributeNamespace===null&&record.attributeName===entry.name))continue;
+    if(record.type==='characterData'&&authored_characters.has(target)&&record.oldValue!==null)character_values.set(record,authored_characters.get(target));
+    state.buffer.push(record);
   }
 }
 function signal(state,observer){
@@ -38,6 +41,20 @@ export function internal_attribute_mutation(element,name,operation){
     internal_attributes.pop();const count=writes.get(name)-1;if(count)writes.set(name,count);else writes.delete(name);
   }}
 }
+function drain_characters(){
+  live.forEach((_,reference)=>{
+    const observer=reference.deref();if(!observer){live.delete(reference);return;}
+    const state=queues.get(observer);collect(state,take.call(observer));state.signaled=false;signal(state,observer);
+  });
+}
+export function internal_character_data_mutation(node,operation){
+  drain_characters();internal_characters.push(node);
+  try{return operation();}finally{try{drain_characters();}finally{internal_characters.pop();}}
+}
+export function authored_character_data_mutation(node,previous,operation){
+  drain_characters();authored_characters.set(node,previous);
+  try{return operation();}finally{try{drain_characters();}finally{authored_characters.delete(node);}}
+}
 // Runtime observers keep native record targets. Only observers made through
 // the virtual global map targets to the document alias supplied by the page.
 const mark=(list,observer)=>{const aliases=observers.get(observer);if(aliases)for(const record of list){const target=native_target.get.call(record);if(aliases.has(target))records.set(record,aliases.get(target));}return list;};
@@ -61,6 +78,8 @@ export const MutationObserver=Native&&new Proxy(Native,{construct(target,args,ne
   observers.set(observer,new WeakMap());return observer;
 }});
 if(Native){
+  const old_value=Object.getOwnPropertyDescriptor(MutationRecord.prototype,'oldValue');
+  Object.defineProperty(MutationRecord.prototype,'oldValue',{...old_value,get(){return character_values.has(this)?character_values.get(this):old_value.get.call(this);}});
   Object.defineProperty(Native.prototype,'constructor',{...Object.getOwnPropertyDescriptor(Native.prototype,'constructor'),value:MutationObserver});
   const disconnect=Native.prototype.disconnect;
   Native.prototype.observe=new Proxy(observe,{apply(target,receiver,args){

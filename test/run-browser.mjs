@@ -58,6 +58,7 @@ import {verifyLocalIframes} from './local-iframes.playwright.mjs';
 import {verifyXMLRuntimeBootstrap} from './xml-runtime-bootstrap.playwright.mjs';
 import {verifyXMLRuntimeProtocol} from './xml-runtime-protocol.playwright.mjs';
 import {verifyXMLDocuments} from './xml-documents.playwright.mjs';
+import {verifyXMLStylesheets} from './xml-stylesheets.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -343,6 +344,7 @@ try {
     result.passed.push(...await timed(verifyXMLRuntimeBootstrap(page),'XML runtime bootstrap fixture'));
     result.passed.push(...await timed(verifyXMLRuntimeProtocol(page),'XML runtime MIME protocol fixture'));
     result.passed.push(...await timed(verifyXMLDocuments(page),'XML document parser fixture'));
+    result.passed.push(...await timed(verifyXMLStylesheets(page),'XML stylesheet instruction fixture'));
     const globalPatch = JSON.parse(await page.evaluate(() => main_frame.eval_js(`(async () => {
       const original = window.queueMicrotask;
       const calls = [];
