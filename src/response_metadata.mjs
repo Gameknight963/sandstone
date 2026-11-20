@@ -17,7 +17,18 @@ for(const name of ['text','json','blob','arrayBuffer','formData','bytes']){
 }
 const clone=Object.getOwnPropertyDescriptor(NativeResponse.prototype,'clone');
 Object.defineProperty(NativeResponse.prototype,'clone',{...clone,value:new Proxy(clone.value,{apply(target,receiver,args){
-  const state=filtered.get(receiver);if(!state)return Reflect.apply(target,receiver,args);
+  const state=filtered.get(receiver);if(!state){
+    const copy=Reflect.apply(target,receiver,args),metadata=records.get(receiver);
+    if(metadata){
+      // Borrowed prototype calls must retain the same trusted metadata as the
+      // per-response wrappers, without consulting authored own properties.
+      for(const key of ['url','type','redirected','status','statusText'])if(metadata[key]!==undefined)
+        define(copy,key,{value:key==='url'?metadata[key].split('#')[0]:metadata[key]});
+      if(metadata.status!==undefined)define(copy,'ok',{value:metadata.status>=200&&metadata.status<=299});
+      remember_response(copy,metadata);
+    }
+    return copy;
+  }
   if(state.used)throw new TypeError('Response body is already used');
   return filtered_redirect(state.inner,state.snapshot);
 }})});

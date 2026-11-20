@@ -17,15 +17,17 @@ const api=`(async()=>{
   const result={};
   for(const path of ['/end?kind=direct#section','/start?kind=inherit#section','/start?kind=override#section','/start?kind=clear#section','/empty','/bad']){
     try{
-      const response=await fetch(path),clone=response.clone(),url=new URL(response.url),cloneURL=new URL(clone.url);
-      result[path]={status:response.status,redirected:response.redirected,url:url.pathname+url.search+url.hash,clone:cloneURL.pathname+cloneURL.search+cloneURL.hash,sameBody:await response.text()===await clone.text()};
+      const response=await fetch(path),clone=response.clone(),borrowed=Response.prototype.clone.call(response),again=Response.prototype.clone.call(borrowed),url=new URL(response.url),cloneURL=new URL(clone.url);
+      const describe=value=>{const url=new URL(value.url);return {url:url.pathname+url.search+url.hash,metadataMatches:['status','statusText','ok','type','redirected'].every(key=>value[key]===response[key])};};
+      const body=await response.text();
+      result[path]={status:response.status,redirected:response.redirected,url:url.pathname+url.search+url.hash,clone:cloneURL.pathname+cloneURL.search+cloneURL.hash,sameBody:body===await clone.text(),borrowed:describe(borrowed),again:describe(again),borrowedBody:body===await borrowed.text()&&body===await again.text()};
     }catch(error){result[path]={error:error.name};}
   }
   const xhr=new XMLHttpRequest();await new Promise((resolve,reject)=>{xhr.onload=resolve;xhr.onerror=reject;xhr.open('GET','/start?kind=inherit#section');xhr.send();});
   const url=new URL(xhr.responseURL);result.xhr={status:xhr.status,url:url.pathname+url.search+url.hash};
-  const cache=await caches.open('redirect-response-url');await cache.put('/saved',await fetch('/end?kind=cached#section'));
-  const stored=await cache.match('/saved'),copy=stored.clone(),storedURL=new URL(stored.url),copyURL=new URL(copy.url);
-  result.cache={url:storedURL.pathname+storedURL.search+storedURL.hash,clone:copyURL.pathname+copyURL.search+copyURL.hash,sameBody:await stored.text()===await copy.text()};
+  const cache=await caches.open('redirect-response-url'),fresh=await fetch('/end?kind=cached#section');await cache.put('/saved',Response.prototype.clone.call(fresh));await fresh.text();
+  const stored=await cache.match('/saved'),copy=stored.clone(),borrowed=Response.prototype.clone.call(stored),storedURL=new URL(stored.url),copyURL=new URL(copy.url),borrowedURL=new URL(borrowed.url),body=await stored.text();
+  result.cache={url:storedURL.pathname+storedURL.search+storedURL.hash,clone:copyURL.pathname+copyURL.search+copyURL.hash,sameBody:body===await copy.text(),borrowed:{url:borrowedURL.pathname+borrowedURL.search+borrowedURL.hash,metadataMatches:['status','statusText','ok','type','redirected'].every(key=>borrowed[key]===stored[key]),sameBody:body===await borrowed.text()}};
   return result;
 })()`;
 

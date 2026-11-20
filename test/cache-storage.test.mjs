@@ -9,8 +9,8 @@ test('Cache snapshots preserve trusted response metadata across property shadowi
   const {api}=environment(),cache=await api.caches.open('metadata');
   const response=remember_response(new Response('body',{headers:{'x-original':'yes'}}),{url:'https://cache.test/final#section',type:'cors',redirected:true});
   Object.defineProperties(response,{status:{value:206},type:{value:'basic'},url:{value:'https://forged.test/'},headers:{value:new Headers({forged:'yes'})}});
-  await cache.put('/entry',response);
-  const restored=(await cache.match('/entry')).clone(),metadata=response_metadata(restored);
+  await cache.put('/entry',Response.prototype.clone.call(response));
+  const restored=Response.prototype.clone.call((await cache.match('/entry')).clone()),metadata=response_metadata(restored);
   assert.equal(metadata.status,200);assert.equal(metadata.type,'cors');assert.equal(metadata.url,'https://cache.test/final#section');assert.equal(metadata.redirected,true);
   assert.equal(restored.url,'https://cache.test/final');
   assert.equal(metadata.headers.get('x-original'),'yes');assert.equal(metadata.headers.has('forged'),false);assert.equal(await restored.text(),'body');

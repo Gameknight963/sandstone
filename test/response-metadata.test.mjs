@@ -16,8 +16,19 @@ test('A relayed opaque response cannot be laundered through respondWith by shado
   const response=remember_response(new Response('private'),{type:'opaque',status:0});
   Object.defineProperty(response,'type',{value:'default'});
   const event=new events.FetchEvent('fetch',{request:new Request('https://app.test/data',{mode:'cors'})});
-  const result=events.dispatch_event(event,view=>view.respondWith(response));
+  const result=events.dispatch_event(event,view=>view.respondWith(Response.prototype.clone.call(response)));
   await assert.rejects(result.response,TypeError);
+});
+
+test('Borrowed native clones retain trusted metadata and independent bodies without copying authored properties',async()=>{
+  const response=remember_response(new Response('body',{headers:{'x-original':'yes'}}),{url:'https://app.test/final#private',type:'cors',redirected:true});
+  Object.defineProperties(response,{url:{get(){throw new Error('Authored URL getter');}},type:{value:'basic'},status:{value:404},headers:{value:new Headers({forged:'yes'})}});
+  const copy=Response.prototype.clone.call(response),again=Response.prototype.clone.call(copy);
+  assert.equal(copy.url,'https://app.test/final');assert.equal(copy.type,'cors');assert.equal(copy.status,200);assert.equal(copy.redirected,true);assert.equal(copy.ok,true);
+  assert.equal(response_metadata(copy).url,'https://app.test/final#private');assert.equal(response_metadata(again).url,'https://app.test/final#private');
+  assert.equal(copy.headers.get('x-original'),'yes');assert.equal(copy.headers.has('forged'),false);copy.headers.set('x-copy','yes');assert.equal(response_metadata(response).headers.has('x-copy'),false);
+  assert.equal(await copy.text(),'body');assert.equal(response.bodyUsed,false);assert.equal(await again.text(),'body');assert.equal(await response.text(),'body');
+  assert.throws(()=>Response.prototype.clone.call(response),TypeError);assert.throws(()=>Response.prototype.clone.call({}),TypeError);
 });
 
 test('Opaque redirect bodies stay private while clones and cache consumers retain native usage semantics',async()=>{
