@@ -145,6 +145,23 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
   if(workerLoaders&&!module)for(const entry of worker_loader_imports(ast)){
     const scope=scopes.get(entry.imported.callee);let dynamic=false;
     for(let current=scope;current;current=current.parent)if(current.kind==='with')dynamic=true;
+    if(entry.promise){
+      const executorScope=scopes.get(entry.executor.params[0]),callbackScope=scopes.get(entry.callback.callee);
+      if(dynamic||scope?.has('importScripts')||scopes.get(entry.promise.callee)?.has('Promise')||scopes.get(entry.global)?.has(entry.global.name)||callbackScope?.owner(entry.loaded)!==executorScope?.owner(entry.loaded)||entry.failed&&scope?.owner(entry.failed)!==executorScope?.owner(entry.failed))continue;
+      let failed=entry.failed;
+      if(!failed){
+        failed='__sandstone_worker_reject__';let index=0;while(identifiers.has(failed)||source.includes(failed))failed='__sandstone_worker_reject__'+(++index);identifiers.add(failed);
+        const parameter=entry.executor.params[0];
+        // Parenthesize a single bare arrow parameter before adding the reject
+        // callback. A default preserves the executor's authored function length.
+        const bare=entry.executor.type==='ArrowFunctionExpression'&&source.slice(entry.executor.start,parameter.start).trim()==='';
+        edits.push([parameter.start,parameter.start,bare?'(':'']);edits.push([parameter.end,parameter.end,','+failed+'=undefined'+(bare?')':'')]);
+      }
+      workerImports.add(entry.callback);
+      edits.push([entry.metadata.start,entry.metadata.start,`${runtimeContext}.__load_worker_scripts__([${entry.url}],${entry.loaded},${failed},()=>{`]);
+      edits.push([entry.metadata.end,entry.imported.start,';']);edits.push([entry.imported.end,entry.callback.end,';})']);
+      continue;
+    }
     if(dynamic||scope?.has('importScripts')||scope?.owner(entry.failed)!==scopes.get(entry.failedReference)?.owner(entry.failed))continue;
     workerImports.add(entry.imported);workerImports.add(entry.callback);
     edits.push([entry.start,entry.end,`${runtimeContext}.__load_worker_scripts__([${entry.url}],${entry.loaded},${entry.failed},${globalName}.importScripts)${entry.statement?';':''}`]);

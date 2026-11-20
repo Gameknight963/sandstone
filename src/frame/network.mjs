@@ -43,7 +43,7 @@ export function cache_put(url, data) {
 }
 
 export async function fetch(url, options) {
-  if (!requests_allowed) throw "Network request blocked";
+  if (!requests_allowed) throw new TypeError("Network request blocked");
 
   let base_url = ctx.location?.href || loader.url;
   url = new URL(url, base_url);

@@ -5,6 +5,33 @@ import {rewrite_source} from '../src/frame/rewrite/javascript.mjs';
 import {create_worker_script_loader} from '../src/frame/worker_loader.mjs';
 
 const source=`class Loader {load(manager,url,loaded,failed){const options=manager.getConfig().getOptionsLiteral();try{options.policy&&(url=options.policy(url)),importScripts(url),loaded()}catch(error){failed(error)}}}`;
+const promiseSource=`function load(url){return new Promise(loaded=>{if('document' in self){throw new Error('Wrong transport')}else self.moduleURL=url,importScripts(url),loaded()});}`;
+
+test('Promise AMD transports prepare lazy imports and set module metadata at execution time',async()=>{
+  const waiting=[],trace=[],self={};
+  const output=rewrite_source(promiseSource+';[load("one.js"),load("two.js")];',['self','importScripts'],{workerLoaders:true});
+  const promises=runInNewContext(output,{__ctx__:{self,importScripts:url=>trace.push([url,self.moduleURL]),__load_worker_scripts__(paths,loaded,failed,run){waiting.push(()=>{try{run(...paths);loaded()}catch(error){failed(error)}});}}});
+  assert.equal(waiting.length,2);assert.equal(self.moduleURL,undefined);waiting[1]();waiting[0]();await Promise.all(promises);assert.deepEqual(trace,[['two.js','two.js'],['one.js','one.js']]);
+});
+
+test('Promise worker import failures reject both authored and injected rejection callbacks',async()=>{
+  for(const source of [promiseSource,promiseSource.replace('loaded=>','(loaded,failed)=>'),promiseSource.replace('loaded=>','function(loaded)')]){
+    const compiled=rewrite_source(source+';load("missing.js");',['self','importScripts'],{workerLoaders:true});
+    const promise=runInNewContext(compiled,{__ctx__:{self:{},importScripts(){throw new DOMException('Missing','NetworkError');},__load_worker_scripts__(paths,loaded,failed,run){queueMicrotask(()=>{try{run(...paths);loaded()}catch(error){failed(error)}});}}});
+    await assert.rejects(promise,{name:'NetworkError'});
+  }
+});
+
+test('Promise transport rewriting leaves shadowed APIs and ordinary synchronous executors intact',()=>{
+  for(const source of [
+    '(function(Promise){'+promiseSource+'})(Promise);',
+    '(function(importScripts){'+promiseSource+'})(importScripts);',
+    '(function(self){'+promiseSource+'})(self);',
+    promiseSource.replace("if('document' in self){throw new Error('Wrong transport')}else self.moduleURL=url,",''),
+    promiseSource.replace("if('document' in self)","'use strict';if('document' in self)"),
+  ])assert.doesNotMatch(rewrite_source(source,['self','importScripts'],{workerLoaders:true}),/__load_worker_scripts__/);
+  assert.doesNotMatch(rewrite_source(promiseSource,['self','importScripts'],{workerLoaders:false}),/__load_worker_scripts__/);
+});
 test('Worker AMD callback transports prepare lazy scripts while preserving callbacks and native import overrides',()=>{
   const trace=[],manager={getConfig:()=>({getOptionsLiteral:()=>({policy:url=>{trace.push('policy');return url+'?policy';}})})};let finish;
   const imports=()=>trace.push('custom-import');

@@ -9,8 +9,10 @@ import {create_relay_server} from '../example/http.mjs';
 import {server as wisp,logging} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
 import {track_client_sockets} from './client-sockets.mjs';
 import {interact_editor} from './live-editors.mjs';
+import {tool_sites,interact_tool} from './live-tools.mjs';
 
 const sites=[
+  ...tool_sites,
   {id:'photopea',url:'https://www.photopea.com/',editor:true},
   {id:'desmos',url:'https://www.desmos.com/calculator',editor:true},
   {id:'jspaint',url:'https://jspaint.app/',editor:true},
@@ -70,6 +72,7 @@ async function wait(page,proxy,expression){
 const summary=(page,proxy)=>read(page,proxy,'({title:document.title,heading:document.querySelector("h1")?.textContent.trim()||"",links:document.links.length})');
 async function interact(page,proxy,site){
   const surface=proxy?page.frameLocator('iframe[frame-id]'):page;
+  if(tool_sites.some(tool=>tool.id===site.id))return interact_tool(page,proxy,site,{surface,read,wait});
   if(site.editor)return interact_editor(page,proxy,site,{surface,read,wait});
   if(site.id==='excalidraw'){
     await surface.getByRole('button',{name:'Rectangle',exact:true}).click();

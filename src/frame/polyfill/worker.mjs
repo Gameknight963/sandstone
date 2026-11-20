@@ -61,8 +61,12 @@ export function sync_worker_request(url,options,timeout){
   sync_client??=create_sync_http_client({SharedBuffer:NativeSharedBuffer,post:packet=>native_post({sandstone_worker:worker_options.token,...packet})});
   return sync_client(url,{...options,body:snapshot_sync_body(options.body)},timeout);
 }
-let callback_script_loader;
-export function load_worker_scripts(...args){
+let callback_script_loader,startup_imports=0,start_requested=false,start_scheduled=false;
+function schedule_worker_start(){
+  if(worker_ready||!start_requested||start_scheduled||startup_imports)return;
+  start_scheduled=true;native_timeout(()=>{start_scheduled=false;if(startup_imports)return;worker_ready=true;pump();},0);
+}
+export function load_worker_scripts(paths,loaded,failed,execute){
   callback_script_loader??=create_worker_script_loader({cache:network.resource_cache,
     resolve:path=>convert_url(String(path),loader.url),base:()=>loader.url,execute:fakeImportScripts,
     fetch:url=>network.fetch(url,{mode:'no-cors',credentials:'include',destination:'script',referrer:loader.url,referrerPolicy:loader.referrer_policy}),
@@ -71,7 +75,10 @@ export function load_worker_scripts(...args){
       (worker_options.source_cross_origins??={})[url]=response.request_cross_origin??response.type==='opaque';
     }
   });
-  return callback_script_loader(...args);
+  const tracked=!worker_ready;let finished=false;if(tracked)startup_imports++;
+  const release=()=>{if(finished)return;finished=true;if(tracked){startup_imports--;schedule_worker_start();}};
+  const complete=callback=>(...args)=>{try{return callback(...args);}finally{release();}};
+  try{return callback_script_loader(paths,complete(loaded),complete(failed),execute);}catch(error){release();throw error;}
 }
 let worker_ready = false;
 let message_queue = [];
@@ -90,7 +97,7 @@ function pump() {
 
 export function mark_worker_started() {
   if (worker_ready) return;
-  native_timeout(() => { worker_ready = true; pump(); }, 0);
+  start_requested=true;schedule_worker_start();
 }
 
 export function fakeImportScripts(...paths) {
@@ -342,7 +349,7 @@ export class FakeWorker extends EventTarget {
       this.#source_cross_origins.set(script.url,script.request_cross_origin??new URL(script.responseURL||script.url).origin!==ctx.origin);
     }
     if (this.#options.type === "classic") {
-      const prefetched = await prefetch_worker_scripts(source, url, resource => this.#fetch_script(resource,url),sources,this.#source_urls);
+      const prefetched = await prefetch_worker_scripts(source, url, resource => this.#fetch_script(resource,url),sources,this.#source_urls,url,{asyncLoaders:!this.#serviceProfile,staticAMD:!!this.#serviceProfile});
       sources = prefetched.cache;
       if (prefetched.dynamic&&!this.#serviceProfile?.restoring) await this.#probe(source, url, sources);
     }
