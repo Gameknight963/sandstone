@@ -17,9 +17,11 @@ export function create_service_worker_runtime({profile,target=globalThis,send,sc
     return new Promise((resolve,reject)=>{commands.set(id,{resolve,reject});try{send({type:'command',id,method,args});}catch(error){commands.delete(id);reject(error);}});
   }
   const registration=Object.create(null);
+  const clients=Object.create(null);
+  Object.defineProperties(clients,{claim:{value:()=>command('clients.claim'),enumerable:true},[Symbol.toStringTag]:{value:'Clients'}});
   for(const key of ['scope','updateViaCache'])Object.defineProperty(registration,key,{enumerable:true,get:()=>profile[key]});
   Object.defineProperties(registration,{
-    update:{value:()=>command('registration.update'),enumerable:true},
+    update:{value:()=>command('registration.update').then(()=>registration),enumerable:true},
     unregister:{value:()=>command('registration.unregister'),enumerable:true},
     [Symbol.toStringTag]:{value:'ServiceWorkerRegistration'}
   });
@@ -82,7 +84,7 @@ export function create_service_worker_runtime({profile,target=globalThis,send,sc
     for(const reader of readers.values())reader.cancel(reason).catch(()=>{});readers.clear();
     for(const pending of commands.values())pending.reject(reason);commands.clear();queued.length=0;jobs.clear();
   }
-  return {events,dispatcher,registration,skipWaiting:()=>command('skipWaiting'),receive,start,destroy};
+  return {events,dispatcher,registration,clients,skipWaiting:()=>command('skipWaiting'),receive,start,destroy};
 }
 
 export function install_service_worker_globals(runtime,{target=globalThis,names=[]}={}){
@@ -95,7 +97,7 @@ export function install_service_worker_globals(runtime,{target=globalThis,names=
       return Reflect.apply(original,this,args);
     }});
   }
-  const values={...runtime.events,registration:runtime.registration,skipWaiting:runtime.skipWaiting,
+  const values={...runtime.events,registration:runtime.registration,clients:runtime.clients,skipWaiting:runtime.skipWaiting,
     addEventListener:runtime.dispatcher.addEventListener,removeEventListener:runtime.dispatcher.removeEventListener,dispatchEvent:runtime.dispatcher.dispatchEvent};
   for(const key of ['dispatch_event','finish_fetch','expire','view','wrap_listener','untrust','listener_options'])delete values[key];
   for(const [key,value] of Object.entries(values)){

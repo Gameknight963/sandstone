@@ -5,10 +5,14 @@ import {indexed_db} from './indexeddb.mjs';
 import {normalize_registration} from '../service_worker/registration.mjs';
 import {ServiceWorkerStorage} from '../service_worker/storage.mjs';
 import {site_data} from './site_data.mjs';
+import {ServiceWorkerManager} from '../service_worker/manager.mjs';
 
 let factory;try{factory=globalThis.indexedDB;}catch{}
 export const registrations=new ServiceWorkerStorage(factory,{onCatalog:catalog=>site_data.serviceWorkers=catalog});
+export const manager=new ServiceWorkerManager({storage:registrations,createWorker:(profile,options)=>create_service_worker_driver(profile,{timeout:300000,...options}),
+  fetch:(url,options,context)=>network.fetch(url,options,{...context,url:context.url||context.base||url,top_url:context.top_url||context.url||context.base||url})});
 export async function clear_registrations(hostname){
+  manager.revoke(hostname);
   for(const owner of [...owners.values()])if(new URL(owner.profile.origin).hostname===hostname)owner.close();
   await registrations.clear(hostname);
 }
@@ -22,7 +26,8 @@ rpc.rpc_handlers.service_worker_command=(id,method,args)=>{
   return owner.command(method,args);
 };
 
-export async function create_service_worker_driver(profile,{command,timeout=30000}={}){
+export async function create_service_worker_driver(profile,{command,timeout=30000,signal}={}){
+  signal?.throwIfAborted();
   const normalized=normalize_registration(profile.scriptURL,profile,{base:profile.scriptURL});
   if(typeof profile.source!=='string')throw new TypeError('A validated service worker script is required');
   const frame=new ProxyFrame(),abort=new AbortController();let next=0,closed=false;
@@ -44,6 +49,7 @@ export async function create_service_worker_driver(profile,{command,timeout=3000
     },
     close(reason=new DOMException('Service worker owner was terminated','AbortError')){
       if(closed)return;closed=true;owners.delete(frame.id);abort.abort(reason);
+      signal?.removeEventListener('abort',externalAbort);
       try{rpc.notify(frame.rpc_target,'service_worker_control',['close']);}catch{}
       frame.runtime_wait?.abort(reason);frame.navigation_id++;frame.is_navigating=false;
       frame.iframe.remove();
@@ -55,8 +61,11 @@ export async function create_service_worker_driver(profile,{command,timeout=3000
       if(frame.runtime_url)URL.revokeObjectURL(frame.runtime_url);
     }
   };
+  const externalAbort=()=>owner.close(signal.reason);
+  signal?.addEventListener('abort',externalAbort,{once:true});
   owners.set(frame.id,owner);document.body.append(frame.iframe);
   try{
+    signal?.throwIfAborted();
     await frame.navigate_to(normalized.scriptURL);abort.signal.throwIfAborted();
     await rpc.call_procedure(frame.rpc_target,'service_worker_start',[{...normalized,source:profile.source,referrerPolicy:profile.referrerPolicy,scripts:profile.scripts,restoring:!!profile.restoring},timeout],{signal:abort.signal});
     return owner;
