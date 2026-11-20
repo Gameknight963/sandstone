@@ -26,7 +26,7 @@ export function navigate(id, url, reload = true, form_data = null, navigation = 
 export const local_storage = rpc.create_rpc_wrapper(rpc.host, "local_storage");
 export const session_storage = rpc.create_rpc_wrapper(rpc.host, "session_storage");
 
-export let runtime_src = self.document?.currentScript?.innerHTML;
+export let runtime_src = self.document?.currentScript?.textContent;
 export let worker_type;
 export let worker_origin;
 export let worker_probe = false;

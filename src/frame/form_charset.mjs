@@ -21,7 +21,9 @@ const charset_name=name=>typeof name==='string'&&name.toLowerCase()==='_charset_
 // detached and runs before authored code or listeners are installed.
 const direction_types=new Set();let datalist_entries=false,submit_direction=false;
 if(globalThis.document){
-  const form=native_dom.create.call(document,'http://www.w3.org/1999/xhtml','form');
+  // HTML probe fragments must not use the active SVG/XHTML document's parser.
+  const probe=document.implementation.createHTMLDocument('');
+  const form=native_dom.create.call(probe,'http://www.w3.org/1999/xhtml','form');
   const has_charset=submitter=>Array.from(apply(entries,submitter?new NativeFormData(form,submitter):new NativeFormData(form),[])).some(([name])=>name==='_charset_');
   for(const type of ['hidden','text','search','tel','url','email','password','number','color','submit','button','reset','checkbox','radio','file']){
     native_dom.inner.call(form,'<input type="'+type+'" name="field" dirname="_charset_" checked>');

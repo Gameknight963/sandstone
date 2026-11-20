@@ -55,6 +55,7 @@ import {verifyIsolatedWorkerLoaders} from './worker-isolated-loaders.playwright.
 import {verifyLinkPreloads} from './link-preloads.playwright.mjs';
 import {verifyWorkerBundles} from './worker-bundles.playwright.mjs';
 import {verifyLocalIframes} from './local-iframes.playwright.mjs';
+import {verifyXMLRuntimeBootstrap} from './xml-runtime-bootstrap.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -337,6 +338,7 @@ try {
     const requests = [];
     page.on("request", request => requests.push(request.url()));
     const result = await timed(verify(page, target), "Browser compatibility fixture");
+    result.passed.push(...await timed(verifyXMLRuntimeBootstrap(page),'XML runtime bootstrap fixture'));
     const globalPatch = JSON.parse(await page.evaluate(() => main_frame.eval_js(`(async () => {
       const original = window.queueMicrotask;
       const calls = [];
