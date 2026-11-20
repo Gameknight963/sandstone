@@ -15,7 +15,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Browser compatibility runs with both durable and denied storage.
+    timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@v7
