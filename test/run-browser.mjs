@@ -39,6 +39,7 @@ import {verifyWorkerImportAliases} from './worker-import-aliases.playwright.mjs'
 import {verifySyncXHR} from './sync-xhr.playwright.mjs';
 import {verifyNestedWorkerSync} from './nested-worker-sync.playwright.mjs';
 import {verifyFilesystem} from './filesystem.playwright.mjs';
+import {verifyFileWrites} from './filesystem-write.playwright.mjs';
 import {verifySynchronousFiles} from './filesystem-sync.playwright.mjs';
 import {verifySQLiteFiles} from './sqlite-filesystem.playwright.mjs';
 import {verifyWorkerRuntimeImports} from './worker-runtime-imports.playwright.mjs';
@@ -384,6 +385,7 @@ try {
     for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyScriptBodies(page,{batch,batches:3}), 'Script body fixture '+(batch+1)));
     result.passed.push(...await timed(verifyCacheStorage(page), 'CacheStorage fixture'));
     result.passed.push(...await timed(verifyFilesystem(page,{storageDenied}), 'Origin-private filesystem fixture'));
+    result.passed.push(...await timed(verifyFileWrites(page), 'File write conversion fixture'));
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));

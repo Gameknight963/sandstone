@@ -7,10 +7,23 @@ for(const [type,info] of Object.entries(mimeTypes))for(const extension of info.e
 const fileType=name=>name.includes('.')?extensions.get(name.split('.').pop().toLowerCase())||'':'';
 
 const text=value=>{if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);};
-const offset=value=>{const number=Math.trunc(Number(value));if(!Number.isFinite(number)||number<0||number>Number.MAX_SAFE_INTEGER)throw new TypeError('Invalid file offset');return number;};
+const offset=value=>{const number=Math.trunc(+value);if(!Number.isFinite(number)||number<0||number>Number.MAX_SAFE_INTEGER)throw new TypeError('Invalid file offset');return number;};
+const unsigned=value=>{const number=+value;if(!Number.isFinite(number)||number===0)return 0;const result=Math.trunc(number)%2**64;return result<0?result+2**64:result;};
+const usv=value=>text(value).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,'\uFFFD');
 const blobSize=Object.getOwnPropertyDescriptor(Blob.prototype,'size').get,blobBytes=Blob.prototype.arrayBuffer;
 const bufferSize=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,'byteLength').get;
+const sharedSize=typeof SharedArrayBuffer==='function'&&Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype,'byteLength').get;
+const isView=ArrayBuffer.isView;
+const viewGetters=[Object.getPrototypeOf(Uint8Array.prototype),DataView.prototype].map(prototype=>Object.fromEntries(['buffer','byteOffset','byteLength'].map(key=>[key,Object.getOwnPropertyDescriptor(prototype,key).get])));
 const branded=(getter,value)=>{try{Reflect.apply(getter,value,[]);return true;}catch{return false;}};
+function viewInfo(value){
+  for(const getters of viewGetters){
+    let buffer;try{buffer=Reflect.apply(getters.buffer,value,[]);}catch{continue;}
+    return {buffer,getters};
+  }
+  throw new TypeError('A buffer view is required');
+}
+function nativeView(value){const {buffer,getters}=viewInfo(value);return new Uint8Array(buffer,Reflect.apply(getters.byteOffset,value,[]),Reflect.apply(getters.byteLength,value,[]));}
 export function create_file_client(dispatch,{worker=false,origin=()=>undefined}={}){
   const handles=new WeakMap(),streams=new WeakMap(),syncHandles=new WeakMap(),secret={},blob=Blob.prototype;let sync;
   const getWriter=WritableStream.prototype.getWriter,write=WritableStreamDefaultWriter.prototype.write,release=WritableStreamDefaultWriter.prototype.releaseLock;
@@ -48,21 +61,49 @@ export function create_file_client(dispatch,{worker=false,origin=()=>undefined}=
       return new FileSystemWritableFileStream(secret,token);
     }
   }
+  function dataValue(value){
+    if(branded(blobSize,value)||branded(bufferSize,value))return value;
+    if(isView(value)){
+      if(!branded(bufferSize,viewInfo(value).buffer))throw new TypeError('Shared buffers are not writable file chunks');
+      return value;
+    }
+    return usv(value);
+  }
+  function convertChunk(value){
+    if(branded(blobSize,value)||isView(value)||branded(bufferSize,value))return dataValue(value);
+    if(value==null||typeof value==='object'||typeof value==='function'){
+      // Web IDL reads dictionary members in alphabetical order. The public
+      // convenience method converts before queueing; writer.write converts
+      // when its chunk reaches the sink. Keep BufferSources live until then.
+      const result=Object.create(null),data=value?.data;
+      if(data!==undefined)result.data=data===null?null:dataValue(data);
+      const position=value?.position;if(position!==undefined)result.position=position===null?null:unsigned(position);
+      const size=value?.size;if(size!==undefined)result.size=size===null?null:unsigned(size);
+      const type=text(value?.type);if(!['write','seek','truncate'].includes(type))throw new TypeError('Invalid file write command');
+      result.type=type;return result;
+    }
+    return usv(value);
+  }
   async function chunk(value){
-    let position,data=value;
-    if(value!==null&&typeof value==='object'&&!branded(blobSize,value)&&!ArrayBuffer.isView(value)&&!branded(bufferSize,value)){
-      const type=text(value.type);
-      if(type==='seek')return {op:'seek',position:offset(value.position)};
-      if(type==='truncate')return {op:'truncate',size:offset(value.size)};
-      if(type!=='write')throw new TypeError('Invalid file write command');
-      if(!('data' in value))throw new TypeError('Write data is required');
-      data=value.data;if(value.position!==undefined)position=offset(value.position);
+    const input=convertChunk(value);let position,data=input;
+    if(input!==null&&typeof input==='object'&&!branded(blobSize,input)&&!isView(input)&&!branded(bufferSize,input)){
+      if(input.type==='seek'){
+        if(input.position==null)throw new DOMException('Seek position is required','SyntaxError');
+        return {op:'seek',position:input.position};
+      }
+      if(input.type==='truncate'){
+        if(input.size==null)throw new DOMException('Truncate size is required','SyntaxError');
+        return {op:'truncate',size:input.size};
+      }
+      if(input.data===undefined)throw new DOMException('Write data is required','SyntaxError');
+      if(input.data===null)throw new TypeError('Write data must not be null');
+      data=input.data;if(input.position!=null)position=input.position;
     }
     let bytes;
     if(branded(blobSize,data))bytes=new Uint8Array(await Reflect.apply(blobBytes,data,[]));
-    else if(ArrayBuffer.isView(data))bytes=new Uint8Array(data.buffer,data.byteOffset,data.byteLength).slice();
+    else if(isView(data))bytes=nativeView(data).slice();
     else if(branded(bufferSize,data))bytes=new Uint8Array(data).slice();
-    else bytes=new TextEncoder().encode(text(data).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,'\uFFFD'));
+    else bytes=new TextEncoder().encode(data);
     return {op:'write',bytes,...(position===undefined?{}:{position})};
   }
   class FileSystemWritableFileStream extends WritableStream{
@@ -72,22 +113,23 @@ export function create_file_client(dispatch,{worker=false,origin=()=>undefined}=
       streams.set(this,token);
     }
     async write(value){
+      if(!streams.has(this))throw new TypeError('Invalid FileSystemWritableFileStream receiver');
       if(!arguments.length)throw new TypeError('Write data is required');
-      return enqueue(this,value);
+      return enqueue(this,convertChunk(value));
     }
-    async seek(position){if(!arguments.length)throw new TypeError('File position is required');return enqueue(this,{type:'seek',position});}
-    async truncate(size){if(!arguments.length)throw new TypeError('File size is required');return enqueue(this,{type:'truncate',size});}
+    async seek(position){if(!streams.has(this))throw new TypeError('Invalid FileSystemWritableFileStream receiver');if(!arguments.length)throw new TypeError('File position is required');return enqueue(this,{type:'seek',position:unsigned(position)});}
+    async truncate(size){if(!streams.has(this))throw new TypeError('Invalid FileSystemWritableFileStream receiver');if(!arguments.length)throw new TypeError('File size is required');return enqueue(this,{type:'truncate',size:unsigned(size)});}
   }
   const view=value=>{
-    if(ArrayBuffer.isView(value))return new Uint8Array(value.buffer,value.byteOffset,value.byteLength);
-    if(branded(bufferSize,value))return new Uint8Array(value);
+    if(isView(value))return nativeView(value);
+    if(branded(bufferSize,value)||sharedSize&&branded(sharedSize,value))return new Uint8Array(value);
     throw new TypeError('A BufferSource is required');
   };
   const syncInfo=handle=>{const state=syncHandles.get(handle);if(!state)throw new TypeError('Invalid FileSystemSyncAccessHandle receiver');if(state.closed)throw new DOMException('File handle is closed','InvalidStateError');return state;};
   class FileSystemSyncAccessHandle{
     constructor(key,token){if(key!==secret)throw new TypeError('Illegal constructor');const handle=new Proxy(this,{});syncHandles.set(handle,{token,closed:false});return handle;}
-    read(buffer,options={}){const state=syncInfo(this),target=view(buffer),result=sync({op:'syncRead',token:state.token,size:target.byteLength,...(options?.at===undefined?{}:{at:offset(options.at)})});target.set(result.bytes);return result.bytes.length;}
-    write(buffer,options={}){const state=syncInfo(this),bytes=view(buffer).slice();return sync({op:'syncWrite',token:state.token,bytes,...(options?.at===undefined?{}:{at:offset(options.at)})}).value;}
+    read(buffer,options={}){const state=syncInfo(this),target=view(buffer),at=options?.at,result=sync({op:'syncRead',token:state.token,size:target.byteLength,...(at===undefined?{}:{at:offset(at)})});target.set(result.bytes);return result.bytes.length;}
+    write(buffer,options={}){const state=syncInfo(this),source=view(buffer),at=options?.at,position=at===undefined?{}:{at:offset(at)},bytes=source.slice();return sync({op:'syncWrite',token:state.token,bytes,...position}).value;}
     truncate(size){const state=syncInfo(this);if(!arguments.length)throw new TypeError('File size is required');sync({op:'syncTruncate',token:state.token,size:offset(size)});}
     getSize(){const state=syncInfo(this);return sync({op:'syncSize',token:state.token}).value;}
     flush(){const state=syncInfo(this);sync({op:'syncFlush',token:state.token});}

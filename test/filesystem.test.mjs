@@ -52,10 +52,31 @@ test('File client streams queue concurrent writes, ignore public overrides and p
   await stream.close();assert.deepEqual([...new Uint8Array(await (await file.getFile()).arrayBuffer())],[97,98,0,0,9]);
   const next=await file.createWritable(),writer=WritableStream.prototype.getWriter.call(next);
   await assert.rejects(next.write('x'),TypeError);await writer.abort();writer.releaseLock();
-  const invalid=await file.createWritable({mode:'exclusive'});await assert.rejects(invalid.seek(-1),TypeError);
+  const invalid=await file.createWritable({mode:'exclusive'});await assert.rejects(invalid.write({type:'write'}),{name:'SyntaxError'});
   const replacement=await file.createWritable({mode:'exclusive'});await replacement.abort();
   assert.equal((await(await root.getFileHandle('png',{create:true})).getFile()).type,'');
 });
+test('File write conversion failures preserve streams while sink failures discard uncommitted data',async()=>{
+  const {service}=fixture(),client=create_file_client(command=>service.command(origin,owner,structuredClone(command))),root=await client.storage.getDirectory(),file=await root.getFileHandle('conversion.txt',{create:true});
+  let stream=await file.createWritable({mode:'exclusive'});
+  for(const value of [null,undefined,Symbol('invalid'),()=>{}])await assert.rejects(stream.write(value),TypeError);
+  await assert.rejects(stream.seek(1n),TypeError);
+  await assert.rejects(file.createWritable({mode:'exclusive'}),{name:'NoModificationAllowedError'});
+  await stream.write('saved');await stream.close();
+  stream=await file.createWritable({mode:'exclusive'});await stream.write('uncommitted');
+  await assert.rejects(stream.write({type:'write'}),{name:'SyntaxError'});
+  assert.equal(await(await file.getFile()).text(),'saved');
+  const next=await file.createWritable({mode:'exclusive'});await next.abort();
+});
+
+test('File write dictionaries convert in member order before queueing without snapshotting queued views early',async()=>{
+  const {service}=fixture(),client=create_file_client(command=>service.command(origin,owner,structuredClone(command))),root=await client.storage.getDirectory(),file=await root.getFileHandle('getters.txt',{create:true}),stream=await file.createWritable();
+  const first=stream.write(new Blob(['first'])),bytes=Uint8Array.of(1,2),order=[];
+  const second=stream.write({get type(){order.push('type');return 'write';},get data(){order.push('data');return bytes;},get position(){order.push('position');return 8;},get size(){order.push('size');return 1;}});
+  assert.deepEqual(order,['data','position','size','type']);bytes.fill(9);
+  await first;await second;await stream.close();assert.deepEqual([...new Uint8Array(await(await file.getFile()).arrayBuffer())],[102,105,114,115,116,0,0,0,9,9]);
+});
+
 test('File handle cloning retains cycles, aliases and native identity without exposing Blob methods',async()=>{
   const {service}=fixture(),client=create_file_client(command=>service.command(origin,owner,structuredClone(command))),root=await client.storage.getDirectory(),file=await root.getFileHandle('x',{create:true});
   const value={file,alias:file,list:[file],map:new Map([[file,root]])};value.self=value;
