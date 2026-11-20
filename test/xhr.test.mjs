@@ -6,6 +6,14 @@ const create = fetch => create_xhr_class({fetch,base:()=> 'https://site.test/bas
 const ended = xhr => new Promise(resolve=>xhr.addEventListener('loadend',resolve,{once:true}));
 const delay = milliseconds => new Promise(resolve=>setTimeout(resolve,milliseconds));
 
+test('Isolated worker synchronous XHR returns completed bytes with native synchronous events and errors',()=>{
+  let fail=false;
+  const XHR=create_xhr_class({isWorker:true,base:()=> 'https://app.test/',fetch(){throw new Error('Must use synchronous transport');},sync_fetch(url,options,timeout){if(fail)throw new DOMException('Timed out','TimeoutError');assert.equal(timeout,20);assert.equal(url,'https://app.test/text');return {status:200,statusText:'OK',url,headers:[['content-type','text/plain;charset=utf-8'],['content-length','4']],bytes:new TextEncoder().encode('a€')};}});
+  const xhr=new XHR(),events=[];for(const type of ['readystatechange','loadstart','progress','load','loadend'])xhr.addEventListener(type,event=>events.push([type,xhr.readyState,event.loaded]));
+  xhr.open('GET','text',false);xhr.timeout=20;xhr.send();assert.equal(xhr.responseText,'a€');assert.equal(xhr.status,200);assert.deepEqual(events,[['readystatechange',1,undefined],['readystatechange',4,undefined],['load',4,4],['loadend',4,4]]);
+  events.length=0;xhr.open('GET','text',false);fail=true;assert.throws(()=>xhr.send(),{name:'TimeoutError'});assert.equal(xhr.readyState,4);assert.equal(xhr.status,0);assert.equal(xhr.responseText,'');assert.deepEqual(events,[['readystatechange',1,undefined]]);
+});
+
 test('XHR snapshots a blank document referrer before body serialization completes', async () => {
   let referrer='',received;
   const XHR=create_xhr_class({base:()=> 'https://site.test/base/',client_referrer:()=>referrer,fetch:async(url,options)=>{

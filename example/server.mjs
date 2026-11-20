@@ -8,6 +8,11 @@ const port = process.env.PORT || 5001;
 const host = process.env.HOST || "0.0.0.0";
 
 app.use(morgan("combined"));
+app.use((request,response,next)=>{
+  response.setHeader('Cross-Origin-Opener-Policy','same-origin');
+  response.setHeader('Cross-Origin-Embedder-Policy','require-corp');
+  next();
+});
 app.use(express.static("./"));
 
 const server = create_relay_server(app);

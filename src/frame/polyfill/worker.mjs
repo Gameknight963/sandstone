@@ -7,6 +7,9 @@ import { ctx, ctx_vars, update_ctx, convert_url } from "../context.mjs";
 import { modules,evaluate_worker_module } from "./module.mjs";
 import { prefetch_worker_scripts } from "../worker_scripts.mjs";
 import {create_worker_script_loader} from '../worker_loader.mjs';
+import {create_sync_http_client,create_sync_http_server} from '../../sync_http.mjs';
+import {snapshot_sync_body,restore_sync_body} from '../../sync_http_body.mjs';
+import {serialize_request} from './request.mjs';
 import {on_document_unload} from '../runtime_events.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {parse_referrer_policy,default_referrer_policy} from '../../referrer.mjs';
@@ -21,6 +24,8 @@ const NativeWorker = globalThis.Worker;
 const native_import_scripts = globalThis.importScripts?.bind(globalThis);
 const native_post = globalThis.postMessage?.bind(globalThis);
 const NativeXHR = globalThis.XMLHttpRequest;
+const NativeSharedBuffer=globalThis.SharedArrayBuffer;
+const native_isolated=globalThis.crossOriginIsolated===true;
 const NativeMessageEvent=globalThis.MessageEvent,NativeErrorEvent=globalThis.ErrorEvent;
 const native_timeout=globalThis.setTimeout.bind(globalThis),native_clear_timeout=globalThis.clearTimeout.bind(globalThis);
 const native_dispatch=globalThis.dispatchEvent?.bind(globalThis);
@@ -40,6 +45,22 @@ function replace_worker_method(name,value){
   else globalThis[name]=value;
 }
 let worker_options;
+let sync_client;
+export function sync_worker_available(url){
+  if(!worker_options||worker_options.service_worker||worker_options.probe)return false;
+  return !!(NativeXHR&&/^(?:data|blob):/.test(url)||worker_options.sync_http&&NativeSharedBuffer);
+}
+export function sync_worker_request(url,options,timeout){
+  if(!sync_worker_available(url))throw new DOMException('Synchronous relay transport is unavailable','InvalidAccessError');
+  if(/^(?:data|blob):/.test(url)){
+    const request=new NativeXHR();request.open(options.method,url,false);request.responseType='arraybuffer';request.timeout=timeout;
+    request.withCredentials=options.credentials==='include';for(const [name,value] of options.headers)request.setRequestHeader(name,value);request.send(options.body);
+    const headers=request.getAllResponseHeaders().trim().split(/[\r\n]+/).filter(Boolean).map(line=>{const index=line.indexOf(':');return [line.slice(0,index),line.slice(index+1).trim()];});
+    return {status:request.status,statusText:request.statusText,url:request.responseURL||url,headers,bytes:new Uint8Array(request.response||new ArrayBuffer(0))};
+  }
+  sync_client??=create_sync_http_client({SharedBuffer:NativeSharedBuffer,post:packet=>native_post({sandstone_worker:worker_options.token,...packet})});
+  return sync_client(url,{...options,body:snapshot_sync_body(options.body)},timeout);
+}
 let callback_script_loader;
 export function load_worker_scripts(...args){
   callback_script_loader??=create_worker_script_loader({cache:network.resource_cache,
@@ -208,6 +229,7 @@ export class FakeWorker extends EventTarget {
   #referrerPolicy;
   #serviceProfile;
   #serviceScripts;
+  #syncServer;
 
   constructor(url, options = {}) {
     super();
@@ -237,7 +259,7 @@ export class FakeWorker extends EventTarget {
     return {
       source:sources.get(url)===source?undefined:source, url, sources: Object.fromEntries(sources), source_urls:Object.fromEntries(this.#source_urls),source_cross_origins:Object.fromEntries(this.#source_cross_origins),probe,
       frame_id: this.#id, token: this.#token, type: this.#options.type,
-      credentials: this.#options.credentials, runtime_src: loader.runtime_src,
+      credentials: this.#options.credentials, runtime_src: loader.runtime_src,sync_http:!!(NativeSharedBuffer&&native_isolated),
       crypto_available: loader.crypto_available,
       referrer_policy: this.#referrerPolicy,
       origin: new URL(url).protocol === "data:" ? "null" : ctx.origin,
@@ -329,8 +351,13 @@ export class FakeWorker extends EventTarget {
     // A classic bootstrap can import worker-local module blobs even on file:
     // origins, where native module-worker construction rejects parent blobs.
     this.#worker = new NativeWorker(this.#bootstrap, {...this.#options, type: "classic"});
+    if(NativeSharedBuffer&&native_isolated)this.#syncServer=create_sync_http_server({SharedBuffer:NativeSharedBuffer,fetch:async(url,options,signal)=>{
+      const request=await serialize_request(url,{method:options.method,headers:options.headers,body:restore_sync_body(options.body),credentials:options.credentials,signal},this.#url);
+      signal.throwIfAborted();return network.fetch(request.url,{...request.options,signal,sandstone_worker_request:this.#id,referrerPolicy:this.#referrerPolicy});
+    }});
     this.#worker.onmessage = event => {
       if (event.data?.sandstone_worker === this.#token) {
+        if(this.#syncServer?.receive(event.data))return;
         if (event.data.type === "closed") this.terminate();
         else if (event.data.type === "error") {
           this.#error(Object.assign(new Error(event.data.message), {name: event.data.name, stack: event.data.stack}));
@@ -363,6 +390,7 @@ export class FakeWorker extends EventTarget {
     if (this.#terminated) return;
     this.#terminated = true;
     this.#controller.abort();
+    this.#syncServer?.close();
     this.#worker?.terminate();
     this.#port.close();
     this.#receiver?.close();

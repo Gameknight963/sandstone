@@ -34,6 +34,14 @@ test('Only an active parent may prefetch scripts for its own worker while genera
   contexts.set('next-root',{frame:'root'});frames.root.document_context='next-root';policy.bind_root(port,'next-root');assert.throws(()=>call('fetch_worker_script',args),{name:'SecurityError'});
 });
 
+test('Synchronous worker fetches require the active owning document and cannot borrow sibling or iframe identities',()=>{
+  const {frames,call,child,policy,port,contexts}=fixture();child('worker');frames.worker.worker=true;child('iframe');
+  const args=['root','worker','request','https://site.test/resource',{method:'POST'}];assert.deepEqual(call('fetch_worker_request',args),args);
+  for(const args of [['root','iframe','request','https://site.test/',{}],['other','worker','request','https://site.test/',{}]])assert.throws(()=>call('fetch_worker_request',args),{name:'SecurityError'});
+  const sibling={};policy.attach(port,sibling,'iframe');assert.throws(()=>call('fetch_worker_request',['iframe','worker','request','https://site.test/',{}],sibling),{name:'SecurityError'});
+  contexts.get('root-document').retired=true;assert.throws(()=>call('fetch_worker_request',args),{name:'SecurityError'});
+});
+
 test('RPC ports bind frame IDs and document capabilities independently of supplied arguments',()=>{
   const {call,port,policy,child}=fixture();const source={};
   policy.attach(port,source,'child');child('child');

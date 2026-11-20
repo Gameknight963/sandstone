@@ -12,6 +12,7 @@ export function navigation_metadata(response){return apply(metadata_get,navigati
 
 export const rpc_fetch = rpc.create_rpc_wrapper(rpc.host, "fetch");
 const rpc_worker_script=rpc.create_rpc_wrapper(rpc.host,'fetch_worker_script');
+const rpc_worker_request=rpc.create_rpc_wrapper(rpc.host,'fetch_worker_request');
 const rpc_fetch_read = rpc.create_rpc_wrapper(rpc.host, "fetch_read");
 const rpc_fetch_abort = rpc.create_rpc_wrapper(rpc.host, "fetch_abort");
 const rpc_keepalive = rpc.create_rpc_wrapper(rpc.host,'fetch_keepalive');
@@ -55,7 +56,8 @@ export async function fetch(url, options) {
   if (!params.referrerPolicy) params.referrerPolicy = document_referrer_policy();
   const worker_script=params.sandstone_worker_script;
   delete params.sandstone_worker_script;
-  const frame_id = worker_script || params.sandstone_frame_id || loader.frame_id;
+  const worker_request=params.sandstone_worker_request;delete params.sandstone_worker_request;
+  const frame_id = worker_script || worker_request || params.sandstone_frame_id || loader.frame_id;
   delete params.sandstone_frame_id;
   const navigation_source=params.sandstone_navigation_source;
   delete params.sandstone_navigation_source;
@@ -66,7 +68,7 @@ export async function fetch(url, options) {
   const keepalive = !!params.keepalive;
   if(worker_script&&keepalive)throw new TypeError('Worker script prefetch cannot be keepalive');
   const owner = keepalive ? loader.beacon_context : frame_id;
-  const open = worker_script ? (...args)=>rpc_worker_script(loader.frame_id,...args) : keepalive ? rpc_keepalive : rpc_fetch;
+  const open = worker_script ? (...args)=>rpc_worker_script(loader.frame_id,...args) : worker_request ? (...args)=>rpc_worker_request(loader.frame_id,...args) : keepalive ? rpc_keepalive : rpc_fetch;
   const read = keepalive ? rpc_keepalive_read : rpc_fetch_read;
   const cancel = keepalive ? rpc_keepalive_abort : rpc_fetch_abort;
   const bytes = keepalive && params.body != null ? new Blob([params.body]).size : 0;

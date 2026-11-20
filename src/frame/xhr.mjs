@@ -21,7 +21,7 @@ function charset(mime) {
 
 // The transport is injected so lifecycle and streaming behavior can be tested
 // independently of the iframe runtime. Remote requests always use the relay.
-export function create_xhr_class({fetch, base, isWorker = false, client_referrer = () => undefined}) {
+export function create_xhr_class({fetch, base, isWorker = false, client_referrer = () => undefined,sync_fetch,sync_available=()=>!!sync_fetch}) {
   class XMLHttpRequestEventTarget extends EventTarget {}
   handlers(XMLHttpRequestEventTarget.prototype, progress_types);
   class XMLHttpRequestUpload extends XMLHttpRequestEventTarget {
@@ -29,6 +29,7 @@ export function create_xhr_class({fetch, base, isWorker = false, client_referrer
   }
   class XMLHttpRequest extends XMLHttpRequestEventTarget {
     #state = 0;
+    #sync = false;
     #sending = false;
     #generation = 0;
     #controller;
@@ -116,7 +117,7 @@ export function create_xhr_class({fetch, base, isWorker = false, client_referrer
       if (/^(DELETE|GET|HEAD|OPTIONS|POST|PUT)$/i.test(method)) method = method.toUpperCase();
       let target;
       try { target = new URL(url, base()); } catch { throw new DOMException('Invalid request URL', 'SyntaxError'); }
-      if (!async) throw new DOMException('Synchronous remote requests are unavailable through the relay', 'InvalidAccessError');
+      if (!async&&(!isWorker||!sync_available(target.href))) throw new DOMException('Synchronous remote requests are unavailable through the relay', 'InvalidAccessError');
       if (user !== undefined && user !== null) target.username = String(user);
       if (password !== undefined && password !== null) target.password = String(password);
       const headers = new Headers();
@@ -134,6 +135,7 @@ export function create_xhr_class({fetch, base, isWorker = false, client_referrer
       this.#uploadComplete = true;
       this.#url = target.href;
       this.#method = method;
+      this.#sync = !async;
       this.#headers = headers;
       if (this.#state !== 1) this.#state_event(1);
     }
@@ -163,6 +165,7 @@ export function create_xhr_class({fetch, base, isWorker = false, client_referrer
       if (typeof body === 'string' && headers.has('content-type')) {
         headers.set('content-type', headers.get('content-type').replace(/(;\s*charset\s*=\s*)(?:"[^"]*"|[^;\s]+)/i, '$1UTF-8'));
       }
+      if(this.#sync){this.#run_sync(body,headers);return;}
       this.#sending = true;
       this.#clear_response();
       this.#controller = new AbortController();
@@ -175,6 +178,23 @@ export function create_xhr_class({fetch, base, isWorker = false, client_referrer
       if (!this.#uploadComplete) this.#upload.dispatchEvent(progress('loadstart'));
       if (!this.#alive(generation)) return;
       this.#run(body, headers, generation);
+    }
+    #run_sync(body,headers){
+      this.#sending=true;this.#clear_response();const generation=++this.#generation;
+      try{
+        const result=sync_fetch(this.#url,{method:this.#method,headers:[...headers],body,credentials:this.#credentials?'include':'same-origin'},this.#timeout);
+        this.#response={status:result.status,statusText:result.statusText,url:result.url,headers:new Headers(result.headers)};
+        this.#bytes=result.bytes;this.#chunks=[result.bytes];this.#received=result.bytes.byteLength;
+      }catch(error){
+        this.#sending=false;this.#clear_response();this.#state=4;
+        if(error?.name==='TimeoutError')throw error;
+        throw new DOMException(error?.message||'Synchronous request failed','NetworkError');
+      }
+      this.#sending=false;this.#state_event(4);
+      if(generation!==this.#generation)return;
+      const length=this.#response?.headers.get('content-length'),total=/^\d+$/.test(length||'')?Number(length):0;
+      this.dispatchEvent(progress('load',this.#received,total));
+      if(generation===this.#generation)this.dispatchEvent(progress('loadend',this.#received,total));
     }
     async #run(body, headers, generation) {
       try {

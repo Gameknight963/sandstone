@@ -63,6 +63,11 @@ rpc_handlers.fetch_worker_script=(parent_id,worker_id,request_id,url,options)=>{
   if(!/^https?:$/.test(new URL(url).protocol))throw new TypeError('Invalid worker script URL');
   return rpc_handlers.fetch(worker_id,request_id,url,{method:'GET',mode:'no-cors',credentials:'include',destination:'script',referrer:worker.url.href,referrerPolicy:options?.referrerPolicy});
 };
+rpc_handlers.fetch_worker_request=(parent_id,worker_id,request_id,url,options)=>{
+  worker_script_frame(iframes,parent_id,worker_id);
+  if(options?.mode==='navigate'||options?.keepalive)throw new TypeError('Invalid synchronous worker request');
+  return rpc_handlers.fetch(worker_id,request_id,url,{...options,destination:'',mode:'cors',sandstone_request_context:undefined});
+};
 
 //handle fetch api requests
 rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navigation_source) {

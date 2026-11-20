@@ -59,7 +59,7 @@ export class RPCSourcePolicy {
     if(procedure==='service_worker_command'){
       if(args[0]!==scope.id||!this.frames()[scope.id]?.service_worker_host)denied();return args;
     }
-    if(procedure==='fetch_worker_script'){
+    if(procedure==='fetch_worker_script'||procedure==='fetch_worker_request'){
       if(args[0]!==scope.id||!this.owns(scope,args[1])||!this.frames()[args[1]]?.worker)denied();return args;
     }
     if(procedure==='frame_register'){
