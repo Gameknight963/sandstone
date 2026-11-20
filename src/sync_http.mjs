@@ -61,7 +61,7 @@ export function create_sync_http_server({fetch,SharedBuffer=globalThis.SharedArr
       if(entry.controller.signal.aborted){await response.body?.cancel();return;}
       if(!response.status)throw networkError();
       reader=entry.reader=response.body?.getReader();
-      await send(entry,1,encoder.encode(stringify({status:response.status,statusText:response.statusText,url:response.url||packet.url,headers:[...response.headers]})));
+      await send(entry,1,encoder.encode(stringify({status:response.status,statusText:response.statusText,url:response.url||packet.url,headers:[...response.headers],request_cross_origin:response.request_cross_origin})));
       while(reader){const item=await reader.read();if(item.done)break;await send(entry,2,item.value);}
       complete=true;await send(entry,3);
     }catch(error){

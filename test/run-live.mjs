@@ -2,7 +2,7 @@
 // as a required CI gate; the deterministic browser/relay suites remain separate.
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
-import {mkdir,writeFile} from 'node:fs/promises';
+import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {chromium} from 'playwright-core';
 import {create_relay_server} from '../example/http.mjs';
@@ -35,14 +35,21 @@ const selected=process.argv.slice(2);
 for(const id of selected)if(!sites.some(site=>site.id===id))throw new Error('Unknown live site: '+id+'; choose '+sites.map(site=>site.id).join(', '));
 const targets=sites.filter(site=>!selected.length||selected.includes(site.id));
 const storageDenied=process.env.LIVE_STORAGE_DENIED==='1';
-const artifact=pathToFileURL(fileURLToPath(new URL('../example/bundled.html',import.meta.url))).href;
-const reportURL=new URL('../.temp/live-compatibility'+(storageDenied?'-storage-denied':'')+'.json',import.meta.url);
+const isolated=process.env.LIVE_ISOLATED==='1';
+let artifact=pathToFileURL(fileURLToPath(new URL('../example/bundled.html',import.meta.url))).href;
+const reportURL=new URL('../.temp/live-compatibility'+(isolated?'-isolated':'')+(storageDenied?'-storage-denied':'')+'.json',import.meta.url);
 const results=[];
-const server=create_relay_server((request,response)=>{response.writeHead(404);response.end();});
+const hostedHTML=isolated?await readFile(new URL('../example/bundled.html',import.meta.url),'utf8'):null;
+const server=create_relay_server((request,response)=>{
+  if(isolated&&request.url==='/host'){
+    response.writeHead(200,{'content-type':'text/html','cross-origin-opener-policy':'same-origin','cross-origin-embedder-policy':'require-corp'});response.end(hostedHTML);
+  }else{response.writeHead(404);response.end();}
+});
 const connections=new Set();
 server.on('connection',socket=>{connections.add(socket);socket.on('close',()=>connections.delete(socket));});
 server.on('upgrade',(request,socket,head)=>wisp.routeRequest(request,socket,head));
 server.listen(0,'127.0.0.1');await once(server,'listening');
+if(isolated)artifact='http://127.0.0.1:'+server.address().port+'/host';
 // The test relay is loopback-only and forwards only ordinary public web ports.
 wisp.options.port_whitelist=[80,443];wisp.options.allow_loopback_ips=false;
 logging.set_level(logging.WARN);
@@ -233,13 +240,13 @@ try{
   for(const site of targets){
     // Compare the site's ordinary native behavior with a standalone host whose
     // real storage may be denied. Proxied sites should still have virtual stores.
-    const result={site:site.id,url:site.url,storageDenied},nativeContext=await context(false);
+    const result={site:site.id,url:site.url,storageDenied,isolated},nativeContext=await context(false);
     try{
       const native=await nativeContext.newPage();
       const response=await native.goto(site.url,{waitUntil:'domcontentloaded'});
       assert.ok(response.ok(),'Native page returned '+response.status());
       await native.waitForTimeout(1000);
-      const interaction=await deadline(interact(native,false,site),'Native interaction',site.id==='react'?40000:25000);
+      const interaction=await deadline(interact(native,false,site),'Native interaction',site.timeout??(site.id==='react'?40000:25000));
       result.native={status:response.status(),...await summary(native,false),interaction};
     }catch(error){result.status='baseline-unavailable';result.error=error.message;}
     finally{await nativeContext.close();}
@@ -247,9 +254,9 @@ try{
     const proxyContext=await context(),page=await proxyContext.newPage(),errors=[],diagnostics=[],direct=[];
     page.on('pageerror',error=>errors.push(error.message));
     page.on('console',message=>{if(message.type()==='error')diagnostics.push(message.text());});
-    page.on('request',request=>{if(/^https?:/.test(request.url()))direct.push(request.url());});
+    page.on('request',request=>{if(/^https?:/.test(request.url())&&request.url()!==artifact)direct.push(request.url());});
     // Fail closed if a page tries to bypass the relay for HTTP resources.
-    await page.route(/^https?:/,route=>route.abort('blockedbyclient'));
+    await page.route(/^https?:/,route=>route.request().url()===artifact?route.continue():route.abort('blockedbyclient'));
     try{
       await page.goto(artifact);
       await page.waitForFunction(()=>globalThis.main_frame&&sandstone.libcurl.ready&&!main_frame.is_navigating);
@@ -261,9 +268,9 @@ try{
         };
       });
       await page.evaluate(port=>sandstone.network.set_websocket('ws://127.0.0.1:'+port+'/'),server.address().port);
-      await deadline(page.evaluate(url=>main_frame.navigate_to(url),site.url),'Proxy navigation');
+      await deadline(page.evaluate(url=>main_frame.navigate_to(url),site.url),'Proxy navigation',site.timeout??25000);
       await page.waitForTimeout(1000);
-      const interaction=await deadline(interact(page,true,site),'Proxy interaction',site.id==='react'?40000:25000);
+      const interaction=await deadline(interact(page,true,site),'Proxy interaction',site.timeout??(site.id==='react'?40000:25000));
       result.proxy={...await summary(page,true),interaction};
       assert.equal(result.proxy.title,result.native.title,'Document title differs after interaction');
       if(!site.editor)assert.ok(result.proxy.links>0,'No proxied links rendered');

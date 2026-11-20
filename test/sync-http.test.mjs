@@ -8,8 +8,8 @@ function client(fetch){
   return {server,request:(options={})=>new Promise(resolve=>{complete=resolve;worker.postMessage({url:'https://app.test/resource',...options});}),async close(){server.close();await worker.terminate();}};
 }
 test('Synchronous worker transport streams bounded chunks without truncating binary bodies or large headers',async()=>{
-  const bytes=Uint8Array.from({length:300000},(_,index)=>index%251),header='x'.repeat(70000);const api=client(async()=>new Response(bytes,{status:206,statusText:'Partial Content',headers:{'x-large':header}}));
-  try{for(let index=0;index<2;index++){const result=await api.request();assert.equal(result.error,undefined);assert.deepEqual(result.response.bytes,bytes);assert.equal(result.response.status,206);assert.equal(result.response.headers.find(([key])=>key==='x-large')[1],header);await tick();assert.equal(api.server.size,0);}}finally{await api.close();}
+  const bytes=Uint8Array.from({length:300000},(_,index)=>index%251),header='x'.repeat(70000);const api=client(async()=>{const response=new Response(bytes,{status:206,statusText:'Partial Content',headers:{'x-large':header}});Object.defineProperty(response,'request_cross_origin',{value:true});return response;});
+  try{for(let index=0;index<2;index++){const result=await api.request();assert.equal(result.error,undefined);assert.deepEqual(result.response.bytes,bytes);assert.equal(result.response.status,206);assert.equal(result.response.request_cross_origin,true);assert.equal(result.response.headers.find(([key])=>key==='x-large')[1],header);await tick();assert.equal(api.server.size,0);}}finally{await api.close();}
 });
 test('Synchronous timeouts cancel pending transfers and late headers cannot resurrect them',async()=>{
   let release,signal,cancelled=false;const started=new Promise(resolve=>release=resolve);let finish;

@@ -30,6 +30,7 @@ const NativeMessageEvent=globalThis.MessageEvent,NativeErrorEvent=globalThis.Err
 const native_timeout=globalThis.setTimeout.bind(globalThis),native_clear_timeout=globalThis.clearTimeout.bind(globalThis);
 const native_dispatch=globalThis.dispatchEvent?.bind(globalThis);
 const imported_blobs = new Map();
+const runtime_imports=new Set();
 const service_profile=Symbol('private service worker profile');
 export function create_service_worker(profile){
   if(typeof profile?.source!=='string')throw new TypeError('A validated service worker script is required');
@@ -121,6 +122,19 @@ export function fakeImportScripts(...paths) {
     if (source === undefined && worker_options?.probe) {
       native_post({sandstone_worker: worker_options.token, type: "need-script", url});
       throw new DOMException("Worker discovery needs a script", "NetworkError");
+    }
+    // A runtime URL may depend on a message received long after discovery.
+    // On isolated static hosts the worker can block on the existing private
+    // shared-memory bridge while its owner performs the ordinary script relay.
+    if((typeof source!=='string'||runtime_imports.has(url))&&/^https?:/.test(url)&&sync_worker_available(url)){
+      const response=sync_worker_request(url,{script:true},0);
+      if(response.status<200||response.status>=300)throw new DOMException('Worker script request failed: '+response.status,'NetworkError');
+      try{validate_module_response({headers:new Headers(response.headers)},'javascript',url);}catch{throw new DOMException('Invalid imported worker script','NetworkError');}
+      const text=new TextDecoder().decode(response.bytes);
+      if(source!==text&&imported_blobs.has(url)){URL.revokeObjectURL(imported_blobs.get(url));imported_blobs.delete(url);}
+      source=text;runtime_imports.add(url);network.cache_put(url,source);
+      (worker_options.source_urls??={})[url]=response.url||url;
+      (worker_options.source_cross_origins??={})[url]=!!response.request_cross_origin;
     }
     if (typeof source !== "string") throw new DOMException(`Worker script is unavailable: ${url}`, "NetworkError");
     if (!imported_blobs.has(url)) {
@@ -359,6 +373,7 @@ export class FakeWorker extends EventTarget {
     // origins, where native module-worker construction rejects parent blobs.
     this.#worker = new NativeWorker(this.#bootstrap, {...this.#options, type: "classic"});
     if(NativeSharedBuffer&&native_isolated)this.#syncServer=create_sync_http_server({SharedBuffer:NativeSharedBuffer,fetch:async(url,options,signal)=>{
+      if(options.script===true)return network.fetch(url,{signal,sandstone_worker_script:this.#id,referrerPolicy:this.#referrerPolicy});
       const request=await serialize_request(url,{method:options.method,headers:options.headers,body:restore_sync_body(options.body),credentials:options.credentials,signal},this.#url);
       signal.throwIfAborted();return network.fetch(request.url,{...request.options,signal,sandstone_worker_request:this.#id,referrerPolicy:this.#referrerPolicy});
     }});
