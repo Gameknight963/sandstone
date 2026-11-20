@@ -22,7 +22,7 @@ export class FakeLocation {
   constructor() {
     set_location(loader.url);
     for (const key of ["href", "origin", "protocol", "host", "hostname", "port", "pathname", "search", "hash"]) {
-      const descriptor = {enumerable: true, get: () => internal[key]};
+      const descriptor = {enumerable: true, get: () => key==='origin'&&internal.protocol==='blob:'?loader.location_origin??internal.origin:internal[key]};
       if (key !== "origin") descriptor.set = value => {
         if (key === "href") { this.assign(value); return; }
         const next = new URL(internal);

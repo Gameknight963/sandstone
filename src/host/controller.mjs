@@ -346,25 +346,30 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
   const parent_broadcast=parent.broadcast_origin||parent.origin||parent.url.origin;
   const opaque_broadcast='opaque:'+child_id+':'+Math.random();
   const srcdoc=!!options.srcdoc;
-  const blank=!!options.blank,inherited=srcdoc||blank;
+  const blank=!!options.blank,blob=!!options.blob,inherited=srcdoc||blank||blob;
   if(srcdoc&&(new URL(url).protocol!=='about:'||new URL(url).pathname!=='srcdoc'||new URL(url).search))throw new TypeError('Invalid inline frame URL');
   if(blank&&(new URL(url).protocol!=='about:'||new URL(url).pathname!=='blank'||new URL(url).search))throw new TypeError('Invalid blank frame URL');
+  if(blob&&new URL(url).protocol!=='blob:')throw new TypeError('Invalid Blob frame URL');
   const inherited_origin=parent.origin||parent.url.origin;
   if(options.worker)worker_script_url(url,inherited_origin);
-  const opaque=options.opaque||parent_broadcast.startsWith('opaque:')||options.worker&&new URL(url).protocol==='data:';
+  const opaque=options.opaque||parent_broadcast.startsWith('opaque:')||new URL(url).protocol==='data:';
   const effective_url=()=>parent.request_url||parent.url.href;
   const creator_url=blank&&options.creator_url!==undefined?new URL(options.creator_url).href:effective_url();
-  if(blank&&new URL(creator_url).origin!==inherited_origin)throw new TypeError('Invalid blank creator URL');
+  if(blank&&new URL(creator_url).origin!==inherited_origin&&!(new URL(creator_url).protocol==='blob:'&&creator_url===(parent.cookie_url||parent.url.href)))throw new TypeError('Invalid blank creator URL');
   const child = {
     id: child_id, parent_id, root_id: root.id, url: new URL(url),worker:!!options.worker,
     parent_context:parent.document_context,
     navigation_sandbox:navigation_sandbox(parent.navigation_sandbox,options.sandbox??null),
     window_name:saved?.window_name??options.window_name??'',
     origin: opaque?'null':inherited||options.worker?inherited_origin:new URL(url).origin,
-    broadcast_origin:options.worker ? new URL(url).protocol==='data:'?opaque_broadcast:parent_broadcast : options.opaque||parent_broadcast.startsWith('opaque:')?opaque_broadcast:inherited?parent_broadcast:new URL(url).origin,
-    cookie_url:inherited ? blank?creator_url:parent.cookie_url||effective_url() : undefined,
-    referrer_url:blank?'about:blank':options.worker&&new URL(url).protocol==='blob:'?url:undefined,
-    get request_url(){return inherited&&this.url.protocol==='about:'?this.inherited_url|| (blank?creator_url:effective_url()):undefined;},
+    broadcast_origin:options.worker ? new URL(url).protocol==='data:'?opaque_broadcast:parent_broadcast : opaque?opaque_broadcast:inherited?parent_broadcast:new URL(url).origin,
+    cookie_url:blob?url:inherited ? blank?creator_url:parent.cookie_url||effective_url() : undefined,
+    referrer_url:blank?'about:blank':blob||options.worker&&new URL(url).protocol==='blob:'?url:undefined,
+    get request_url(){
+      if(!inherited||this.url.protocol!=='about:')return;
+      const target=this.inherited_url||(blank?creator_url:effective_url());
+      return new URL(target).protocol==='blob:'&&this.origin!=='null'?this.origin+'/':target;
+    },
     session_storage: parent.session_storage,
     history: saved?.history || new NavigationHistory(),
     async navigate_to(url, form_data, navigation = {}) {
@@ -400,6 +405,7 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
     cookie_cross_site:frame_cross_site(child,iframes),
     message_origin:child.broadcast_origin.startsWith('opaque:')?'null':inherited?child.origin:undefined,
     document_origin:child.origin,
+    location_origin:blob?inherited_origin:undefined,
     ...(inherited?{cookie_url:child.cookie_url}:{}),
     crypto_available: crypto_service.methods,
     local_storage: site_data.local[child.origin],

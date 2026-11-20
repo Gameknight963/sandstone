@@ -92,7 +92,7 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
     };
     const navigate=(value,mode)=>{
       const url=new URL(`${value}`,ctx.document.baseURI);
-      if(url.protocol==='http:'||url.protocol==='https:'||url.protocol==='about:'&&url.pathname==='srcdoc')state.navigate(url.href,mode)?.catch(console.error);
+      if(['http:','https:','blob:','data:'].includes(url.protocol)||url.protocol==='about:'&&url.pathname==='srcdoc')state.navigate(url.href,mode)?.catch(console.error);
       else if(mode==='replace')nativeLocation().replace(url.href);
       else nativeLocation().href=url.href;
     };
@@ -110,6 +110,9 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
         if(key===Symbol.toPrimitive)return undefined;
         if(key===Symbol.toStringTag)return 'Location';
         if(Object.hasOwn(methods,key))return methods[key];
+        if(key==='origin'){
+          const context=window_runtime_context(target);if(context)return context.location.origin;
+        }
         if(['href','origin','protocol','host','hostname','port','pathname','search','hash'].includes(key))return new URL(url)[key];
         return Reflect.get(nativeLocation(),key,nativeLocation());
       },

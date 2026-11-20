@@ -27,3 +27,15 @@ test('Pending frames and inherited document URLs select the owner without changi
   assert.equal(clear('inherited.test',{localStorage:true}),true);assert.equal(contexts.get('inherited').storage.cleared_local,true);
   contexts.set('replacement',{frame:'child',context:{root_id:'root',url:'https://inherited.test/base/'},storage:{}});assert.equal(contexts.get('replacement').cleared_storage,undefined);
 });
+
+test('Blob documents revoke their creator site storage even when their physical URLs are opaque',()=>{
+  const {frames,contexts,clear}=fixture(),blob='blob:null/local-preview';
+  frames.preview={root_id:'root',url:new URL(blob),origin:'https://embedded.test',cookie_url:blob};
+  contexts.set('preview',{frame:'preview',context:{root_id:'root',url:'https://embedded.test/',cookie_url:blob},storage:{}});
+  contexts.set('opaque',{frame:'removed',context:{root_id:'root',url:'blob:null/opaque-preview',broadcast_origin:'opaque:preview'},storage:{}});
+  assert.equal(clear('embedded.test',{localStorage:true,indexedDB:true,fileSystems:true}),true);
+  assert.deepEqual(contexts.get('preview').cleared_storage,{localStorage:true,indexedDB:true,fileSystems:true});
+  assert.equal(contexts.get('preview').storage.cleared_local,true);
+  assert.equal(contexts.get('opaque').cleared_storage,undefined);
+  contexts.clear();assert.equal(clear('embedded.test',{cacheStorage:true}),true,'A pending Blob frame selects its owning view');
+});

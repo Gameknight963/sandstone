@@ -48,7 +48,8 @@ export function set_ready_state(value){ready_state=value;}
 export let base_url;
 // Inline frame documents have an about: URL but inherit a frozen creator base
 // and cookie URL. Their origin is distinct from Location.origin.
-export let inherited_base_url, document_origin, cookie_url;
+// Blob documents also retain their virtual creator origin in Location.origin.
+export let inherited_base_url, document_origin, cookie_url, location_origin;
 export let is_iframe = false;
 export let automatic_features = true;
 export let sandboxed_context = false;
@@ -164,6 +165,7 @@ function prepare_html(options) {
   set_url(options.url);
   inherited_base_url = options.inherited_base_url;
   document_origin = options.document_origin;
+  location_origin = options.location_origin;
   cookie_url = options.cookie_url;
   base_url = inherited_base_url || options.url;
   set_frame_id(options.frame_id);

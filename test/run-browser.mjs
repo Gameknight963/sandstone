@@ -54,6 +54,7 @@ import {verifyWorkerRuntimeImports} from './worker-runtime-imports.playwright.mj
 import {verifyIsolatedWorkerLoaders} from './worker-isolated-loaders.playwright.mjs';
 import {verifyLinkPreloads} from './link-preloads.playwright.mjs';
 import {verifyWorkerBundles} from './worker-bundles.playwright.mjs';
+import {verifyLocalIframes} from './local-iframes.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -455,6 +456,7 @@ try {
     result.passed.push(...await timed(verifyBootstrap(page), 'Bootstrap message fixture'));
     result.passed.push(...await timed(verifyInsecureHost(page,await readFile(artifact,'utf8')), 'Insecure host fixture'));
     result.passed.push(...await timed(verifySrcdoc(page), 'Inline frame fixture'));
+    result.passed.push(...await timed(verifyLocalIframes(page), 'Local HTML frame fixture'));
     result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
     result.passed.push(...await timed(verifyAncestorWindows(page), 'Ancestor windows fixture'));
     result.passed.push(...await timed(verifyBroadcast(page), 'Broadcast channel fixture'));

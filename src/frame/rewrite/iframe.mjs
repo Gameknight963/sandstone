@@ -23,6 +23,9 @@ import {service_worker_snapshot} from '../polyfill/service_worker.mjs';
 import {navigation_activation} from '../user_activation.mjs';
 import {decode_document_response} from '../../text_encoding.mjs';
 import {native_dom} from '../dom_operations.mjs';
+import {mime_essence} from '../../mime.mjs';
+
+const relayed_source=value=>util.url_is_http(value)||/^(?:blob|data):/i.test(String(value));
 
 const inline_frames=new WeakMap(),sandbox_lists=new WeakMap();
 const runtime_loads=new WeakMap();
@@ -206,6 +209,7 @@ export function rewrite_iframe(iframe_element) {
       return rpc.call_procedure(active_target,'navigate_fragment',[value]);
     }
     const target_url=convert_url(value,ctx.document.baseURI,loader.character_encoding);
+    const local=/^(?:blob|data):/.test(target_url),blob=target_url.startsWith('blob:');
     runtime_sandbox=true;render_sandbox();
     const inherited_base_url=inline?ctx.document.baseURI:undefined;
     if(inline&&!finish_load)finish_load=delay_script_load();
@@ -225,7 +229,7 @@ export function rewrite_iframe(iframe_element) {
     else try {
       let response = await network.fetch(target_url, {
         signal:controller.signal,
-        mode:'navigate',sandstone_frame_id:navigation.from_child ? frame_id : loader.frame_id,
+        mode:local?'cors':'navigate',sandstone_frame_id:navigation.from_child ? frame_id : loader.frame_id,
         sandstone_navigation_source:navigation.source_context,
         sandstone_navigation_activation:!!navigation.activation?.transient,
         sandstone_navigation_target:frame_id,
@@ -236,6 +240,13 @@ export function rewrite_iframe(iframe_element) {
         method: "POST", headers: form_data.headers || {"Content-Type": form_data.enctype}, body: form_data.body
       } : {})});
       if(!current())return;
+      // Keep native rendering for non-HTML local documents. HTML must install
+      // the runtime before authored code can access storage or network APIs.
+      if(local&&mime_essence(response.headers.get('content-type'))!=='text/html'){
+        await response.body?.cancel();if(!current())return;
+        retire();runtime_sandbox=false;render_sandbox();
+        render_media_attribute(iframe_element,'src',target_url);return;
+      }
       if([204,205].includes(response.status)){await response.body?.cancel();iframe_element.setAttribute('__src',previous_url);release_load();return {no_navigation:true};}
       if(is_download(response.headers)){
         try{const filename=await save_response(response);return current()?{download:true,filename}:undefined;}
@@ -245,9 +256,9 @@ export function rewrite_iframe(iframe_element) {
       const inherited=new URL(response.url||target_url).origin===ctx.origin?loader.character_encoding:undefined;
       const decoded=await decode_document_response(response,{fallbackEncoding:inherited});
       html=decoded.text;character_encoding=decoded.encoding;
-      final_url = response.url;
-      referrer_policy = parse_referrer_policy(response.headers.get('referrer-policy'));
-      document_referrer = response.request_referrer || '';
+      final_url = response.url||target_url;
+      referrer_policy = local?document_referrer_policy():parse_referrer_policy(response.headers.get('referrer-policy'));
+      document_referrer = local?request_referrer(loader.cookie_url||loader.url,blob&&ctx.origin!=='null'?ctx.origin+'/':target_url,iframe_element.referrerPolicy||document_referrer_policy()):response.request_referrer || '';
       request_metadata_token=network.navigation_metadata(response);
     }
     catch (e) {
@@ -267,7 +278,7 @@ export function rewrite_iframe(iframe_element) {
       const bootstrap_nonce=create_bootstrap_nonce(),runtime_source=bootstrap_html(loader.frame_html,bootstrap_nonce,2);
       policy_url=/^about:(?:blank|srcdoc)(?:[?#]|$)/.test(final_url)?ctx.location.href:final_url;render_focus();
       const use_inline=authored.get('srcdoc')!==null;
-      const share_origin=!use_inline&&new URL(final_url).origin===ctx.origin&&!(authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'));
+      const share_origin=!use_inline&&!final_url.startsWith('data:')&&(blob||new URL(final_url).origin===ctx.origin)&&!(authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'));
       const runtime_url=use_inline?'about:srcdoc#'+crypto.randomUUID():share_origin?'about:blank?'+crypto.randomUUID():runtime_seed(bootstrap_nonce);
       const runtime_html=use_inline?runtime_source.replace(/(<head[^>]*>)/i,'$1<script>history.replaceState(null,"",'+JSON.stringify(runtime_url)+');document.currentScript.remove();<\/script>'):undefined;
       await new Promise((resolve) => {
@@ -331,7 +342,7 @@ export function rewrite_iframe(iframe_element) {
 
       iframe_url=final_url;
       const sandbox=iframe_element.getAttribute('sandbox'),opaque=sandbox!==null&&!sandbox_tokens(sandbox).has('allow-same-origin');
-      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,sandbox,window_name:initial_name,srcdoc:inline,request_metadata_token});
+      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,sandbox,window_name:initial_name,srcdoc:inline,blob,request_metadata_token});
       registered = true;
       window_name=state.window_name;opaque_origin=state.message_origin==='null';
       loader.child_names.set(frame_id,value=>{window_name=value;});
@@ -385,7 +396,7 @@ export function rewrite_iframe(iframe_element) {
       authored.set('src',value);
       if(authored.get('srcdoc')!==null){render_media_attribute(iframe_element,'src','');return;}
       let remote=false;
-      try{remote=util.url_is_http(value);}catch{}
+      try{remote=relayed_source(value);}catch{}
       if (!remote || !value){
         if(blank_url()){
           active_request?.abort();generation++;blank_load_pending=true;
@@ -407,15 +418,15 @@ export function rewrite_iframe(iframe_element) {
   intercept_property(iframe_element,'src',{get:source_url,set(value){set_src(`${value}`);}});
   intercept_iframe_window(iframe_element,()=>iframe_url,(url,history_mode,form_data,navigation)=>{
     return fetch_src(url,form_data,{...navigation,history_mode});
-  },message_token,{id:frame_id,name:()=>window_name,opaque:()=>opaque_origin,prepare:ensure_blank,origin:()=>/^about:(?:srcdoc|blank)(?:#|$)/.test(iframe_url)?ctx.origin:new URL(iframe_url).origin});
+  },message_token,{id:frame_id,name:()=>window_name,opaque:()=>opaque_origin,prepare:ensure_blank,origin:()=>/^(?:blob:|about:(?:srcdoc|blank)(?:#|$))/.test(iframe_url)?ctx.origin:new URL(iframe_url).origin});
   let lifecycle_ready=false;
   track_iframe(iframe_element,{
     disconnect(){
       retire();
       // A reinserted element must not auto-load its old physical runtime before
-      // the authored URL is relayed again. Keep native data/blob sources intact.
+      // the authored URL is relayed again.
       let remote=false;
-      try{remote=!authored_src||util.url_is_http(authored_src);}catch{}
+      try{remote=!authored_src||relayed_source(authored_src);}catch{}
       if(remote)render_media_attribute(iframe_element,'src','');
     },
     connect(){
@@ -423,14 +434,14 @@ export function rewrite_iframe(iframe_element) {
       if(!lifecycle_ready)return;
       if(authored.get('srcdoc')!==null){fetch_src('about:srcdoc',null,{srcdoc:true}).catch(console.error);return;}
       if(blank_url()){ensure_blank(native_frame_window(iframe_element));return;}
-      let remote=false;try{remote=util.url_is_http(authored_src);}catch{}
+      let remote=false;try{remote=relayed_source(authored_src);}catch{}
       if(remote)fetch_src(authored_src).catch(console.error);
     }
   });
   lifecycle_ready=true;
   if(blank_url()){if(iframe_element.isConnected)ensure_blank(native_frame_window(iframe_element));return;}
   if(authored.get('srcdoc')!==null){fetch_src('about:srcdoc',null,{srcdoc:true}).catch(console.error);return;}
-  if (!iframe_src || iframe_src.startsWith("data:") || iframe_src.startsWith("blob:")) {
+  if (!iframe_src) {
     return;
   }
   iframe_element.src = authored_src;
