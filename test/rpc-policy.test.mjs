@@ -7,35 +7,40 @@ test('Filesystem commands cannot borrow another document or worker capability',(
   assert.deepEqual(call('filesystem_command',['root-document',{op:'root'}]),['root-document',{op:'root'}]);
   assert.throws(()=>call('filesystem_command',['child-document',{op:'root'}]),{name:'SecurityError'});
   assert.throws(()=>call('filesystem_command',['root-document',{op:'root'}],nested),{name:'SecurityError'});
-  assert.throws(()=>call('filesystem_sync_open',['child','child-document',{}],nested),{name:'SecurityError'});
+  assert.throws(()=>call('worker_sync_open',['child','child-document',{}],nested),{name:'SecurityError'});
   frames.child.worker=true;
-  assert.deepEqual(call('filesystem_sync_open',['child','child-document',{}],nested),['child','child-document',{}]);
-  assert.throws(()=>call('filesystem_sync_open',['child','child-document',{}]),{name:'SecurityError'});
-  assert.throws(()=>call('filesystem_sync_open',['root','root-document',{}],nested),{name:'SecurityError'});
-  assert.throws(()=>call('filesystem_sync_open',['child','root-document',{}],nested),{name:'SecurityError'});
+  assert.deepEqual(call('worker_sync_open',['child','child-document',{}],nested),['child','child-document',{}]);
+  assert.throws(()=>call('worker_sync_open',['child','child-document',{}]),{name:'SecurityError'});
+  assert.throws(()=>call('worker_sync_open',['root','root-document',{}],nested),{name:'SecurityError'});
+  assert.throws(()=>call('worker_sync_open',['child','root-document',{}],nested),{name:'SecurityError'});
   contexts.get('child-document').retired=true;
-  assert.throws(()=>call('filesystem_sync_open',['child','child-document',{}],nested),{name:'SecurityError'});
+  assert.throws(()=>call('worker_sync_open',['child','child-document',{}],nested),{name:'SecurityError'});
 });
 
-test('Synchronous file relays are restricted to the live renderer of each worker tree',()=>{
+test('Synchronous worker relays are restricted to the live renderer of each worker tree',()=>{
   const {call,child,policy,port,frames,contexts}=fixture(),iframe={};
   child('parent');frames.parent.worker=true;
   child('nested','parent','parent-document');frames.nested.worker=true;
-  const request=['root','nested','nested-document',{op:'syncSize'}];
-  assert.deepEqual(call('filesystem_sync_command',request),request);
-  assert.throws(()=>call('filesystem_sync_command',['root','nested','parent-document',{}]),{name:'SecurityError'});
+  const request=['root','nested','nested-document','file',{op:'syncSize'}];
+  assert.deepEqual(call('worker_sync_request',request),request);
+  for(const method of ['fetch','script','read','abort']){
+    const args=['root','nested','nested-document',method,['request']];
+    assert.deepEqual(call('worker_sync_request',args),args);
+    assert.throws(()=>call('worker_sync_request',['root','nested','parent-document',method,['request']]),{name:'SecurityError'});
+  }
+  assert.throws(()=>call('worker_sync_request',['root','nested','parent-document',{}]),{name:'SecurityError'});
   policy.attach(port,iframe,'iframe');child('iframe');
   child('other','iframe','iframe-document');frames.other.worker=true;
-  assert.throws(()=>call('filesystem_sync_command',['root','other','other-document',{}]),{name:'SecurityError'});
+  assert.throws(()=>call('worker_sync_request',['root','other','other-document',{}]),{name:'SecurityError'});
   const other=['iframe','other','other-document',{}];
-  assert.deepEqual(call('filesystem_sync_command',other,iframe),other);
-  assert.throws(()=>call('filesystem_sync_command',request,iframe),{name:'SecurityError'});
+  assert.deepEqual(call('worker_sync_request',other,iframe),other);
+  assert.throws(()=>call('worker_sync_request',request,iframe),{name:'SecurityError'});
   frames.parent.document_context='replacement';
-  assert.throws(()=>call('filesystem_sync_command',request),{name:'SecurityError'});
+  assert.throws(()=>call('worker_sync_request',request),{name:'SecurityError'});
   frames.other.parent_id='other';frames.other.parent_context='other-document';
-  assert.throws(()=>call('filesystem_sync_command',other,iframe),{name:'SecurityError'});
+  assert.throws(()=>call('worker_sync_request',other,iframe),{name:'SecurityError'});
   contexts.get('iframe-document').retired=true;
-  assert.throws(()=>call('filesystem_sync_command',other,iframe),{name:'SecurityError'});
+  assert.throws(()=>call('worker_sync_request',other,iframe),{name:'SecurityError'});
 });
 
 function fixture(){

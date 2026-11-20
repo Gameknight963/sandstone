@@ -7,9 +7,9 @@ import { ctx, ctx_vars, update_ctx, convert_url } from "../context.mjs";
 import { modules,evaluate_worker_module } from "./module.mjs";
 import { prefetch_worker_scripts } from "../worker_scripts.mjs";
 import {create_worker_script_loader} from '../worker_loader.mjs';
-import {create_sync_http_client,create_sync_http_server} from '../../sync_http.mjs';
-import {snapshot_sync_body,restore_sync_body} from '../../sync_http_body.mjs';
-import {serialize_request} from './request.mjs';
+import {create_sync_http_client} from '../../sync_http.mjs';
+import {snapshot_sync_body} from '../../sync_http_body.mjs';
+import '../worker_sync.mjs';
 import {on_document_unload} from '../runtime_events.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {parse_referrer_policy,default_referrer_policy} from '../../referrer.mjs';
@@ -47,7 +47,6 @@ function replace_worker_method(name,value){
 }
 let worker_options;
 let sync_client;
-let file_sync_client;
 export function sync_worker_available(url){
   if(!worker_options||worker_options.service_worker||worker_options.probe)return false;
   return !!(NativeXHR&&/^(?:data|blob):/.test(url)||worker_options.sync_http&&NativeSharedBuffer);
@@ -60,7 +59,6 @@ export function sync_worker_request(url,options,timeout){
     const headers=request.getAllResponseHeaders().trim().split(/[\r\n]+/).filter(Boolean).map(line=>{const index=line.indexOf(':');return [line.slice(0,index),line.slice(index+1).trim()];});
     return {status:request.status,statusText:request.statusText,url:request.responseURL||url,headers,bytes:new Uint8Array(request.response||new ArrayBuffer(0))};
   }
-  sync_client??=create_sync_http_client({SharedBuffer:NativeSharedBuffer,post:packet=>native_post({sandstone_worker:worker_options.token,...packet})});
   return sync_client(url,{...options,body:snapshot_sync_body(options.body)},timeout);
 }
 let callback_script_loader,startup_imports=0,start_requested=false,start_scheduled=false;
@@ -159,7 +157,7 @@ export function initialize_worker(options) {
   loader.set_worker_context(options);
   if(options.sync_http&&!options.service_worker&&!options.probe&&NativeSharedBuffer){
     configure_filesystem_sync(command=>{
-      const response=file_sync_client('sandstone-filesystem:command',{filesystem:command},0);
+      const response=sync_client('sandstone-filesystem:command',{filesystem:command},0);
       const result=JSON.parse(decodeURIComponent(new Headers(response.headers).get('x-sandstone-file-result')));
       if(result.error)throw new DOMException(result.error.message,result.error.name);
       return {...result,bytes:response.bytes};
@@ -201,8 +199,8 @@ export function initialize_worker(options) {
         // A nested worker must still reach storage while its creator blocks in
         // Atomics.wait(). The host routes its port to the owning renderer.
         const channel=new MessageChannel(),post=channel.port1.postMessage.bind(channel.port1);
-        await rpc.call_procedure(rpc.host,'filesystem_sync_open',[loader.frame_id,loader.beacon_context,channel.port2],{transfer:[channel.port2]});
-        file_sync_client=create_sync_http_client({SharedBuffer:NativeSharedBuffer,post});
+        await rpc.call_procedure(rpc.host,'worker_sync_open',[loader.frame_id,loader.beacon_context,channel.port2,{referrerPolicy:options.referrer_policy}],{transfer:[channel.port2]});
+        sync_client=create_sync_http_client({SharedBuffer:NativeSharedBuffer,post});
       }
       if (options.type === "module") {
         modules.preamble = "__ctx__.__worker_module_started__();\n";
@@ -270,7 +268,6 @@ export class FakeWorker extends EventTarget {
   #referrerPolicy;
   #serviceProfile;
   #serviceScripts;
-  #syncServer;
 
   constructor(url, options = {}) {
     super();
@@ -395,14 +392,8 @@ export class FakeWorker extends EventTarget {
     // A classic bootstrap can import worker-local module blobs even on file:
     // origins, where native module-worker construction rejects parent blobs.
     this.#worker = new NativeWorker(this.#bootstrap, {...this.#options, type: "classic"});
-    if(NativeSharedBuffer&&native_isolated)this.#syncServer=create_sync_http_server({SharedBuffer:NativeSharedBuffer,fetch:async(url,options,signal)=>{
-      if(options.script===true)return network.fetch(url,{signal,sandstone_worker_script:this.#id,referrerPolicy:this.#referrerPolicy});
-      const request=await serialize_request(url,{method:options.method,headers:options.headers,body:restore_sync_body(options.body),credentials:options.credentials,signal},this.#url);
-      signal.throwIfAborted();return network.fetch(request.url,{...request.options,signal,sandstone_worker_request:this.#id,referrerPolicy:this.#referrerPolicy});
-    }});
     this.#worker.onmessage = event => {
       if (event.data?.sandstone_worker === this.#token) {
-        if(this.#syncServer?.receive(event.data))return;
         if (event.data.type === "closed") this.terminate();
         else if (event.data.type === "error") {
           this.#error(Object.assign(new Error(event.data.message), {name: event.data.name, stack: event.data.stack}));
@@ -436,7 +427,6 @@ export class FakeWorker extends EventTarget {
     if (this.#terminated) return;
     this.#terminated = true;
     this.#controller.abort();
-    this.#syncServer?.close();
     this.#worker?.terminate();
     this.#port.close();
     this.#receiver?.close();

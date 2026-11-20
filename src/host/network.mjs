@@ -16,7 +16,8 @@ import {broadcast_channels} from './broadcast.mjs';
 import {lock_service} from './locks.mjs';
 import {disconnect_storage} from './storage.mjs';
 import {cache_storage} from './cache.mjs';
-import {file_system,disconnect_file_worker} from './filesystem.mjs';
+import {file_system} from './filesystem.mjs';
+import {disconnect_worker_sync} from './worker_sync.mjs';
 export {http_cache} from './http_cache.mjs';
 export {broadcast_channels};
 
@@ -239,7 +240,7 @@ export function clean_ws_connections(id_to_clean,options={}) {
   disconnect_storage(id_to_clean);
   broadcast_channels.disconnect(id_to_clean);
   lock_service.disconnect(id_to_clean);
-  for(const [token,entry] of beacons.contexts)if(entry.frame===id_to_clean){disconnect_file_worker(token);file_system.release(token);}
+  for(const [token,entry] of beacons.contexts)if(entry.frame===id_to_clean){disconnect_worker_sync(token);file_system.release(token);}
   beacons.retire(id_to_clean);
   keepalives.retire(id_to_clean);
   cancel_requests(id_to_clean);

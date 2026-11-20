@@ -37,6 +37,7 @@ import {verifyWorkerLoaders} from './worker-loaders.playwright.mjs';
 import {verifyPromiseWorkerLoaders,verifyAMDServiceWorkerScripts} from './worker-promise-loaders.playwright.mjs';
 import {verifyWorkerImportAliases} from './worker-import-aliases.playwright.mjs';
 import {verifySyncXHR} from './sync-xhr.playwright.mjs';
+import {verifyNestedWorkerSync} from './nested-worker-sync.playwright.mjs';
 import {verifyFilesystem} from './filesystem.playwright.mjs';
 import {verifySynchronousFiles} from './filesystem-sync.playwright.mjs';
 import {verifySQLiteFiles} from './sqlite-filesystem.playwright.mjs';
@@ -404,6 +405,7 @@ try {
     result.passed.push(...await timed(verifyAMDServiceWorkerScripts(page), 'AMD service worker scripts fixture'));
     result.passed.push(...await timed(verifySyncXHR(page), 'Synchronous worker XHR fixture'));
     result.passed.push(...await timed(verifySynchronousFiles(page), 'Synchronous worker filesystem fixture'));
+    result.passed.push(...await timed(verifyNestedWorkerSync(page), 'Nested synchronous worker fixture'));
     for(const vfs of ['opfs-sahpool','opfs','opfs-wl'])result.passed.push(...await timed(verifySQLiteFiles(page,{storageDenied,vfs,nestedFrame:vfs==='opfs'}), 'SQLite filesystem fixture '+vfs));
     result.passed.push(...await timed(verifyWorkerRuntimeImports(page), 'Runtime worker imports fixture'));
     result.passed.push(...await timed(verifyIsolatedWorkerLoaders(page), 'Isolated worker loaders fixture'));
