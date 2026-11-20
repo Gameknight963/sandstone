@@ -16,6 +16,8 @@ const sharedSize=typeof SharedArrayBuffer==='function'&&Object.getOwnPropertyDes
 const isView=ArrayBuffer.isView;
 const viewGetters=[Object.getPrototypeOf(Uint8Array.prototype),DataView.prototype].map(prototype=>Object.fromEntries(['buffer','byteOffset','byteLength'].map(key=>[key,Object.getOwnPropertyDescriptor(prototype,key).get])));
 const branded=(getter,value)=>{try{Reflect.apply(getter,value,[]);return true;}catch{return false;}};
+const generatorPrototype=Object.getPrototypeOf(Object.getPrototypeOf((async function*(){})()));
+const generatorNext=generatorPrototype.next,asyncIteratorPrototype=Object.getPrototypeOf(generatorPrototype);
 function viewInfo(value){
   for(const getters of viewGetters){
     let buffer;try{buffer=Reflect.apply(getters.buffer,value,[]);}catch{continue;}
@@ -26,6 +28,14 @@ function viewInfo(value){
 function nativeView(value){const {buffer,getters}=viewInfo(value);return new Uint8Array(buffer,Reflect.apply(getters.byteOffset,value,[]),Reflect.apply(getters.byteLength,value,[]));}
 export function create_file_client(dispatch,{worker=false,origin=()=>undefined}={}){
   const handles=new WeakMap(),streams=new WeakMap(),syncHandles=new WeakMap(),secret={},blob=Blob.prototype;let sync;
+  const iterators=new WeakMap(),iteratorPrototype=Object.create(asyncIteratorPrototype);
+  Object.defineProperties(iteratorPrototype,{
+    next:{enumerable:true,configurable:true,writable:true,value:async function next(){
+      const generator=iterators.get(this);if(!generator)throw new TypeError('Invalid directory iterator receiver');
+      return Reflect.apply(generatorNext,generator,[]);
+    }},
+    [Symbol.toStringTag]:{value:'FileSystemDirectoryHandle AsyncIterator',configurable:true}
+  });
   const getWriter=WritableStream.prototype.getWriter,write=WritableStreamDefaultWriter.prototype.write,release=WritableStreamDefaultWriter.prototype.releaseLock;
   function enqueue(stream,value){
     if(!streams.has(stream))throw new TypeError('Invalid FileSystemWritableFileStream receiver');
@@ -43,14 +53,25 @@ export function create_file_client(dispatch,{worker=false,origin=()=>undefined}=
     async requestPermission(options={}){permission(options);return send(this,'permission');}
   }
   const permission=options=>{const value=options?.mode,mode=value===undefined?'read':text(value);if(!['read','readwrite'].includes(mode))throw new TypeError('Invalid file permission mode');};
+  function directoryIterator(handle,kind){
+    if(info(handle).kind!=='directory')throw new TypeError('Invalid directory handle receiver');
+    // Keep iteration independent of authored entries/keys/values overrides.
+    // A Web IDL async iterator has no generator return()/throw() methods, so
+    // breaking a for-await loop must not close a retained iterator.
+    const generator=(async function*(){
+      const entries=await send(handle,'entries');
+      for(const [name,value] of entries)yield kind==='keys'?name:kind==='values'?decode(value):[name,decode(value)];
+    })();
+    const iterator=Object.create(iteratorPrototype);iterators.set(iterator,generator);return iterator;
+  }
   class FileSystemDirectoryHandle extends FileSystemHandle{
     async getFileHandle(name,options={}){if(!arguments.length)throw new TypeError('File name is required');return decode(await send(this,'file',{name:text(name),create:!!options?.create}));}
     async getDirectoryHandle(name,options={}){if(!arguments.length)throw new TypeError('Directory name is required');return decode(await send(this,'directory',{name:text(name),create:!!options?.create}));}
     async removeEntry(name,options={}){if(!arguments.length)throw new TypeError('File name is required');return send(this,'remove',{name:text(name),recursive:!!options?.recursive});}
     async resolve(other){info(other);return send(this,'resolve',{other});}
-    async *entries(){const entries=await send(this,'entries');for(const [name,handle] of entries)yield [name,decode(handle)];}
-    async *keys(){for await(const [name] of this.entries())yield name;}
-    async *values(){for await(const [,handle] of this.entries())yield handle;}
+    entries(){return directoryIterator(this,'entries');}
+    keys(){return directoryIterator(this,'keys');}
+    values(){return directoryIterator(this,'values');}
   }
   FileSystemDirectoryHandle.prototype[Symbol.asyncIterator]=FileSystemDirectoryHandle.prototype.entries;
   class FileSystemFileHandle extends FileSystemHandle{

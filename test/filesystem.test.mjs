@@ -45,6 +45,30 @@ test('File directory removal checks descendants, names, lease ownership and dele
   const replacement=await call({op:'directory',handle:root,name:'folder',create:true});assert.equal(await call({op:'same',handle:dir,other:replacement}),true);
   assert.deepEqual(await call({op:'resolve',handle:root,other:file}),['folder','x']);
 });
+test('Directory iterators bypass public overrides and remain resumable after an early exit',async()=>{
+  const {service}=fixture(),client=create_file_client(command=>service.command(origin,owner,structuredClone(command))),root=await client.storage.getDirectory();
+  await root.getFileHandle('a.txt',{create:true});await root.getDirectoryHandle('folder',{create:true});
+  root.entries=()=>{throw new Error('Authored entries override');};
+  const collect=async iterator=>{const result=[];for await(const item of iterator)result.push(item);return result;};
+  assert.deepEqual((await collect(root.keys())).sort(),['a.txt','folder']);
+  assert.deepEqual((await collect(root.values())).map(handle=>[handle.name,handle.kind]).sort(),[['a.txt','file'],['folder','directory']]);
+  const iterator=root.keys();assert.equal(iterator.return,undefined);assert.equal(iterator.throw,undefined);
+  assert.equal(Object.prototype.toString.call(iterator),'[object FileSystemDirectoryHandle AsyncIterator]');
+  let first;for await(const name of iterator){first=name;break;}
+  const rest=await collect(iterator);assert.equal(rest.length,1);assert.deepEqual([first,...rest].sort(),['a.txt','folder']);
+});
+
+test('Directory iterators validate receivers immediately and serialize concurrent next requests',async()=>{
+  const {service}=fixture(),client=create_file_client(command=>service.command(origin,owner,structuredClone(command))),root=await client.storage.getDirectory(),file=await root.getFileHandle('saved',{create:true});
+  for(const method of ['entries','keys','values'])for(const receiver of [{},file])assert.throws(()=>client.FileSystemDirectoryHandle.prototype[method].call(receiver),TypeError);
+  const iterator=root.values();
+  const records=await Promise.all([iterator.next(),iterator.next(),iterator.next()]);
+  assert.equal(records.filter(record=>record.done).length,2);assert.equal(records.find(record=>!record.done).value.name,'saved');
+  await assert.rejects(Object.getPrototypeOf(iterator).next.call({}),TypeError);
+  const removed=await root.getDirectoryHandle('removed',{create:true});await root.removeEntry('removed');
+  const missing=removed.entries();await assert.rejects(missing.next(),{name:'NotFoundError'});assert.deepEqual(await missing.next(),{value:undefined,done:true});
+});
+
 test('File client streams queue concurrent writes, ignore public overrides and preserve writer locking',async()=>{
   const {service}=fixture(),client=create_file_client(command=>service.command(origin,owner,structuredClone(command))),root=await client.storage.getDirectory(),file=await root.getFileHandle('queued.txt',{create:true});
   const stream=await file.createWritable();stream.getWriter=()=>{throw new Error('Authored override');};
