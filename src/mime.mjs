@@ -16,3 +16,8 @@ export function mime_essence(header){
   }
   return result;
 }
+
+export function xml_document_type(header){
+  const type=mime_essence(header);
+  return ['image/svg+xml','application/xhtml+xml','application/xml','text/xml'].includes(type)?type:null;
+}

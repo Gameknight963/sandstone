@@ -10,7 +10,8 @@ import {restore_history} from './polyfill/history.mjs';
 import {default_referrer_policy} from '../referrer.mjs';
 import {document_referrer_policy,reset_document_referrer_policy,set_current_script,get_current_script} from './intercept/document.mjs';
 import {configure_window_messages} from './window_messages.mjs';
-import {load_document_html,run_document_script,initialize_blank_document,on_document_complete} from './document_input.mjs';
+import {load_document_html,load_document_xml,run_document_script,initialize_blank_document,on_document_complete} from './document_input.mjs';
+import {runtime_html} from '../runtime_html.mjs';
 import {navigation_activation} from './user_activation.mjs';
 import {configure_document_encoding} from './document_encoding.mjs';
 import {configure_service_workers} from './polyfill/service_worker.mjs';
@@ -139,9 +140,7 @@ export function set_worker_context(options) {
 }
 
 function get_frame_html() {
-  let html = document.documentElement.outerHTML;
-  let doctype = new XMLSerializer().serializeToString(document.doctype);
-  frame_html = doctype + html;
+  frame_html=runtime_html(runtime_src);
 }
 
 function prepare_html(options) {
@@ -188,6 +187,12 @@ async function load_html(options) {
   await prepare_html(options);
 
   if (options.error) {
+    if(document.contentType!=='text/html'){
+      const message=String(options.error).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+      const content='<div xmlns="http://www.w3.org/1999/xhtml" style="font:14px sans-serif;white-space:pre-wrap"><h2>An unexpected error has occurred</h2><pre>'+message+'</pre></div>';
+      const markup=document.contentType==='image/svg+xml'?'<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"><foreignObject width="100%" height="100%">'+content+'</foreignObject></svg>':'<html xmlns="http://www.w3.org/1999/xhtml"><body>'+content+'</body></html>';
+      await load_document_xml(markup,{scriptingEnabled:false});return;
+    }
     document.getElementById("loading_text").style.display = "none";
     document.getElementById("error_div").style.display = "initial";
     document.getElementById("error_msg").innerText = options.error;
@@ -196,7 +201,8 @@ async function load_html(options) {
   }
 
   is_loaded = true;
-  await load_document_html(options.html,{scriptingEnabled:site_settings.allow_js});
+  if(document.contentType==='text/html')await load_document_html(options.html,{scriptingEnabled:site_settings.allow_js});
+  else await load_document_xml(options.html,{scriptingEnabled:site_settings.allow_js});
   restore_history(ctx.history,options.history);
 }
 

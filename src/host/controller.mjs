@@ -13,7 +13,9 @@ import './cookies.mjs';
 import './navigation_targets.mjs';
 import {navigation_sandbox} from '../navigation_policy.mjs';
 import {RPCSourcePolicy} from './rpc_policy.mjs';
-import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../bootstrap.mjs';
+import {bootstrap_html,bootstrap_xml,create_bootstrap_nonce,runtime_seed} from '../bootstrap.mjs';
+import {runtime_html} from '../runtime_html.mjs';
+import {xml_document_type} from '../mime.mjs';
 import {decode_document_response} from '../text_encoding.mjs';
 import {prepare_site_data_clear as prepare_clear} from '../site_data_clear.mjs';
 import {opened_document_urls,document_request_url} from './document_url.mjs';
@@ -30,40 +32,7 @@ import { libcurl } from "libcurl.js/bundled";
 //frame_js is a string, which is imported using webpack
 import frame_js from "../../dist/sandstone_frame.js";
 
-let frame_html = `
-  <!DOCTYPE html>
-  <head>
-    <meta charset="utf-8">
-    <script>${frame_js}</script>
-    <style>
-      html {
-        background-color: #222222;
-        font-family: sans-serif;
-      }
-      * {
-        color: #dddddd;
-      }
-      #error_div {
-        display: none;
-      }
-      #version_text {
-        font-size: 14px;
-      }
-    </style>
-  </head>
-  <body>
-    <p id="loading_text">Loading...</p>
-
-    <div id="error_div">
-      <h2>An unexpected error has occurred</h2>
-      <pre id="error_msg">
-      </pre>
-      <p><i>
-        <span id="version_text"></span>
-      </p></i>
-    </div>
-  </body>
-`;
+const frame_html=runtime_html(frame_js);
 
 export const iframes = {};
 const saved_child_histories = new Map();
@@ -139,6 +108,7 @@ export class ProxyFrame {
     const source_policy = navigation.referrerPolicy || this.referrer_policy || default_referrer_policy;
     let html = null;
     let character_encoding = 'UTF-8';
+    let content_type='text/html';
     let download_response;
     let navigation_client;
     let error = false;
@@ -167,7 +137,7 @@ export class ProxyFrame {
         if(navigation_id!==this.navigation_id){await response.body?.cancel();return;}
         if([204,205].includes(response.status)){await response.body?.cancel();this.is_navigating=false;return {no_navigation:true};}
         if(is_download(response.headers))download_response=response;
-        else {const decoded=await decode_document_response(response);html=decoded.text;character_encoding=decoded.encoding;}
+        else {const decoded=await decode_document_response(response);html=decoded.text;character_encoding=decoded.encoding;content_type=xml_document_type(response.headers.get('content-type'))||'text/html';}
         url = response.url;
         referrer_policy = parse_referrer_policy(response.headers.get('referrer-policy'));
         document_referrer = response.request_referrer || '';
@@ -219,7 +189,9 @@ export class ProxyFrame {
 
     try{
       await rpc.wait_on_frame(this.iframe,{signal:runtime_wait.signal,nonce:bootstrap_nonce});
-      const runtime_url=await rpc.load_frame_runtime(this.iframe,bootstrap_html(frame_html,bootstrap_nonce),bootstrap_nonce,{signal:runtime_wait.signal});
+      const mime=error?'text/html':content_type;
+      const runtime=mime==='text/html'?bootstrap_html(frame_html,bootstrap_nonce):bootstrap_xml(frame_js,mime,bootstrap_nonce);
+      const runtime_url=await rpc.load_frame_runtime(this.iframe,runtime,bootstrap_nonce,{signal:runtime_wait.signal,mime});
       if(navigation_id!==this.navigation_id)return;
       this.runtime_url=runtime_url;rpc.commit_frame_runtime(this.iframe,runtime_url,bootstrap_nonce);
       await rpc.wait_on_frame(this.iframe,{signal:runtime_wait.signal,url:runtime_url,nonce:bootstrap_nonce});

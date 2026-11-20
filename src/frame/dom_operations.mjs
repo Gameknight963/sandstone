@@ -5,7 +5,7 @@ const inert_nodes=new WeakSet();
 export const native_attach_shadow=globalThis.Element?.prototype.attachShadow;
 export const native_dom=globalThis.document&&{
   create:Document.prototype.createElementNS,text:Document.prototype.createTextNode,comment:Document.prototype.createComment,
-  adopt:Document.prototype.adoptNode,append:Node.prototype.appendChild,insert:Node.prototype.insertBefore,remove:Node.prototype.removeChild,
+  adopt:Document.prototype.adoptNode,append:Node.prototype.appendChild,insert:Node.prototype.insertBefore,remove:Node.prototype.removeChild,clone:Node.prototype.cloneNode,
   attribute:Element.prototype.setAttributeNS,plainAttribute:Element.prototype.setAttribute,attributeNode:Element.prototype.setAttributeNodeNS,
   inner:Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML').set,
   data:Object.getOwnPropertyDescriptor(CharacterData.prototype,'data').set,appendData:CharacterData.prototype.appendData,

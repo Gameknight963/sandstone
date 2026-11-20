@@ -1,10 +1,13 @@
 import {HTMLDOMStream} from './html_dom_stream.mjs';
 import {native_dom as dom} from './dom_operations.mjs';
 import {listen_runtime,unlisten_runtime,snapshot_runtime_events,restore_runtime_events} from './runtime_events.mjs';
-import {walk_resources} from './resource_nodes.mjs';
+import {walk_resources,prepare_resources} from './resource_nodes.mjs';
 import {forget_document_listeners} from './link_events.mjs';
 import {unwrap_document,wrap_document} from './document_identity.mjs';
-import {rewrite_script} from './rewrite/script.mjs';
+import {rewrite_script,prime_inert_script,mark_parser_script} from './rewrite/script.mjs';
+import {rewrite_element} from './rewrite/element.mjs';
+import {activate_parser_event_attributes} from './event_attributes.mjs';
+import {reconcile_iframes} from './iframe_lifecycle.mjs';
 import {flush_import_map} from './polyfill/module.mjs';
 import {ctx} from './context.mjs';
 import * as loader from './loader.mjs';
@@ -112,6 +115,54 @@ export async function load_document_html(source,{scriptingEnabled=true}={}){
   const current=begin({source:true,scriptingEnabled});
   current.stream.write(source);close(current);await current.finished;
 }
+export async function load_document_xml(source,{scriptingEnabled=true}={}){
+  // Parse without connecting nodes. Every resource must be rewritten before
+  // adoption into the live XML document, where native loading can begin.
+  const parsed=new DOMParser().parseFromString(source,type.call(document));
+  session?.controller.abort(new DOMException('The document was replaced','AbortError'));
+  const current={controller:new AbortController(),source:true,xml:true,phase:'loading',async:[],deferred:[],finished:null};session=current;
+  loader.set_ready_state('loading');
+  const pending=[];
+  current.stream={closed:true,get pendingResources(){return pending.length;},finish:()=>Promise.resolve(),settled:()=>Promise.allSettled(pending)};
+  while(document.firstChild)dom.remove.call(document,document.firstChild);
+  const live=()=>session===current&&!current.controller.signal.aborted;
+  const siblings=(children,parent,index=0)=>{
+    for(;index<children.length&&live();index++){
+      const operation=insert(children[index],parent);
+      if(operation)return Promise.resolve(operation).then(()=>siblings(children,parent,index+1));
+    }
+  };
+  const insert=(node,parent)=>{
+    // An XML stylesheet PI starts a native request upon insertion. Keep it
+    // disconnected until the relay has a handler for this resource type.
+    if(node.nodeType===7&&node.target==='xml-stylesheet')throw new DOMException('XML stylesheet processing is not yet available','NotSupportedError');
+    const script=node instanceof HTMLScriptElement||is_svg_script(node);
+    const atomic=script||node instanceof HTMLStyleElement||globalThis.SVGStyleElement&&node instanceof SVGStyleElement||node instanceof HTMLTemplateElement;
+    const copy=dom.clone.call(node,!!atomic);
+    if(script){
+      // Cloning an inert DOMParser script retains its non-executing state.
+      // Parser scheduling, rather than insertion, executes the authored code.
+      const attributes=[...copy.attributes].map(attribute=>[attribute.namespaceURI,attribute.name,attribute.value]);
+      prime_inert_script(copy);for(const attribute of [...copy.attributes])copy.removeAttributeNode(attribute);
+      for(const [namespace,name,value] of attributes)dom.attribute.call(copy,namespace,name,value);
+      copy.__rewritten__=true;mark_parser_script(copy);
+    }
+    prepare_resources(copy);
+    const prepared=rewrite_element(copy);if(prepared)pending.push(Promise.resolve(prepared));
+    dom.adopt.call(document,copy);activate_parser_event_attributes(copy);
+    if(parent===document&&copy instanceof Element)current.root=copy;
+    dom.append.call(parent,copy);
+    reconcile_iframes(copy);
+    if(script){
+      if(!scriptingEnabled)return;
+      return Promise.resolve(prepare_script(current,copy,null));
+    }
+    if(!atomic)return siblings([...node.childNodes],copy);
+  };
+  await siblings([...parsed.childNodes],document);
+  if(!live())return;
+  close(current);await current.finished;
+}
 function begin({source=false,scriptingEnabled=loader.site_settings.allow_js!==false}={}){
   const previous=session,targets=nodes(),saved=snapshot_runtime_events(targets);
   const previous_url=document.URL,sources=loader.document_sources();
@@ -135,7 +186,8 @@ function close(current){
   const live=()=>session===current&&!current.controller.signal.aborted;
   const interactive=()=>{if(live()&&current.phase==='loading'){current.phase='interactive';loader.set_ready_state('interactive');emit(document,'readystatechange');}};
   const complete=()=>{
-    if(!live())return;dom.close.call(document);current.phase='complete';loader.set_ready_state('complete');emit(document,'readystatechange');
+    if(!live())return;if(!current.xml)dom.close.call(document);current.phase='complete';loader.set_ready_state('complete');emit(document,'readystatechange');
+    if(current.xml&&current.root===document.documentElement&&is_svg_root(current.root))emit(current.root,'load');
     if(!live())return;
     const loaded=new Event('load');Object.defineProperty(loaded,'target',{value:wrap_document(document)});globalThis.dispatchEvent(loaded);
     if(live())globalThis.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:false}));
@@ -167,7 +219,7 @@ if(globalThis.document){
   // The proxy dispatches lifecycle events for the virtual document. Hide only
   // the native parser's own document/window events, never resource load events.
   for(const name of ['readystatechange','DOMContentLoaded','load','pageshow'])listen_runtime(globalThis,name,event=>{
-    if(session&&event.isTrusted&&(event.target===document||event.target===globalThis))event.stopImmediatePropagation();
+    if(session&&event.isTrusted&&(event.target===document||event.target===globalThis||session.xml&&event.target===session.root&&event.type==='load'))event.stopImmediatePropagation();
   },true);
   for(const method of ['open','write','writeln','close']){
     Document.prototype[method]=new Proxy(dom[method],{apply(target,receiver,args){
@@ -186,3 +238,4 @@ if(globalThis.document){
     }});
   }
 }
+function is_svg_root(node){return node.namespaceURI==='http://www.w3.org/2000/svg'&&node.localName==='svg';}
