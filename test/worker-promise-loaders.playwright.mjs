@@ -14,8 +14,8 @@ async function exercise(){
 }
 export async function verifyPromiseWorkerLoaders(page){
   const server=createServer((request,response)=>{const path=new URL(request.url,'http://local').pathname;if(path==='/one.js'){response.writeHead(302,{location:'/delivered/one.js'});response.end();return;}setTimeout(()=>{response.writeHead(files[path]||path==='/page'?200:404,{'content-type':path.endsWith('.js')?'text/javascript':'text/html','cache-control':'no-store'});response.end(files[path]||'<body>Promise worker loader');},20);});server.listen(0,'127.0.0.1');await once(server,'listening');
-  const origin='http://127.0.0.1:'+server.address().port,native=await page.context().newPage(),fixture=await page.context().newPage(),errors=[],direct=[];
-  fixture.on('pageerror',error=>errors.push(error.message));fixture.on('request',request=>{if(/^https?:/.test(request.url()))direct.push(request.url());});
+  const origin='http://127.0.0.1:'+server.address().port,native=await page.context().newPage(),fixture=await page.context().newPage(),errors=[],direct=[],artifact=page.url();
+  fixture.on('pageerror',error=>errors.push(error.message));fixture.on('request',request=>{if(/^https?:/.test(request.url())&&request.url()!==artifact)direct.push(request.url());});
   try{
     await native.goto(origin+'/page');const expected=await native.evaluate(exercise);
     assert.equal(expected.detached,true);assert.deepEqual(expected.replies,[{ready:true},{id:0,startup:7,values:[],bytes:[1,2,3]},{id:1,startup:7,values:[41,2],bytes:[]},{id:2,startup:7,values:[41],bytes:[]},{id:3,error:'NetworkError'},{id:4,startup:7,values:[2],bytes:[]}]);

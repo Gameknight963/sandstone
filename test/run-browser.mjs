@@ -35,6 +35,7 @@ import {verifyPromiseWorkerLoaders,verifyAMDServiceWorkerScripts} from './worker
 import {verifyWorkerImportAliases} from './worker-import-aliases.playwright.mjs';
 import {verifySyncXHR} from './sync-xhr.playwright.mjs';
 import {verifyWorkerRuntimeImports} from './worker-runtime-imports.playwright.mjs';
+import {verifyIsolatedWorkerLoaders} from './worker-isolated-loaders.playwright.mjs';
 import {verifyLinkPreloads} from './link-preloads.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
@@ -396,6 +397,7 @@ try {
     result.passed.push(...await timed(verifyAMDServiceWorkerScripts(page), 'AMD service worker scripts fixture'));
     result.passed.push(...await timed(verifySyncXHR(page), 'Synchronous worker XHR fixture'));
     result.passed.push(...await timed(verifyWorkerRuntimeImports(page), 'Runtime worker imports fixture'));
+    result.passed.push(...await timed(verifyIsolatedWorkerLoaders(page), 'Isolated worker loaders fixture'));
     result.passed.push(...await timed(verifyWorkerCycles(page), 'Cyclic worker module fixture'));
     result.passed.push(...await timed(verifyWorkerNames(page), 'Worker function name fixture'));
     result.passed.push(...await timed(verifyWorkerScopes(page), 'Worker script scope fixture'));

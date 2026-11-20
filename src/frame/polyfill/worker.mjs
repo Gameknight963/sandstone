@@ -30,7 +30,6 @@ const NativeMessageEvent=globalThis.MessageEvent,NativeErrorEvent=globalThis.Err
 const native_timeout=globalThis.setTimeout.bind(globalThis),native_clear_timeout=globalThis.clearTimeout.bind(globalThis);
 const native_dispatch=globalThis.dispatchEvent?.bind(globalThis);
 const imported_blobs = new Map();
-const runtime_imports=new Set();
 const service_profile=Symbol('private service worker profile');
 export function create_service_worker(profile){
   if(typeof profile?.source!=='string')throw new TypeError('A validated service worker script is required');
@@ -102,6 +101,9 @@ export function mark_worker_started() {
 }
 
 export function fakeImportScripts(...paths) {
+  return import_worker_scripts(paths);
+}
+function import_worker_scripts(paths,entry=false) {
   if (loader.worker_type === "module") throw new TypeError("Module scripts don't support importScripts()");
   const urls = paths.map(path => convert_url(String(path), loader.url));
   const blobs = urls.map(url => {
@@ -123,24 +125,24 @@ export function fakeImportScripts(...paths) {
       native_post({sandstone_worker: worker_options.token, type: "need-script", url});
       throw new DOMException("Worker discovery needs a script", "NetworkError");
     }
-    // A runtime URL may depend on a message received long after discovery.
-    // On isolated static hosts the worker can block on the existing private
-    // shared-memory bridge while its owner performs the ordinary script relay.
-    if((typeof source!=='string'||runtime_imports.has(url))&&/^https?:/.test(url)&&sync_worker_available(url)){
+    // Import when called, through the normal HTTP cache and script request
+    // context. Discovery snapshots cannot represent no-store or revalidation.
+    // The initial entry was already fetched and must execute that exact body.
+    if(!entry&&/^https?:/.test(url)&&sync_worker_available(url)){
       const response=sync_worker_request(url,{script:true},0);
       if(response.status<200||response.status>=300)throw new DOMException('Worker script request failed: '+response.status,'NetworkError');
       try{validate_module_response({headers:new Headers(response.headers)},'javascript',url);}catch{throw new DOMException('Invalid imported worker script','NetworkError');}
-      const text=new TextDecoder().decode(response.bytes);
-      if(source!==text&&imported_blobs.has(url)){URL.revokeObjectURL(imported_blobs.get(url));imported_blobs.delete(url);}
-      source=text;runtime_imports.add(url);network.cache_put(url,source);
-      (worker_options.source_urls??={})[url]=response.url||url;
-      (worker_options.source_cross_origins??={})[url]=!!response.request_cross_origin;
+      const text=new TextDecoder().decode(response.bytes),delivered=response.url||url,crossed=!!response.request_cross_origin;
+      if((source!==text||worker_options.source_urls?.[url]!==delivered||worker_options.source_cross_origins?.[url]!==crossed)&&imported_blobs.has(url)){URL.revokeObjectURL(imported_blobs.get(url));imported_blobs.delete(url);}
+      source=text;network.cache_put(url,source);
+      (worker_options.source_urls??={})[url]=delivered;
+      (worker_options.source_cross_origins??={})[url]=crossed;
     }
     if (typeof source !== "string") throw new DOMException(`Worker script is unavailable: ${url}`, "NetworkError");
     if (!imported_blobs.has(url)) {
       const scriptURL=worker_options?.source_urls?.[url]||url;
       const crossed=worker_options?.source_cross_origins?.[url]??new URL(scriptURL).origin!==ctx.origin;
-      const rewritten = parser.rewrite_js(source, {url:scriptURL,sourceURL:url,workerLoaders:!worker_options?.probe&&!worker_options?.service_worker,importReferrer:{url:crossed?'about:blank':scriptURL,credentials:'same-origin',referrerPolicy:loader.referrer_policy}});
+      const rewritten = parser.rewrite_js(source, {url:scriptURL,sourceURL:url,workerLoaders:!worker_options?.probe&&!worker_options?.service_worker&&!worker_options?.sync_http,importReferrer:{url:crossed?'about:blank':scriptURL,credentials:'same-origin',referrerPolicy:loader.referrer_policy}});
       imported_blobs.set(url, network.create_blob_url(new Blob([rewritten], {type: "text/javascript"}), scriptURL));
     }
     return imported_blobs.get(url);
@@ -192,7 +194,7 @@ export function initialize_worker(options) {
       } else {
         // Native classic-script evaluation preserves strict globals and lexical
         // bindings across imported files; indirect eval gives them another scope.
-        fakeImportScripts(options.url);
+        import_worker_scripts([options.url],true);
       }
       mark_worker_started();
       service?.start();
@@ -362,7 +364,10 @@ export class FakeWorker extends EventTarget {
       this.#source_urls.set(script.url,script.responseURL||script.url);
       this.#source_cross_origins.set(script.url,script.request_cross_origin??new URL(script.responseURL||script.url).origin!==ctx.origin);
     }
-    if (this.#options.type === "classic") {
+    // Isolated dedicated workers can import synchronously through their owner.
+    // Avoid speculative fetching/execution there; retain discovery for file
+    // hosts and the explicit installed-script graph of service workers.
+    if (this.#options.type === "classic" && (this.#serviceProfile||!NativeSharedBuffer||!native_isolated)) {
       const prefetched = await prefetch_worker_scripts(source, url, resource => this.#fetch_script(resource,url),sources,this.#source_urls,url,{asyncLoaders:!this.#serviceProfile,staticAMD:!!this.#serviceProfile});
       sources = prefetched.cache;
       if (prefetched.dynamic&&!this.#serviceProfile?.restoring) await this.#probe(source, url, sources);

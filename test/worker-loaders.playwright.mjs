@@ -19,7 +19,7 @@ export async function verifyWorkerLoaders(page){
   });
   server.listen(0,'127.0.0.1');await once(server,'listening');const origin='http://127.0.0.1:'+server.address().port;
   const native=await page.context().newPage(),fixture=await page.context().newPage(),direct=[],errors=[];
-  fixture.on('request',request=>{if(/^https?:/.test(request.url()))direct.push(request.url());});fixture.on('pageerror',error=>errors.push(error.message));
+  const artifact=page.url();fixture.on('request',request=>{if(/^https?:/.test(request.url())&&request.url()!==artifact)direct.push(request.url());});fixture.on('pageerror',error=>errors.push(error.message));
   const read=(target,proxy,source)=>proxy?target.evaluate(source=>main_frame.eval_js(source),source):target.evaluate(source=>globalThis.eval(source),source);
   async function verify(target,proxy){
     await read(target,proxy,`globalThis.workerReplies=[];globalThis.lateWorker=new Worker('/worker.js');lateWorker.onmessage=event=>workerReplies.push(event.data);true`);
