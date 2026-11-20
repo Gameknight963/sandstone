@@ -32,6 +32,7 @@ import {verifyPublicServiceWorker} from './service-worker-public.playwright.mjs'
 import {verifyServiceWorkerWindowClients} from './service-worker-window-clients.playwright.mjs';
 import {verifyWorkerLoaders} from './worker-loaders.playwright.mjs';
 import {verifySyncXHR} from './sync-xhr.playwright.mjs';
+import {verifyLinkPreloads} from './link-preloads.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -357,6 +358,7 @@ try {
     result.passed.push(...moduleResults);
     result.passed.push(...await timed(verifyResources(page), "Resource fixture"));
     result.passed.push(...await timed(verifyStylesheetRel(page), 'Stylesheet relation fixture'));
+    result.passed.push(...await timed(verifyLinkPreloads(page), 'Resource preload fixture'));
     result.passed.push(...await timed(verifyStylesheetAttributes(page), 'Stylesheet attribute fixture'));
     try{result.passed.push(...await timed(verifyStylesheetErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Stylesheet failure fixture'));}
     finally{expectedDiagnostics.clear();}

@@ -6,7 +6,10 @@ import { load_cookies } from "./polyfill/cookie.mjs";
 import {document_referrer_policy} from './intercept/document.mjs';
 import {reserve_keepalive} from './keepalive_budget.mjs';
 import {remember_response} from '../response_metadata.mjs';
+import {ResourcePreloads} from '../preloads.mjs';
 const native_fetch=globalThis.fetch;
+const preloads=new ResourcePreloads();
+export function preload_resource(url,options){return preloads.load(url,options,loader.beacon_context,()=>fetch(url,{...options,sandstone_preload:true}));}
 const navigation_data=new WeakMap(),metadata_get=WeakMap.prototype.get,metadata_set=WeakMap.prototype.set,apply=Reflect.apply;
 const worker_data=new WeakMap();
 export function worker_context(response){return apply(metadata_get,worker_data,[response]);}
@@ -44,6 +47,14 @@ export async function fetch(url, options) {
 
   let base_url = ctx.location?.href || loader.url;
   url = new URL(url, base_url);
+  if(!options?.sandstone_preload&&!options?.sandstone_worker_script&&!options?.sandstone_worker_request&&!options?.sandstone_frame_id){
+    options?.signal?.throwIfAborted();const cached=preloads.consume(url.href,options||{},loader.beacon_context);
+    if(cached){
+      const signal=options?.signal;let abort;
+      try{const response=signal?await Promise.race([cached,new Promise((_,reject)=>{abort=()=>reject(signal.reason);signal.addEventListener('abort',abort,{once:true});})]):await cached;signal?.throwIfAborted();if(response)return response;}
+      finally{if(abort)signal.removeEventListener('abort',abort);}
+    }
+  }
   if (url.protocol === "data:" || url.protocol === "blob:") {
     try { return await native_fetch(url.href, options); }
     finally { options?.sandstone_keepalive_release?.(); }
@@ -53,6 +64,7 @@ export async function fetch(url, options) {
   }
 
   const params = {...options};
+  delete params.sandstone_preload;
   const reserved_release = params.sandstone_keepalive_release;
   delete params.sandstone_keepalive_release;
   if (!params.referrerPolicy) params.referrerPolicy = document_referrer_policy();
