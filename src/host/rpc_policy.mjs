@@ -56,6 +56,9 @@ export class RPCSourcePolicy {
       if(scope.entry.retired)throw new DOMException('Document was retired','AbortError');
     }
     this.active(scope);
+    if(procedure==='service_worker_command'){
+      if(args[0]!==scope.id||!this.frames()[scope.id]?.service_worker_host)denied();return args;
+    }
     if(procedure==='fetch_worker_script'){
       if(args[0]!==scope.id||!this.owns(scope,args[1])||!this.frames()[args[1]]?.worker)denied();return args;
     }

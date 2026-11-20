@@ -11,4 +11,5 @@ export {seed_encoder} from '../bootstrap.mjs';
 export * as rpc from "../rpc.mjs";
 
 import * as rpc from "../rpc.mjs";
+import './service_worker_host.mjs';
 rpc.set_role("frame");

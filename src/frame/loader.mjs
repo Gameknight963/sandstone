@@ -28,6 +28,7 @@ export let worker_type;
 export let worker_origin;
 export let worker_probe = false;
 export let service_worker = false;
+export let service_worker_host = false;
 export let url; //the proxied page url
 export let frame_id; //the current frame id
 export let beacon_context;
@@ -145,6 +146,7 @@ function prepare_html(options) {
   beacon_context = options.beacon_context;
   version = options.version;
   is_iframe = options.is_iframe || false;
+  service_worker_host = !!options.service_worker_host;
   cookie_cross_site = !!options.cookie_cross_site;
   default_settings = options.default_settings;
   site_settings = {...default_settings, ...options.settings};

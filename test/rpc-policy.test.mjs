@@ -14,6 +14,17 @@ function fixture(){
   return {frames,contexts,policy,port,call,child};
 }
 
+test('Service worker owner commands require the active owner port and cannot be supplied by its worker',()=>{
+  const {call,frames,policy,port,child,contexts}=fixture(),worker={};
+  const args=['root','skipWaiting',[]];
+  assert.throws(()=>call('service_worker_command',args),{name:'SecurityError'});
+  frames.root.service_worker_host=true;assert.deepEqual(call('service_worker_command',args),args);
+  policy.attach(port,worker,'worker');child('worker');frames.worker.worker=true;
+  assert.throws(()=>call('service_worker_command',args,worker),{name:'SecurityError'});
+  assert.throws(()=>call('service_worker_command',['worker','skipWaiting',[]],worker),{name:'SecurityError'});
+  contexts.get('root-document').retired=true;assert.throws(()=>call('service_worker_command',args),{name:'SecurityError'});
+});
+
 test('Only an active parent may prefetch scripts for its own worker while general child fetches remain restricted',()=>{
   const {frames,call,child,policy,port,contexts}=fixture();child('worker');frames.worker.worker=true;child('iframe');
   const args=['root','worker','request','https://site.test/script.js',{}];assert.deepEqual(call('fetch_worker_script',args),args);
