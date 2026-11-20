@@ -15,10 +15,13 @@ export async function verifyXMLRuntimeBootstrap(page){
     for(const type of ['text/html','image/svg+xml','application/xhtml+xml']){
       console.log(JSON.stringify({fixture:'Runtime bootstrap',type}));
       const actual=await fixture.evaluate(async({runtime,type,token})=>{
-        const suffix=`;{
+        const suffix=`;(async()=>{
+          const ordered=[];
+          await sandstone_frame.script_schedule.ordered_classic(()=>ordered.push('classic'));
           const result={token:${JSON.stringify(token)},type:document.contentType,xml:document instanceof XMLDocument,namespace:document.documentElement.namespaceURI};
+          result.ordered=ordered;
           parent.postMessage(result,'*');
-        }`;
+        })()`;
         const source=runtime+suffix;
         const script=type==='text/html'?'<script>'+source+'</script>':'<script><![CDATA['+source.replaceAll(']]>',']]]]><![CDATA[>')+']]></script>';
         const markup=type==='image/svg+xml'?'<svg xmlns="http://www.w3.org/2000/svg">'+script+'</svg>':(type==='text/html'?'<!doctype html>':'')+'<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"/>'+script+'</head><body></body></html>';
@@ -36,11 +39,11 @@ export async function verifyXMLRuntimeBootstrap(page){
           });
         }finally{clearTimeout(timer);removeEventListener('message',receive);frame.remove();URL.revokeObjectURL(url);}
       },{runtime,type,token:randomUUID()});
-      assert.deepEqual(actual,{type,xml:type!=='text/html',namespace:type==='image/svg+xml'?'http://www.w3.org/2000/svg':'http://www.w3.org/1999/xhtml',sourceMatches:true},type+' runtime initialization and executable source preservation');
+      assert.deepEqual(actual,{type,xml:type!=='text/html',namespace:type==='image/svg+xml'?'http://www.w3.org/2000/svg':'http://www.w3.org/1999/xhtml',ordered:['classic'],sourceMatches:true},type+' runtime initialization, ordered scripts and executable source preservation');
     }
     assert.deepEqual(errors,[],'Runtime bootstrap raised script errors');
     assert.deepEqual(direct,[],'Runtime bootstrap made a direct HTTP request');
-    return ['Runtime initializes in native SVG and XHTML documents without parsing HTML fragments as XML','Runtime source preserves executable script text across HTML and XML CDATA'];
+    return ['Runtime initializes and executes ordered scripts in native SVG and XHTML documents','Runtime source preserves executable script text across HTML and XML CDATA'];
   }catch(error){throw new Error(error.message+'; script errors: '+JSON.stringify(errors),{cause:error});}
   finally{await fixture.close();}
 }

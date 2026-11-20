@@ -1,3 +1,4 @@
+import {create_runtime_script,append_runtime_script} from './runtime_script.mjs';
 let next=0;
 const queue=[];
 const callbacks=new Map();
@@ -18,12 +19,12 @@ export function ordered_script(){
 export function run(id){callbacks.get(id)?.();}
 export function ordered_classic(execute){
   return new Promise((resolve,reject)=>{
-    const id=++next,script=document.createElement('script');
-    script.__rewritten__=true;script.async=false;
+    const id=++next,script=create_runtime_script();
+    script.async=false;
     const url=URL.createObjectURL(new Blob([`sandstone_frame.script_schedule.run(${id});`],{type:'text/javascript'}));
     const cleanup=()=>{callbacks.delete(id);script.remove();URL.revokeObjectURL(url);};
     callbacks.set(id,execute);
     script.onload=()=>{cleanup();resolve();};script.onerror=()=>{cleanup();reject(new TypeError('Ordered script runner failed'));};
-    script.src=url;document.head.append(script);
+    script.src=url;append_runtime_script(script);
   });
 }

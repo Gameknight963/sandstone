@@ -7,6 +7,7 @@ import {document_referrer_policy} from '../intercept/document.mjs';
 import {compile_worker_cycles} from '../worker_module_compiler.mjs';
 import {runtime_context_name} from '../runtime_context.mjs';
 import {fetch_service_worker_script} from '../service_worker_scripts.mjs';
+import {create_runtime_script,append_runtime_script} from '../runtime_script.mjs';
 
 // Keep native import out of webpack's chunk loader; every URL here is a prepared blob.
 const native_import = Function("url", "options", "return import(url, options)");
@@ -16,11 +17,10 @@ let context_url;
 export function flush_import_map() {
   if (!Object.keys(pending_imports).length) return;
   if (typeof document === "undefined") throw new TypeError("Cyclic module workers require a separate module resolver");
-  const script = document.createElement("script");
-  script.__rewritten__ = true;
+  const script=create_runtime_script();
   script.type = "importmap";
   script.textContent = JSON.stringify({imports: pending_imports});
-  document.head.append(script);
+  append_runtime_script(script);
   script.remove();
   pending_imports = Object.create(null);
 }
@@ -49,13 +49,12 @@ export function evaluate_worker_module(record){
 
 export function execute_module(record,{ordered=false}={}) {
   return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.__rewritten__ = true;
+    const script=create_runtime_script();
     script.type = "module";
     if(ordered)script.async=false;
     script.src = record.blob;
     script.onload = () => { script.remove(); resolve(); };
     script.onerror = () => { script.remove(); reject(new TypeError(`Module failed to load: ${record.url}`)); };
-    document.head.append(script);
+    append_runtime_script(script);
   });
 }

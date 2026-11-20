@@ -16,6 +16,7 @@ import {configure_document_encoding} from './document_encoding.mjs';
 import {configure_service_workers} from './polyfill/service_worker.mjs';
 import {configure_autofocus} from './autofocus.mjs';
 import {configure_filesystem} from './polyfill/filesystem.mjs';
+import {create_runtime_script,append_runtime_script} from './runtime_script.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -94,8 +95,7 @@ export function document_opened(before,after,sources){
 export function eval_script(script_element, script_text,{run=callback=>run_document_script(script_element,callback),context}={}) {
   const previous_script=get_current_script();
   set_current_script(script_element);
-  let script = document.createElement("script");
-  script.__rewritten__ = true;
+  const script=create_runtime_script();
   try {
     const url=context?.url||script_element.__sandstone_url__||ctx.document.baseURI;
     let rewritten_js = parser.rewrite_js(script_text, {
@@ -103,8 +103,8 @@ export function eval_script(script_element, script_text,{run=callback=>run_docum
       importReferrer:{url:context?.muted?'about:blank':url,credentials:context?.credentials||'same-origin',referrerPolicy:context?.referrerPolicy||document_referrer_policy()},
       sourceURL:script_element.__sandstone_url__ || ctx.location.href
     });
-    script.innerHTML = rewritten_js;
-    run(()=>(document.body||document.head||document.documentElement).append(script));
+    script.textContent = rewritten_js;
+    run(()=>append_runtime_script(script,{bodyFirst:true}));
   }
   catch (e) {
     console.error(e);
