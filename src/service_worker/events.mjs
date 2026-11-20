@@ -18,7 +18,7 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
   const portGetter=Object.getOwnPropertyDescriptor(globalThis.MessagePort?.prototype||{},'onmessage')?.get;
   const sourceGetters=[[globalThis.Client,'id'],[globalThis.ServiceWorker,'scriptURL']].map(([constructor,key])=>constructor&&Object.getOwnPropertyDescriptor(constructor.prototype,key)?.get).filter(Boolean);
   const invalid=()=>new DOMException('The service worker event is not active','InvalidStateError');
-  const state=event=>{const value=states.get(event);if(!value)throw new TypeError('Illegal service worker event receiver');return value;};
+  const state=event=>{const value=states.get(event);if(!value||value.generic)throw new TypeError('Illegal service worker event receiver');return value;};
   const fetch_state=event=>{const value=state(event);if(!value.fetch)throw new TypeError('Illegal FetchEvent receiver');return value;};
   const deferred=()=>{let resolve,reject;const promise=new PromiseClass((yes,no)=>{resolve=yes;reject=no;});upon(promise,undefined,()=>{});return {promise,resolve,reject};};
   const dispatching=data=>data.dispatching||!!data.parent&&eventPhase.call(data.parent)!==0;
@@ -156,6 +156,15 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
         }
         const own=Object.getOwnPropertyDescriptor(target,key),value=Reflect.get(target,key,own?receiver:target);
         if(typeof value!=='function'||methods.get(key)!==value)return value;
+        if(key==='preventDefault'||key==='stopPropagation'||key==='stopImmediatePropagation'){
+          if(!data.methods.has(value))data.methods.set(value,(...args)=>{
+            if(key==='preventDefault'&&dispatching(data)&&data.passive)return;
+            const result=Reflect.apply(value,target,args);
+            if(key!=='preventDefault'&&data.parent&&data.parent!==target)Reflect.apply(value,data.parent,args);
+            return result;
+          });
+          return data.methods.get(value);
+        }
         if(key==='composedPath'&&data.target!==undefined){
           if(!data.path)data.path=()=>dispatching(data)?[data.target]:[];return data.path;
         }
@@ -167,6 +176,10 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
           return data.init;
         }
         if(!data.methods.has(value))data.methods.set(value,value.bind(target));return data.methods.get(value);
+      },set(target,key,value,receiver){
+        if(key==='returnValue'&&!value){view(event).preventDefault();return true;}
+        if(key==='cancelBubble'&&value){view(event).stopPropagation();return true;}
+        return Reflect.set(target,key,value,receiver);
       }});
       states.set(data.view,data);
     }
@@ -182,7 +195,7 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
   }
   function dispatch_event(event,dispatch,parent,target=globalThis){
     const data=state(event);if(data.delivered)throw invalid();
-    if(parent){eventPhase.call(parent);data.parent=parent;data.target=target;}
+    if(parent){eventPhase.call(parent);data.parent=parent;data.target=target;states.set(parent,data);}
     data.delivered=true;data.trusted=true;data.dispatching=true;
     const ended=()=>{
       if(data.expired)return;
@@ -204,6 +217,12 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
     data.expired=true;data.finished=true;clear_timeout(data.timer);data.parent=null;data.dispatched.reject(reason);data.lifetime.reject(reason);data.response?.reject(reason);data.handledOwner?.reject(reason);
     if(data.handle?.reader)upon(data.handle.reader.cancel(reason),undefined,()=>{});
   }
-  function untrust(event){const data=states.get(event);if(!data)return event;data.trusted=false;return data.raw;}
-  return {ExtendableEvent,FetchEvent,ExtendableMessageEvent,dispatch_event,finish_fetch,expire,view,wrap_listener,untrust};
+  function untrust(event,target){
+    let data=states.get(event);
+    if(data&&dispatching(data))throw invalid();
+    if(!data&&target!==undefined){eventPhase.call(event);data={generic:true,raw:event,trusted:false,parent:event,methods:new Map()};states.set(event,data);}
+    if(!data)return event;data.trusted=false;if(!data.generic)data.parent=null;if(target!==undefined)data.target=target;return data.raw;
+  }
+  function listener_options(event,{passive=false}={}){const data=states.get(event);if(data)data.passive=passive;}
+  return {ExtendableEvent,FetchEvent,ExtendableMessageEvent,dispatch_event,finish_fetch,expire,view,wrap_listener,untrust,listener_options};
 }

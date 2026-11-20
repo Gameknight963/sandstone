@@ -3,6 +3,7 @@ import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {create_service_worker_events} from '../src/service_worker/events.mjs';
+import {verifyServiceWorkerDispatcher} from './service-worker-dispatcher.playwright.mjs';
 
 function worker_control(create){
   const api=create(),reports=new Map();
@@ -155,7 +156,7 @@ export async function verifyServiceWorkerEvents(browser){
       return results;
     });
     for(const result of results)assert.deepEqual(result.virtual,result.native,'Service worker event '+result.name);
-    return [...results.map(result=>'Service worker native event parity: '+result.name),...await verifyFileWorkerEvents(page)];
+    return [...results.map(result=>'Service worker native event parity: '+result.name),...await verifyFileWorkerEvents(page),...await verifyServiceWorkerDispatcher(page)];
   }catch(error){for(const worker of context.serviceWorkers())console.error('Service worker control error:',await worker.evaluate(()=>self.lastControlError).catch(value=>String(value)));throw error;}
   finally{await context.close();for(const socket of sockets)socket.destroy();await new Promise(resolve=>server.close(resolve));}
 }
