@@ -21,7 +21,9 @@ async function snapshot(response){
 function response_from(data){
   if(!data)return undefined;
   const response=data.items.status===0?NativeResponse.error():new NativeResponse(data.body,{status:data.items.status,statusText:data.items.statusText,headers:data.headers});
-  for(const key of ['url','type','redirected'])Object.defineProperty(response,key,{value:data.items[key]});
+  for(const key of ['url','type','redirected']){
+    const value=data.items[key];Object.defineProperty(response,key,{value:key==='url'&&typeof value==='string'?value.split('#')[0]:value});
+  }
   const clone=response.clone.bind(response);Object.defineProperty(response,'clone',{value:()=>response_from({...data,body:clone().body})});
   return remember_response(response,data.items);
 }

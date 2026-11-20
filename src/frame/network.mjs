@@ -5,7 +5,7 @@ import { ctx } from "./context.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
 import {document_referrer_policy} from './intercept/document.mjs';
 import {reserve_keepalive} from './keepalive_budget.mjs';
-import {remember_response} from '../response_metadata.mjs';
+import {remember_response,response_metadata} from '../response_metadata.mjs';
 import {ResourcePreloads} from '../preloads.mjs';
 const native_fetch=globalThis.fetch;
 const preloads=new ResourcePreloads();
@@ -125,13 +125,18 @@ export async function fetch(url, options) {
   } catch (error) { cleanup(); release(); throw error; }
 };
 
-function restore_response(data) {
+export function public_response(response){
+  const metadata=response_metadata(response);
+  return restore_response({items:metadata,headers:metadata.headers,body:response.body},true);
+}
+
+function restore_response(data,publicURL=false) {
   const {status, statusText, url, redirected, type} = data.items;
   const response = new Response([101, 204, 205, 304].includes(status) ? null : data.body, {
     status: status >= 200 && status <= 599 ? status : 200,
     statusText, headers: data.headers
   });
-  for (const [key, value] of Object.entries({url, redirected, type})) {
+  for (const [key, value] of Object.entries({url:publicURL?url.split('#')[0]:url, redirected, type})) {
     Object.defineProperty(response, key, {value});
   }
   if(status===0)Object.defineProperties(response,{status:{value:0},ok:{value:false}});
@@ -142,7 +147,7 @@ function restore_response(data) {
   const clone = response.clone.bind(response);
   Object.defineProperty(response, "clone", {value: () => {
     const copy = clone();
-    return restore_response({...data, body: copy.body});
+    return restore_response({...data, body: copy.body},publicURL);
   }});
   return remember_response(response,data.items);
 }

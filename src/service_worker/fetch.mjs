@@ -1,5 +1,6 @@
 import {parse_referrer_policy,request_referrer} from '../referrer.mjs';
 import {remember_response} from '../response_metadata.mjs';
+import {redirect_url} from '../redirect.mjs';
 
 // Runs before the HTTP cookie/cache pipeline. A worker's own fetches bypass
 // this dispatcher, while synthetic redirects re-enter it for the same client.
@@ -65,8 +66,8 @@ export class ServiceWorkerFetch{
         }
         if(context.navigation||context.service_worker_entry)return response;
         if(depth===20)throw new TypeError('Too many redirects');
-        const next=new URL(location,url);
-        if(!/^https?:$/.test(next.protocol)||next.username||next.password)throw new TypeError('Invalid redirect URL');
+        const next=redirect_url(location,url);
+        if(next.username||next.password)throw new TypeError('Invalid redirect URL');
         const init={...options,headers:new Headers(options.headers),referrerPolicy:parse_referrer_policy(responseHeaders.get('referrer-policy'),policy),referrer};
         if(next.origin!==url.origin)for(const key of ['authorization','proxy-authorization','cookie'])init.headers.delete(key);
         if(metadata.status===303&&!/^(GET|HEAD)$/i.test(request.method)||[301,302].includes(metadata.status)&&/^POST$/i.test(request.method)){

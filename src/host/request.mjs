@@ -2,6 +2,7 @@ import {same_site,metadata_site,set_fetch_metadata} from './fetch_metadata.mjs';
 export {same_site} from './fetch_metadata.mjs';
 import {parse_referrer_policy, request_referrer, request_origin} from '../referrer.mjs';
 import {cookie_header} from './cookie_policy.mjs';
+import {redirect_url} from '../redirect.mjs';
 
 // Redirects must pass through the cookie jar at every hop, including login flows.
 export async function fetch_with_cookies(transport, data, input, init = {}, context = {}, worker) {
@@ -80,15 +81,17 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
       return output;
     }
     if (redirect === "error") {
-      await response.body?.cancel();
+      await response.body?.cancel().catch(()=>{});
       throw new TypeError("Redirect disallowed");
     }
     if (hop === 20) {
-      await response.body?.cancel();
+      await response.body?.cancel().catch(()=>{});
       throw new TypeError("Too many redirects");
     }
-    const next = new URL(location, url);
-    if (!/^https?:$/.test(next.protocol)) throw new TypeError("Invalid redirect URL");
+    let next;
+    try{
+      next = redirect_url(location,url);
+    }catch(error){await response.body?.cancel().catch(()=>{});throw error;}
     if (next.origin !== url.origin) {
       if (source.origin !== url.origin) tainted = true;
       if (!same_site(top,next)) crossSiteRedirect = true;
@@ -105,7 +108,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
       for (const key of ["content-type", "content-length", "content-encoding", "content-language", "content-location"]) nextHeaders.delete(key);
       options.headers = Object.fromEntries(nextHeaders);
     }
-    await response.body?.cancel();
+    await response.body?.cancel().catch(()=>{});
     url = next;
     redirected = true;
   }

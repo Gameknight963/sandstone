@@ -71,6 +71,13 @@ test('Synthetic redirects re-enter workers, convert POST and strip credentials a
   assert.equal(api.events.length,2);const next=api.events[1].request;
   assert.equal(next.method,'GET');assert.equal(next.body,undefined);assert.deepEqual(next.headers,[]);
 });
+test('Worker redirects retain the current fragment until a Location explicitly replaces it',async()=>{
+  for(const [fragment,expected] of [['','#kept'],['#next','#next'],['#','']]){
+    const api=environment(event=>new URL(event.request.url).pathname==='/start'?{type:'response',metadata:{status:302,headers:[['location','/middle'+fragment]]},body:false}:new URL(event.request.url).pathname==='/middle'?{type:'response',metadata:{status:307,headers:[['location','/end']]},body:false}:{type:'response',metadata:{status:200,headers:[]},body:false});
+    const response=await api.fetch('https://app.test/start#kept');assert.equal(response.url,'https://app.test/end'+expected);assert.equal(response.redirected,true);
+  }
+});
+
 test('Manual and disallowed redirects never issue a destination request',async()=>{
   const api=environment(()=>({type:'response',metadata:{status:302,headers:[['location','/next']]},body:true}));
   const manual=await api.fetch(undefined,{redirect:'manual'});
