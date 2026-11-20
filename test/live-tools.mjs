@@ -6,6 +6,7 @@ import {scratchSites,interactScratch} from './live-scratch.mjs';
 import {paintFileSites,interactPaintFiles} from './live-paint-files.mjs';
 import {markdownSites,interactMarkdown} from './live-markdown.mjs';
 import {jsonSites,interactJson} from './live-json.mjs';
+import {workbenchSites,interactWorkbench} from './live-workbench.mjs';
 
 export const tool_sites=[
   ...documentSites,
@@ -15,6 +16,7 @@ export const tool_sites=[
   ...paintFileSites,
   ...markdownSites,
   ...jsonSites,
+  ...workbenchSites,
   {id:'squoosh',url:'https://squoosh.app/',editor:true},
   {id:'sqlime',url:'https://sqlime.org/',editor:true}
 ];
@@ -27,6 +29,7 @@ export async function interact_tool(page,proxy,site,{surface,read,wait}){
   if(paintFileSites.some(editor=>editor.id===site.id))return interactPaintFiles(page,proxy,{surface,read,wait});
   if(markdownSites.some(editor=>editor.id===site.id))return interactMarkdown(page,proxy,site,{surface,read,wait});
   if(jsonSites.some(editor=>editor.id===site.id))return interactJson(page,proxy,{surface,read,wait});
+  if(workbenchSites.some(editor=>editor.id===site.id))return interactWorkbench(page,proxy,{surface,read,wait});
   if(site.id==='sqlime'){
     const editor=surface.locator('#editor');await editor.fill("create table numbers(value); insert into numbers values (6),(7); select sum(value) as answer from numbers;");
     await surface.getByRole('button',{name:'run',exact:true}).click();
