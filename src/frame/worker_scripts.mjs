@@ -63,14 +63,41 @@ export function worker_imports(source, base, {scriptURL=base,asyncLoaders=false,
       if (declaration.id.type === "Identifier") constants.set(declaration.id.name, value(declaration.init, constants));
     }
   }
-  function walk(node, scope) {
+  function imported(node,scope,aliases){
+    if(node?.type==='Identifier')return aliases.has(node.name);
+    return node?.type==='MemberExpression'&&member(node)==='importScripts'&&node.object.type==='Identifier'&&['self','globalThis'].includes(node.object.name)&&!scope.has(node.object.name);
+  }
+  function import_alias(node,scope,aliases){
+    return imported(node,scope,aliases)||node?.type==='CallExpression'&&node.callee.type==='MemberExpression'&&member(node.callee)==='bind'&&node.arguments.length<=1&&imported(node.callee.object,scope,aliases);
+  }
+  function walk(node, scope, aliases) {
     if (!node?.type) return;
     if (["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(node.type)) {
       scope = new Map(scope);
-      for (const parameter of node.params) if (parameter.type === "Identifier") scope.delete(parameter.name);
+      aliases=new Set(aliases);
+      if(node.id){scope.set(node.id.name,undefined);aliases.delete(node.id.name);}
+      for (const parameter of node.params) if (parameter.type === "Identifier") {scope.set(parameter.name,undefined);aliases.delete(parameter.name);}
+    }
+    if(node.type==='BlockStatement'){scope=new Map(scope);aliases=new Set(aliases);}
+    if(node.type==='VariableDeclarator'&&node.id.type==='Identifier'){
+      const alias=import_alias(node.init,scope,aliases);scope.set(node.id.name,value(node.init,scope));
+      if(alias)aliases.add(node.id.name);else aliases.delete(node.id.name);
     }
     if (node.type === "CallExpression") {
       const callee = node.callee;
+      // Native worker shims often capture importScripts and invoke an IIFE
+      // with the actual entry URL. Read those bindings without executing the
+      // shim or confusing a shadowed helper with the native importer.
+      if(['FunctionExpression','ArrowFunctionExpression'].includes(callee.type)){
+        const values=new Map(scope),bindings=new Set(aliases);
+        for(let index=0;index<callee.params.length;index++){
+          const parameter=callee.params[index];if(parameter.type!=='Identifier')continue;
+          values.set(parameter.name,value(node.arguments[index],scope));
+          if(import_alias(node.arguments[index],scope,aliases))bindings.add(parameter.name);else bindings.delete(parameter.name);
+        }
+        if(callee.id){values.set(callee.id.name,undefined);bindings.delete(callee.id.name);}
+        walk(callee.body,values,bindings);for(const argument of node.arguments)walk(argument,scope,aliases);return;
+      }
       // Parcel registers lazy bundle IDs and filenames in a flat asset table.
       // These chunks can be imported after the first message, when a discovery
       // worker cannot observe the call. Read the declared table without running
@@ -88,7 +115,7 @@ export function worker_imports(source, base, {scriptURL=base,asyncLoaders=false,
           }
         }
       }
-      const imports = callee.type === "Identifier" && callee.name === "importScripts" || callee.type === "MemberExpression" &&
+      const imports = callee.type === "Identifier" && (callee.name === "importScripts"||aliases.has(callee.name)) || callee.type === "MemberExpression" &&
         (callee.computed ? callee.property.value === "importScripts" : callee.property.name === "importScripts");
       if (imports&&!asynchronous.has(node)) for (const argument of node.arguments) {
         const path = value(argument, scope);
@@ -97,16 +124,16 @@ export function worker_imports(source, base, {scriptURL=base,asyncLoaders=false,
       }
     }
     for (const child of Object.values(node)) {
-      if (Array.isArray(child)) child.forEach(item => walk(item, scope));
-      else if (child?.type) walk(child, scope);
+      if (Array.isArray(child)) child.forEach(item => walk(item, scope,aliases));
+      else if (child?.type) walk(child, scope,aliases);
     }
   }
-  walk(ast, constants);
+  walk(ast, constants,new Set(['importScripts']));
   return {urls: [...urls], dynamic};
 }
 
-export async function prefetch_worker_scripts(source, base, fetch, cache = new Map(), source_urls=new Map(), scriptURL=base,{asyncLoaders=false,staticAMD=false}={}) {
-  const queue = [{source,url:scriptURL,amdURL:scriptURL}];
+export async function prefetch_worker_scripts(source, base, fetch, cache = new Map(), source_urls=new Map(), scriptURL=base,{asyncLoaders=false,staticAMD=false,stackURL=scriptURL}={}) {
+  const queue = [{source,url:scriptURL,amdURL:stackURL}];
   // Static AMD discovery is for known dual document/worker transports. Other
   // service-worker scripts retain the existing synchronous discovery behavior.
   if(staticAMD)try{staticAMD=asynchronous_worker_imports(parse(source,{ranges:true,webcompat:true,next:true})).size>0;}catch{staticAMD=false;}
@@ -115,7 +142,7 @@ export async function prefetch_worker_scripts(source, base, fetch, cache = new M
   let dynamic = false;
   while (queue.length) {
     const entry=queue.shift();
-    const next = worker_imports(entry.source, base,{scriptURL:entry.url,asyncLoaders,staticAMD,amdURL:entry.amdURL});
+    const next = worker_imports(entry.source, base,{scriptURL:entry.amdURL,asyncLoaders,staticAMD,amdURL:entry.amdURL});
     dynamic ||= next.dynamic;
     for (const url of next.urls) {
       if (cache.has(url)) continue;

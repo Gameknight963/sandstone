@@ -32,6 +32,7 @@ import {verifyPublicServiceWorker} from './service-worker-public.playwright.mjs'
 import {verifyServiceWorkerWindowClients} from './service-worker-window-clients.playwright.mjs';
 import {verifyWorkerLoaders} from './worker-loaders.playwright.mjs';
 import {verifyPromiseWorkerLoaders,verifyAMDServiceWorkerScripts} from './worker-promise-loaders.playwright.mjs';
+import {verifyWorkerImportAliases} from './worker-import-aliases.playwright.mjs';
 import {verifySyncXHR} from './sync-xhr.playwright.mjs';
 import {verifyLinkPreloads} from './link-preloads.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
@@ -390,6 +391,7 @@ try {
     result.passed.push(...await timed(verifyServiceWorkerWindowClients(page), 'Service worker window clients fixture'));
     result.passed.push(...await timed(verifyWorkerLoaders(page), 'Lazy AMD worker loaders fixture'));
     result.passed.push(...await timed(verifyPromiseWorkerLoaders(page), 'Promise AMD worker loaders fixture'));
+    result.passed.push(...await timed(verifyWorkerImportAliases(page), 'Aliased worker imports fixture'));
     result.passed.push(...await timed(verifyAMDServiceWorkerScripts(page), 'AMD service worker scripts fixture'));
     result.passed.push(...await timed(verifySyncXHR(page), 'Synchronous worker XHR fixture'));
     result.passed.push(...await timed(verifyWorkerCycles(page), 'Cyclic worker module fixture'));

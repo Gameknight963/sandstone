@@ -126,7 +126,7 @@ export function fakeImportScripts(...paths) {
     if (!imported_blobs.has(url)) {
       const scriptURL=worker_options?.source_urls?.[url]||url;
       const crossed=worker_options?.source_cross_origins?.[url]??new URL(scriptURL).origin!==ctx.origin;
-      const rewritten = parser.rewrite_js(source, {url:scriptURL,sourceURL:scriptURL,workerLoaders:!worker_options?.probe&&!worker_options?.service_worker,importReferrer:{url:crossed?'about:blank':scriptURL,credentials:'same-origin',referrerPolicy:loader.referrer_policy}});
+      const rewritten = parser.rewrite_js(source, {url:scriptURL,sourceURL:url,workerLoaders:!worker_options?.probe&&!worker_options?.service_worker,importReferrer:{url:crossed?'about:blank':scriptURL,credentials:'same-origin',referrerPolicy:loader.referrer_policy}});
       imported_blobs.set(url, network.create_blob_url(new Blob([rewritten], {type: "text/javascript"}), scriptURL));
     }
     return imported_blobs.get(url);
@@ -312,7 +312,7 @@ export class FakeWorker extends EventTarget {
         sources.set(missing, script);
         const final_url=response.url||missing;
         this.#source_urls.set(missing,final_url);
-        await prefetch_worker_scripts(script, url, resource => this.#fetch_script(resource,url), sources,this.#source_urls,final_url);
+        await prefetch_worker_scripts(script, url, resource => this.#fetch_script(resource,url), sources,this.#source_urls,final_url,{stackURL:missing});
       } catch {}
     }
   }

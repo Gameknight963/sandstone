@@ -10,7 +10,7 @@ export function create_worker_script_loader({cache,resolve,fetch,execute,base=()
       const resource=async target=>{const response=await fetch(target);remember(target,response);return response;};
       const response=await resource(url);if(!response.ok)throw new DOMException('Worker script request failed: '+response.status,'NetworkError');
       const source=await response.text(),sources=new Map(Object.entries(cache));sources.set(url,source);
-      const prepared=await prefetch_worker_scripts(source,base()||url,resource,sources,new Map(),response.url||url);
+      const prepared=await prefetch_worker_scripts(source,base()||url,resource,sources,new Map(),response.url||url,{stackURL:url});
       Object.assign(cache,Object.fromEntries(prepared.cache));
     });
     pending.set(url,operation);tail=operation.catch(()=>{});

@@ -21,6 +21,20 @@ test('Worker discovery parses native legacy arrow initializers without executing
   assert.deepEqual(worker_imports('for(var callback=()=>1 in {}){};importScripts("./chunk.js");throw new Error("must not execute");','https://site.test/worker.js'),{urls:['https://site.test/chunk.js'],dynamic:false});
 });
 
+test('Worker discovery resolves entry URLs passed to IIFEs and captured native import functions',()=>{
+  const base='https://app.test/worker.js';
+  for(const source of [
+    `(function(url){const load=importScripts.bind(self);self.importScripts=(...paths)=>load(...paths);load(url);throw new Error('Must not execute');})('https://cdn.test/server.js');`,
+    `((url)=>{const nativeImport=self.importScripts;nativeImport(url);})('./relative.js');`,
+    `((load,url)=>load(url))(importScripts,'./argument.js');`,
+  ])assert.equal(worker_imports(source,base).urls.length,1);
+  assert.deepEqual(worker_imports(`(function(url){const load=importScripts.bind(self);load(url)})('https://cdn.test/server.js');`,base),{urls:['https://cdn.test/server.js'],dynamic:false});
+  assert.deepEqual(worker_imports(`const url='./outer.js';function local(url){const load=importScripts.bind(self);load(url)}`,base),{urls:[],dynamic:true});
+  assert.deepEqual(worker_imports(`const load=unrelated;((load)=>load('./ignored.js'))(unrelated);`,base),{urls:[],dynamic:false});
+  assert.deepEqual(worker_imports(`(function self(url){const load=self.importScripts;load(url)})('./ignored.js');`,base),{urls:[],dynamic:false});
+  assert.deepEqual(worker_imports(`const load=importScripts;function shadow(load){load('./ignored.js')}load('./actual.js');`,base),{urls:['https://app.test/actual.js'],dynamic:false});
+});
+
 test("Classic worker discovery finds literal and constant imports without executing source", () => {
   const source = `
     const root = './lib/';
@@ -62,7 +76,7 @@ test('Worker discovery reads declared lazy bundle tables without executing regis
   ])assert.deepEqual(worker_imports(source,'https://example.com/main.js').urls,[]);
 });
 
-test('Lazy bundle discovery uses the imported runtime response URL and avoids refetching the worker entry',async()=>{
+test('Lazy bundle discovery uses the requested import filename and retains redirected response metadata',async()=>{
   const base='https://example.com/workers/main.js',seen=[];
   const result=await prefetch_worker_scripts("importScripts('./runtime.js')",base,async url=>{
     seen.push(url);
@@ -71,7 +85,7 @@ test('Lazy bundle discovery uses the imported runtime response URL and avoids re
     if(url.endsWith('/runtime.js'))Object.defineProperty(response,'url',{value:'https://example.com/assets/runtime.js'});
     return response;
   });
-  assert.deepEqual(seen,['https://example.com/workers/runtime.js','https://example.com/assets/late.js']);
+  assert.deepEqual(seen,['https://example.com/workers/runtime.js','https://example.com/workers/late.js']);
   assert.equal(result.source_urls.get('https://example.com/workers/runtime.js'),'https://example.com/assets/runtime.js');
   assert.equal(result.cache.get(base),"importScripts('./runtime.js')");
 });
