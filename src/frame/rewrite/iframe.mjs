@@ -18,6 +18,7 @@ import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../../bootstra
 import {on_shadow_root} from '../shadow_roots.mjs';
 import {cookie_snapshot} from '../polyfill/cookie.mjs';
 import {storage_entries} from '../polyfill/storage.mjs';
+import {service_worker_snapshot} from '../polyfill/service_worker.mjs';
 import {navigation_activation} from '../user_activation.mjs';
 import {decode_document_response} from '../../text_encoding.mjs';
 import {native_dom} from '../dom_operations.mjs';
@@ -141,6 +142,7 @@ export function rewrite_iframe(iframe_element) {
       const creator_url=loader.cookie_url||loader.url,policy=document_referrer_policy();
       let local=[],session=[];try{local=storage_entries(ctx.localStorage);session=storage_entries(ctx.sessionStorage);}catch{}
       const ready=runtime.loader.initialize_blank({url,frame_id,beacon_context:token,document_origin:ctx.origin,cookie_url:creator_url,
+        service_worker_state:service_worker_snapshot(),
         inherited_base_url:ctx.document.baseURI,document_referrer:request_referrer(creator_url,creator_url,policy),referrer_policy:policy,
         message_origin:ctx.origin,message_parent:child_message_parent(message_token),is_iframe:true,window_name:window_name,
         crypto_available:loader.crypto_available,local_storage:local,session_storage:session,cookies:cookie_snapshot(),

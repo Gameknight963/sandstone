@@ -36,7 +36,8 @@ async function control(createEvents,createDispatcher){
 }
 
 export async function verifyServiceWorkerDispatcher(page){
-  const source=`(${control})(${create_service_worker_events},${create_service_worker_dispatcher}).then(passed=>postMessage({passed}),error=>postMessage({error:error.stack}));`;
+  const source=`const native_event_target={addEventListener:EventTarget.prototype.addEventListener,removeEventListener:EventTarget.prototype.removeEventListener,dispatchEvent:EventTarget.prototype.dispatchEvent};
+(${control})(${create_service_worker_events},${create_service_worker_dispatcher}).then(passed=>postMessage({passed}),error=>postMessage({error:error.stack}));`;
   const report=await page.evaluate(source=>new Promise((resolve,reject)=>{
     const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'})),worker=new Worker(url);
     const timer=setTimeout(()=>{cleanup();reject(new Error('Service dispatcher control timed out'));},10000);

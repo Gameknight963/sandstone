@@ -13,6 +13,7 @@ import {configure_window_messages} from './window_messages.mjs';
 import {load_document_html,run_document_script,initialize_blank_document,on_document_complete} from './document_input.mjs';
 import {navigation_activation} from './user_activation.mjs';
 import {configure_document_encoding} from './document_encoding.mjs';
+import {configure_service_workers} from './polyfill/service_worker.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -164,7 +165,7 @@ function prepare_html(options) {
   const ready=update_ctx(options);
   configure_document_encoding(document,ctx.document,character_encoding);
   configure_window_messages(options);
-  return Promise.all([ready,configure_cookies(options.cookies,ctx.document)]);
+  return Promise.all([ready,configure_cookies(options.cookies,ctx.document),configure_service_workers(options)]);
 }
 
 export function initialize_blank(options,onload,onurl){

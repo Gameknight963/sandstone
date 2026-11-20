@@ -1,10 +1,11 @@
 // Each logical event type has a native MessagePort target. Native callback
 // cleanup supplies the microtask checkpoint between authored listeners.
-export function create_service_worker_dispatcher({events,target=globalThis,nativeTarget=target,started=()=>{},finished=()=>{}}){
-  const add=EventTarget.prototype.addEventListener,remove=EventTarget.prototype.removeEventListener,dispatch=EventTarget.prototype.dispatchEvent;
+export const native_event_target={addEventListener:EventTarget.prototype.addEventListener,removeEventListener:EventTarget.prototype.removeEventListener,dispatchEvent:EventTarget.prototype.dispatchEvent};
+export function create_service_worker_dispatcher({events,target=globalThis,nativeTarget=target,started=()=>{},finished=()=>{},types=['install','activate','fetch','message','messageerror']}){
+  const add=native_event_target.addEventListener,remove=native_event_target.removeEventListener,dispatch=native_event_target.dispatchEvent;
   const post=MessagePort.prototype.postMessage,start=MessagePort.prototype.start,close=MessagePort.prototype.close;
   const aborted=Object.getOwnPropertyDescriptor(AbortSignal.prototype,'aborted').get;
-  const serviceTypes=new Set(['install','activate','fetch','message','messageerror']);
+  const serviceTypes=new Set(types);
   const PromiseClass=globalThis.Promise,then=PromiseClass.prototype.then,reject=PromiseClass.reject.bind(PromiseClass);
   const channels=new Map(),pending=new Map(),active=new Set();let next=0,closed=false;
   const error=()=>new DOMException('Service worker dispatcher is closed','InvalidStateError');

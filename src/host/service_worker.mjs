@@ -10,10 +10,12 @@ import {ServiceWorkerFetch} from '../service_worker/fetch.mjs';
 import {ServiceWorkerClients} from '../service_worker/clients.mjs';
 import {ServiceWorkerNavigations} from '../service_worker/navigation.mjs';
 import {ServiceWorkerRequests} from '../service_worker/requests.mjs';
+import {ServiceWorkerBroker} from '../service_worker/broker.mjs';
 
 let factory;try{factory=globalThis.indexedDB;}catch{}
 export const registrations=new ServiceWorkerStorage(factory,{onCatalog:catalog=>site_data.serviceWorkers=catalog});
 export const manager=new ServiceWorkerManager({storage:registrations,createWorker:(profile,options)=>create_service_worker_driver(profile,{timeout:300000,...options}),
+  notify:event=>broker.notify(event),clientCommand:(...args)=>broker.workerCommand(...args),
   fetch:(url,options,context)=>network.fetch(url,options,{...context,service_worker_bypass:true,url:context.url||context.base||url,top_url:context.top_url||context.url||context.base||url})});
 export const fetch_router=new ServiceWorkerFetch({manager,client:context=>{
   if(context.service_worker_navigation)return context.service_worker_navigation;
@@ -23,10 +25,19 @@ export const fetch_router=new ServiceWorkerFetch({manager,client:context=>{
   return client?.frame===frame.id?client:null;
 }});
 export const clients=new ServiceWorkerClients({manager,frames:()=>iframes});
+export const broker=new ServiceWorkerBroker({manager,frames:()=>iframes});
 export const navigations=new ServiceWorkerNavigations({manager,frames:()=>iframes,route:(...args)=>fetch_router.fetch(...args)});
 network.set_service_worker_fetch((url,options,context,network)=>context?.navigation?navigations.fetch(url,options,context,network):fetch_router.fetch(url,options,context,network),
-  (frame,options)=>{clients.disconnect(frame);navigations.disconnect(frame,options);},(frame,signal)=>clients.bind(frame,signal),
+  (frame,options)=>{clients.disconnect(frame);navigations.disconnect(frame,options);broker.disconnect(frame);},(frame,signal)=>clients.bind(frame,signal),
   Object.fromEntries(['response','commit','cancel','reserved'].map(key=>[key,navigations[key].bind(navigations)])));
+rpc.rpc_handlers.service_worker_open=async(id,token,port)=>{
+  Object.getOwnPropertyDescriptor(MessagePort.prototype,'onmessage').get.call(port);
+  try{return await broker.open(id,token,port);}catch(error){port.close();throw error;}
+};
+rpc.rpc_handlers.service_worker_client=async(id,token,method,args)=>{
+  if(typeof method!=='string'||!Array.isArray(args))throw new TypeError('Invalid service worker client operation');
+  const value=await broker.command(id,token,method,args);return {value,snapshot:broker.snapshot(id,token)};
+};
 export async function clear_registrations(hostname){
   manager.revoke(hostname);
   for(const owner of [...owners.values()])if(new URL(owner.profile.origin).hostname===hostname)owner.close();

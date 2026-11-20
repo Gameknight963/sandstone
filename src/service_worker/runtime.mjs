@@ -2,11 +2,13 @@ import {create_service_worker_events} from './events.mjs';
 import {create_service_worker_dispatcher} from './dispatcher.mjs';
 import {response_metadata} from '../response_metadata.mjs';
 import {remember_request,request_metadata} from '../request_metadata.mjs';
+import {create_worker_clients} from './worker_clients.mjs';
 
 // The owner supplies this private transport. Pages never receive the control
 // port: authored postMessage traffic is delivered as ExtendableMessageEvent.
-export function create_service_worker_runtime({profile,target=globalThis,send,scripts=()=>[],Request:RequestClass=globalThis.Request,requestMetadata=request_metadata,responseMetadata=response_metadata}){
-  const events=create_service_worker_events({requestMetadata,responseMetadata});
+export function create_service_worker_runtime({profile,target=globalThis,send,scripts=()=>[],Request:RequestClass=globalThis.Request,requestMetadata=request_metadata,responseMetadata=response_metadata,encode=value=>value}){
+  const peers=create_worker_clients({command,encode});
+  const events=create_service_worker_events({requestMetadata,responseMetadata,sourceValid:peers.valid});
   const jobs=new Map(),readers=new Map(),commands=new Map(),queued=[];
   const collect=id=>{const job=jobs.get(id);if(job?.complete&&(!job.fetch||job.handled&&!readers.has(id)))jobs.delete(id);};
   let ready=false,closed=false,nextCommand=0;
@@ -14,14 +16,13 @@ export function create_service_worker_runtime({profile,target=globalThis,send,sc
   const reply=(id,type,value={})=>{if(!closed)send({id,type,...value});};
   const fail=(id,error)=>reply(id,'error',{error:error_value(error)});
   const dispatcher=create_service_worker_dispatcher({events,target,nativeTarget:globalThis});
-  function command(method,args=[]){
+  function command(method,args=[],ports=[]){
     if(closed)return Promise.reject(new DOMException('Service worker was terminated','AbortError'));
     const id=++nextCommand;
-    return new Promise((resolve,reject)=>{commands.set(id,{resolve,reject});try{send({type:'command',id,method,args});}catch(error){commands.delete(id);reject(error);}});
+    return new Promise((resolve,reject)=>{commands.set(id,{resolve,reject});try{send({type:'command',id,method,args,ports},ports);}catch(error){commands.delete(id);reject(error);}});
   }
   const registration=Object.create(null);
-  const clients=Object.create(null);
-  Object.defineProperties(clients,{claim:{value:()=>command('clients.claim'),enumerable:true},[Symbol.toStringTag]:{value:'Clients'}});
+  const clients=peers.clients;
   for(const key of ['scope','updateViaCache'])Object.defineProperty(registration,key,{enumerable:true,get:()=>profile[key]});
   Object.defineProperties(registration,{
     update:{value:()=>command('registration.update').then(()=>registration),enumerable:true},
@@ -36,7 +37,7 @@ export function create_service_worker_runtime({profile,target=globalThis,send,sc
       const request=remember_request(new RequestClass(url,{...init,mode:init.mode==='navigate'?'same-origin':init.mode,referrer:virtualReferrer||'',signal:controller.signal,...(body===undefined?{}:{body})}),{context,mode:init.mode,redirect:init.redirect,destination:destination||'',referrer:virtualReferrer||''});
       event=new events.FetchEvent('fetch',{request,clientId:packet.clientId||'',resultingClientId:packet.resultingClientId||'',cancelable:true});
     }else if(packet.event==='message'||packet.event==='messageerror'){
-      event=new events.ExtendableMessageEvent(packet.event,{data:packet.data,origin:packet.origin,ports:packet.ports||[]});
+      event=new events.ExtendableMessageEvent(packet.event,{data:packet.data,origin:packet.origin,ports:packet.ports||[],source:peers.source(packet.source)});
     }else if(packet.event==='install'||packet.event==='activate')event=new events.ExtendableEvent(packet.event);
     else throw new TypeError('Unsupported service worker event');
     if(jobs.has(packet.id)||readers.has(packet.id))throw new TypeError('Duplicate service worker event ID');
@@ -93,7 +94,7 @@ export function create_service_worker_runtime({profile,target=globalThis,send,sc
     for(const reader of readers.values())reader.cancel(reason).catch(()=>{});readers.clear();
     for(const pending of commands.values())pending.reject(reason);commands.clear();queued.length=0;jobs.clear();
   }
-  return {events,dispatcher,registration,clients,skipWaiting:()=>command('skipWaiting'),receive,start,destroy};
+  return {events,dispatcher,registration,clients,Client:peers.Client,WindowClient:peers.WindowClient,skipWaiting:()=>command('skipWaiting'),receive,start,destroy};
 }
 
 export function install_service_worker_globals(runtime,{target=globalThis,names=[]}={}){
@@ -106,9 +107,9 @@ export function install_service_worker_globals(runtime,{target=globalThis,names=
       return Reflect.apply(original,this,args);
     }});
   }
-  const values={...runtime.events,registration:runtime.registration,clients:runtime.clients,skipWaiting:runtime.skipWaiting,
+  const values={...runtime.events,Client:runtime.Client,WindowClient:runtime.WindowClient,registration:runtime.registration,clients:runtime.clients,skipWaiting:runtime.skipWaiting,
     addEventListener:runtime.dispatcher.addEventListener,removeEventListener:runtime.dispatcher.removeEventListener,dispatchEvent:runtime.dispatcher.dispatchEvent};
-  for(const key of ['dispatch_event','finish_fetch','expire','view','wrap_listener','untrust','listener_options'])delete values[key];
+  for(const key of ['adopt','dispatch_event','finish_fetch','expire','view','wrap_listener','untrust','listener_options'])delete values[key];
   for(const [key,value] of Object.entries(values)){
     Object.defineProperty(native,key,{value,writable:true,configurable:true,enumerable:true});if(!names.includes(key))names.push(key);
   }

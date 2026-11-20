@@ -8,7 +8,7 @@ rpc.rpc_handlers.service_worker_start=async(profile,timeout)=>{
   authorize();if(bridge)throw new DOMException('Service worker owner is already running','InvalidStateError');
   const worker=create_service_worker(profile);
   bridge=new ServiceWorkerBridge({timeout,post:(packet,ports)=>worker.postMessage(packet,ports),terminate:()=>worker.terminate(),
-    command:(method,args)=>rpc.call_procedure(rpc.host,'service_worker_command',[loader.frame_id,method,args])});
+    command:(method,args,ports)=>rpc.call_procedure(rpc.host,'service_worker_command',[loader.frame_id,method,args],{transfer:ports})});
   worker.onmessage=event=>bridge.accept(event.data);
   worker.onerror=event=>{event.preventDefault();bridge.close(event.error||new Error(event.message));};
   await bridge.ready;

@@ -27,7 +27,7 @@ export class ServiceWorkerNavigations{
     const owner=this.frames()[lease.owner];
     if(!owner||this.frames()[frame.id]!==frame||this.pending.get(frame.id)!==lease||lease.url!==frame.url.href||owner.document_context!==lease.owner_context||this.manager.clients.get(lease.client.id)!==lease.client){lease.release();return;}
     if(!trustworthy_url(frame.url)||frame.broadcast_origin?.startsWith('opaque:')){lease.release();return;}
-    lease.complete();Object.assign(lease.client,{frame:frame.id,url:frame.url.href,creationURL:frame.url.href,navigation_committed:true});return lease.client.id;
+    lease.complete();Object.assign(lease.client,{frame:frame.id,url:frame.url.href,creationURL:frame.url.href,navigation_committed:true});this.manager.notify?.({event:'clientready',client:lease.client});return lease.client.id;
   }
   reserve(input,context,signal){
     this.pending.get(context.navigation_target)?.release();

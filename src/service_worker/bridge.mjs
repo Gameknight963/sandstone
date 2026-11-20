@@ -56,7 +56,7 @@ export class ServiceWorkerBridge{
     if(packet.type==='command'){
       Promise.resolve().then(()=>{
         if(!this.command)throw new DOMException('Service worker owner command is unavailable','NotSupportedError');
-        return this.command(packet.method,packet.args);
+        return this.command(packet.method,packet.args,packet.ports||[]);
       }).then(value=>{if(!this.closed)this.send({type:'command-result',id:packet.id,value});},error=>{
         if(!this.closed)this.send({type:'command-result',id:packet.id,error:{name:error?.name||'Error',message:error?.message||String(error)}});
       }).catch(error=>this.close(error));return;

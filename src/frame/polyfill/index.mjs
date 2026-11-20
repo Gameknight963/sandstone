@@ -12,3 +12,4 @@ export * as idb from "./indexeddb.mjs";
 export * as cache from './cache.mjs';
 export {BroadcastChannel} from './broadcast.mjs';
 export * as locks from './locks.mjs';
+export * as service_workers from './service_worker.mjs';

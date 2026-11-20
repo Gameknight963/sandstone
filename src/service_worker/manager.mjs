@@ -10,8 +10,8 @@ const abort=()=>new DOMException('Service worker registration was cleared','Abor
 const stored=worker=>worker?Object.fromEntries(['id','scriptURL','type','source','scripts','referrerPolicy','skipWaiting'].map(name=>[name,worker[name]])):null;
 
 export class ServiceWorkerManager{
-  constructor({storage,fetch,createWorker,notify=()=>{},id=create_bootstrap_nonce}){
-    Object.assign(this,{storage,fetch,createWorker,notify,id});
+  constructor({storage,fetch,createWorker,notify=()=>{},clientCommand,id=create_bootstrap_nonce}){
+    Object.assign(this,{storage,fetch,createWorker,notify,clientCommand,id});
     this.records=new Map();this.loading=new Map();this.retired=new Set();this.tails=new Map();this.epochs=new Map();this.clients=new Map();
   }
   epoch(origin){return this.epochs.get(new URL(origin).hostname)||0;}
@@ -102,7 +102,7 @@ export class ServiceWorkerManager{
     this.valid(record);if(worker.state==='redundant')throw new DOMException('Worker is redundant','InvalidStateError');
     if(worker.owner)return worker.owner;if(worker.starting)return worker.starting;
     worker.starting=this.createWorker({...stored(worker),scope:record.scope,updateViaCache:record.updateViaCache,restoring},
-      {signal:record.abort.signal,command:(method,args)=>this.command(record,worker,method,args)}).then(owner=>{
+      {signal:record.abort.signal,command:(method,args,ports)=>this.command(record,worker,method,args,ports)}).then(owner=>{
         if(record.revoked||record.abort.signal.aborted){owner.close();throw abort();}
         if(worker.state==='redundant'){owner.close();throw new DOMException('Worker is redundant','InvalidStateError');}worker.owner=owner;return owner;
       }).finally(()=>worker.starting=null);
@@ -158,7 +158,7 @@ export class ServiceWorkerManager{
     worker.pending++;let owner,raw;
     const lost=error=>{if(['InvalidStateError','TimeoutError'].includes(error?.name)&&worker.owner===owner){owner.close(error);worker.owner=null;}};
     try{
-      if(!['install','activate'].includes(event.event)&&worker.state==='activating')await record.activation;
+      if(event.event==='fetch'&&worker.state==='activating')await record.activation;
       owner=await this.running(record,worker);raw=owner.dispatch(event);
     }catch(error){lost(error);worker.pending--;this.requestActivation(record);this.collect(record);throw error;}
     let resultDone=false,lifetimeDone=false,bodyDone=false,handledDone=!waitHandled,finished=false;
@@ -174,7 +174,7 @@ export class ServiceWorkerManager{
   }
   control(client,record,worker){const changed=client.controller!==worker;client.registration=record;client.controller=worker;if(changed)this.notify({event:'controllerchange',record,worker,client});}
   addClient(client){this.clients.set(client.id,{...client,creationURL:client.creationURL||client.url,registration:null,controller:null});return this.clients.get(client.id);}
-  removeClient(id){const client=this.clients.get(id);this.clients.delete(id);if(client?.registration){this.requestActivation(client.registration);this.collect(client.registration);}}
+  removeClient(id){const client=this.clients.get(id);this.clients.delete(id);if(client?.registration){this.requestActivation(client.registration);this.collect(client.registration);}if(client)this.notify({event:'clientgone',client});}
   async claim(record,worker){
     await this.list(record.origin);this.valid(record);
     if(record.active!==worker||!['activating','activated'].includes(worker.state))throw new DOMException('Worker is not active','InvalidStateError');
@@ -183,7 +183,7 @@ export class ServiceWorkerManager{
       if(matches===record)this.control(client,record,worker);
     }
   }
-  command(record,worker,method,args){
+  command(record,worker,method,args,ports){
     this.valid(record);
     if(method==='skipWaiting'){
       worker.skipWaiting=true;if(worker.state!=='installed')return;
@@ -195,6 +195,7 @@ export class ServiceWorkerManager{
       if(record.unregistered||worker.state==='installing')throw new DOMException('Worker cannot update this registration','InvalidStateError');
       return this.register(worker.scriptURL,{scope:record.scope,type:worker.type,updateViaCache:record.updateViaCache},{base:worker.scriptURL,origin:record.origin}).then(()=>undefined);
     }
+    if(this.clientCommand)return this.clientCommand(record,worker,method,args,ports);
     throw new DOMException('Service worker client operation is not connected','NotSupportedError');
   }
   unregister(origin,scope){return this.enqueue(origin,scope,async()=>{

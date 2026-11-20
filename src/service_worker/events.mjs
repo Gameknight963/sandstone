@@ -43,6 +43,11 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
       extend(data,resolve(promise));
     }
   }
+  function adopt(event){
+    eventPhase.call(event);
+    if(!states.has(event))states.set(event,{raw:event,trusted:false,dispatching:false,delivered:false,expired:false,finished:false,pending:0,errors:[],lifetime:deferred(),dispatched:deferred(),methods:new Map()});
+    return event;
+  }
   function response_handle(data,response){
     const body=responseFields.body.call(response),native=Object.fromEntries(['status','statusText','headers','url','type','redirected'].map(key=>[key,responseFields[key].call(response)]));
     const sourceMetadata=responseMetadata?.(response)||native,metadata={...sourceMetadata,headers:new HeaderClass(sourceMetadata.headers)},policy=requestMetadata?.(data.request)||{mode:requestFields.mode.call(data.request),redirect:requestFields.redirect.call(data.request)};
@@ -224,5 +229,5 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
     if(!data)return event;data.trusted=false;if(!data.generic)data.parent=null;if(target!==undefined)data.target=target;return data.raw;
   }
   function listener_options(event,{passive=false}={}){const data=states.get(event);if(data)data.passive=passive;}
-  return {ExtendableEvent,FetchEvent,ExtendableMessageEvent,dispatch_event,finish_fetch,expire,view,wrap_listener,untrust,listener_options};
+  return {ExtendableEvent,FetchEvent,ExtendableMessageEvent,adopt,dispatch_event,finish_fetch,expire,view,wrap_listener,untrust,listener_options};
 }

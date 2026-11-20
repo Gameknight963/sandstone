@@ -13,6 +13,7 @@ import {validate_module_response} from '../modules.mjs';
 import {create_service_worker_runtime,install_service_worker_globals} from '../../service_worker/runtime.mjs';
 import {bind_native_property} from '../global_functions.mjs';
 import {ServiceWorkerScripts} from '../../service_worker/scripts.mjs';
+import {encode_message} from './crypto.mjs';
 import {configure_service_worker_scripts,service_worker_script_snapshot,remember_service_worker_script} from '../service_worker_scripts.mjs';
 
 const NativeWorker = globalThis.Worker;
@@ -99,7 +100,7 @@ export function initialize_worker(options) {
   loader.set_worker_context(options);
   update_ctx();
   if(options.service_worker)configure_service_worker_scripts(options.service_worker);
-  const service=options.service_worker&&create_service_worker_runtime({profile:options.service_worker,target:ctx.self,Request:ctx.Request,scripts:service_worker_script_snapshot,send:packet=>native_post({sandstone_service_worker:options.token,...packet})});
+  const service=options.service_worker&&create_service_worker_runtime({profile:options.service_worker,target:ctx.self,Request:ctx.Request,encode:encode_message,scripts:service_worker_script_snapshot,send:(packet,ports)=>native_post({sandstone_service_worker:options.token,...packet},ports)});
   if(service){
     install_service_worker_globals(service,{target:ctx.self,names:ctx_vars});
     for(const type of ['install','activate','fetch','message','messageerror'])bind_native_property(ctx.self,'on'+type);

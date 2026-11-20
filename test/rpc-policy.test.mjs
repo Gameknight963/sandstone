@@ -59,6 +59,9 @@ test('Child registration and channel attachment cannot replace unrelated or ance
   assert.deepEqual(call('frame_register',['first','pending','https://site.test'],first),['first','pending','https://site.test']);
   assert.deepEqual(call('frame_unregister',['first']),['first',{source_frame:'root',source_document:'root-document'}]);
   assert.deepEqual(call('frame_unregister',['pending',{source_frame:'second',source_document:'forged'}],first),['pending',{source_frame:'first',source_document:'first-document'}]);
+  assert.throws(()=>call('service_worker_open',['first','root-document',{}],first),{name:'SecurityError'});
+  assert.throws(()=>call('service_worker_client',['root','root-document','list',[]],first),{name:'SecurityError'});
+  assert.deepEqual(call('service_worker_client',['first','first-document','list',[]],first),['first','first-document','list',[]]);
 });
 
 test('Retired channels retain only their own storage and network document leases',()=>{

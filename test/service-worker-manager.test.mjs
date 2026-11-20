@@ -176,13 +176,22 @@ test('Client claims honor the longest registration scope and the original creati
     await api.manager.claim(nested,nested.active);assert.equal(inside.controller,nested.active);
   }finally{api.close();}
 });
-test('Functional events wait for activation work while reserving their accepted request',async()=>{
+test('Fetch events wait for activation work while reserving their accepted request',async()=>{
   const api=environment(),activation=gate();api.activationGate=activation;
   try{
     const record=await api.register();while(!record.active)await new Promise(resolve=>setImmediate(resolve));
-    const pending=api.manager.dispatch(record,record.active,{event:'message'});await new Promise(resolve=>setImmediate(resolve));
-    assert.equal(api.owners[0].events.includes('message'),false);assert.ok(record.active.pending>=1);
-    activation.resolve();const job=await pending;await job.result;await job.lifetime;await api.manager.settled(record);
-    assert.equal(api.owners[0].events.includes('message'),true);assert.equal(record.active.pending,0);
+    const pending=api.manager.dispatch(record,record.active,{event:'fetch'});await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(api.owners[0].events.includes('fetch'),false);assert.ok(record.active.pending>=1);
+    activation.resolve();const job=await pending;await job.result;await job.lifetime;await job.cancel();await api.manager.settled(record);
+    assert.equal(api.owners[0].events.includes('fetch'),true);assert.equal(record.active.pending,0);
+  }finally{activation.resolve();api.close();}
+});
+
+test('Messages can finish activation work instead of waiting on the activation they must release',async()=>{
+  const api=environment(),activation=gate();api.activationGate=activation;
+  try{
+    const record=await api.register();while(!record.active)await new Promise(resolve=>setImmediate(resolve));
+    const job=await api.manager.dispatch(record,record.active,{event:'message'});await job.result;await job.lifetime;
+    assert.equal(record.active.state,'activating');assert.equal(api.owners[0].events.includes('message'),true);activation.resolve();await api.manager.settled(record);
   }finally{activation.resolve();api.close();}
 });
