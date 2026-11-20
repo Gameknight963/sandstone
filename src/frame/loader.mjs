@@ -71,7 +71,7 @@ export function document_sources(){
     try{
       if(window!==globalThis&&window.sandstone_frame?.context.ctx.origin===ctx.origin){
         const source=window.sandstone_frame.loader;
-        if(!sources.has(window.location.href))sources.set(window.location.href,{url:source.url,cookie_url:source.cookie_url,inherited_base_url:source.inherited_base_url,character_encoding:source.character_encoding});
+        if(!sources.has(window.location.href))sources.set(window.location.href,{url:source.url,cookie_url:source.cookie_url,inherited_base_url:source.inherited_base_url,character_encoding:source.character_encoding,location_origin:source.location_origin,beacon_context:source.beacon_context});
       }
       for(let index=0;index<window.length;index++)visit(window[index]);
     }catch{}
@@ -84,10 +84,11 @@ export function document_opened(before,after,sources){
   const source=sources.get(after);if(!source){opened_url?.(ctx.location.href);return;}
   document_origin=ctx.origin;
   character_encoding=source.character_encoding||'UTF-8';configure_document_encoding(document,ctx.document,character_encoding);
-  inherited_base_url=source.inherited_base_url;cookie_url=new URL(source.url).protocol==='about:'?source.cookie_url||source.url:undefined;base_url=inherited_base_url||source.url;
+  inherited_base_url=source.inherited_base_url;cookie_url=['about:','blob:'].includes(new URL(source.url).protocol)?source.cookie_url||source.url:undefined;base_url=inherited_base_url||source.url;
+  location_origin=source.location_origin;
   network.known_urls[after]=source.url;
   set_location(source.url);opened_url?.(source.url);
-  rpc.call_procedure(rpc.host,'document_open',[frame_id,beacon_context,{url:source.url,cookie_url,inherited_base_url}]).catch(()=>{});
+  rpc.call_procedure(rpc.host,'document_open',[frame_id,beacon_context,{url:source.url,cookie_url,inherited_base_url,source_context:source.beacon_context}]).catch(()=>{});
 }
 
 export function eval_script(script_element, script_text,{run=callback=>run_document_script(script_element,callback),context}={}) {

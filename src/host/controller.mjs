@@ -16,6 +16,7 @@ import {RPCSourcePolicy} from './rpc_policy.mjs';
 import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../bootstrap.mjs';
 import {decode_document_response} from '../text_encoding.mjs';
 import {prepare_site_data_clear as prepare_clear} from '../site_data_clear.mjs';
+import {opened_document_urls,document_request_url} from './document_url.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 export {cache_storage} from './cache.mjs';
@@ -395,7 +396,7 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
   const receipt=network.navigation_metadata.take(options.request_metadata_token,parent_id,child_id,url);
   if(!receipt?.attachment)network.cancel_navigation_client(child_id,parent_id,parent.document_context);
   child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push",request_metadata:receipt?.metadata});
-  child.document_context=network.beacons.register(child_id, {url:child.request_url||(child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href),cookie_url:child.cookie_url,referrer_url:child.referrer_url,top_url:root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id},worker_context||network.commit_navigation_client(child,receipt?.attachment)||options.beacon_context);
+  child.document_context=network.beacons.register(child_id, {url:document_request_url(child),cookie_url:child.cookie_url,referrer_url:child.referrer_url,top_url:root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id},worker_context||network.commit_navigation_client(child,receipt?.attachment)||options.beacon_context);
   root.rpc_policy.document(child_id,child.document_context,parent.document_context);
   await network.bind_service_worker_client(child);
   if(iframes[child_id]!==child||iframes[parent_id]!==parent||parent.document_context!==child.parent_context)throw new DOMException('Frame was superseded','AbortError');
@@ -418,13 +419,10 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
 rpc.rpc_handlers.document_open=(id,token,snapshot)=>{
   const frame=iframes[id],context=network.beacons.contexts.get(token);
   if(!frame||frame.document_context!==token||!context||context.retired)throw new DOMException('Document is unavailable','InvalidStateError');
-  const url=new URL(snapshot.url),cookie=new URL(snapshot.cookie_url||snapshot.url);
-  const inherited=url.protocol==='about:'&&['blank','srcdoc'].includes(url.pathname)&&!url.search;
-  if((url.origin!==frame.origin&&!inherited)||cookie.origin!==frame.origin)throw new DOMException('Document URL must retain its origin','SecurityError');
-  frame.document_origin=frame.origin;frame.url=url;frame.cookie_url=inherited?cookie.href:undefined;frame.inherited_url=inherited?cookie.href:undefined;
-  frame.referrer_url=url.protocol==='about:'&&url.pathname==='blank'?'about:blank':undefined;
+  const urls=opened_document_urls(snapshot,frame.origin,network.beacons.contexts),{url}=urls;
+  frame.document_origin=frame.origin;Object.assign(frame,urls);
   if(frame.history.current)frame.history.current.url=url.href;
-  context.context.url=frame.request_url||url.href;context.context.cookie_url=frame.cookie_url;
+  context.context.url=document_request_url(frame);context.context.cookie_url=frame.cookie_url;
   context.context.referrer_url=frame.referrer_url;
   if(context.storage)context.storage.url=url.href;
   frame.on_url_change();

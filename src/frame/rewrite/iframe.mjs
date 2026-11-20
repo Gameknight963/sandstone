@@ -172,7 +172,7 @@ export function rewrite_iframe(iframe_element) {
         automatic_features:loader.automatic_features&&(authored.get('sandbox')===null||sandbox_tokens(authored.get('sandbox')).has('allow-scripts')),
         sandboxed_context:loader.sandboxed_context||authored.get('sandbox')!==null,
         service_worker_state:service_worker_snapshot(),
-        inherited_base_url:ctx.document.baseURI,document_referrer:request_referrer(creator_url,creator_url,policy),referrer_policy:policy,
+        inherited_base_url:ctx.document.baseURI,document_referrer:loader.url.startsWith('blob:')?loader.url:request_referrer(creator_url,creator_url,policy),referrer_policy:policy,
         message_origin:ctx.origin,message_parent:child_message_parent(message_token),is_iframe:true,window_name:window_name,
         crypto_available:loader.crypto_available,local_storage:local,session_storage:session,cookies:cookie_snapshot(),
         cookie_cross_site:loader.cookie_cross_site,settings:{allow_js:loader.site_settings.allow_js!==false&&(authored.get('sandbox')===null||sandbox_tokens(authored.get('sandbox')).has('allow-scripts'))},

@@ -30,10 +30,16 @@ export async function verifyLocalIframes(page){
     try{result.database=await databaseValue(false)}catch(error){result.database=error.name}
     try{result.shared=await(await fetch(SHARED_BLOB)).text()}catch(error){result.shared=error.name}
     if(result.origin!=='null'){
+      history.replaceState(null,'',location.href+'#creator');
       const nested=document.createElement('iframe');
       await new Promise(resolve=>{nested.onload=resolve;document.body.append(nested)});
       result.nestedLocal=nested.contentWindow.localStorage.getItem('local-frame');
-      result.nestedCookie=nested.contentDocument.cookie;nested.remove();
+      result.nestedCookie=nested.contentDocument.cookie;
+      const written=nested.contentDocument;written.open();written.write('<!doctype html><body>Written local frame');written.close();
+      nested.contentWindow.history.replaceState({written:true},'',nested.contentWindow.location.href.split('#')[0]+'#written');
+      result.written={protocol:new URL(nested.contentWindow.location.href).protocol,origin:nested.contentWindow.location.origin,globalOrigin:nested.contentWindow.origin,cookie:written.cookie,body:written.body.textContent,baseProtocol:new URL(written.baseURI).protocol,referrerProtocol:written.referrer?new URL(written.referrer).protocol:null,referrerIsCreator:written.referrer===location.href};
+      result.written.state=nested.contentWindow.history.state;result.written.echo=await(await nested.contentWindow.fetch(${JSON.stringify(origin+'/echo')})).text();
+      nested.remove();
     }
     result.echo=await(await fetch(${JSON.stringify(origin+'/echo')})).text();
     parent.postMessage({localFrameResult:result},'*');
@@ -83,6 +89,7 @@ export async function verifyLocalIframes(page){
           await main_frame.navigate_to(origin+'/page');
         },{origin,html});
         fixture.on('pageerror',error=>errors.push(error.message));
+        fixture.on('console',message=>{if(message.type()==='error'&&message.text().includes('History URLs'))errors.push(message.text());});
         const actual=JSON.parse(await fixture.evaluate(source=>main_frame.eval_js(source),source(kind,sandbox,mode)));
         if(mode==='blocked')assert.deepEqual(actual,{attempted:false,sandbox:''},'Authored sandbox must prevent local HTML scripts');
         else{
