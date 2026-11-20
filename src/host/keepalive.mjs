@@ -44,7 +44,7 @@ export class KeepaliveRequests {
       else { this.finish(record); this.requests.delete(key); }
       return {has_body,request_referrer:response.request_referrer,
         headers:[...response.headers].filter(([name])=>!['set-cookie','set-cookie2'].includes(name.toLowerCase())),
-        items:Object.fromEntries(['ok','redirected','status','statusText','type','url'].map(name=>[name,response[name]])),
+        items:Object.fromEntries(['ok','redirected','status','statusText','type','url','cors_exposed'].map(name=>[name,response[name]])),
         cookies:this.cookies(lease.entry.context.url,lease.entry.context)};
     } catch (error) {
       record.error = error;

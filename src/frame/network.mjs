@@ -5,7 +5,7 @@ import { ctx } from "./context.mjs";
 import { load_cookies } from "./polyfill/cookie.mjs";
 import {document_referrer_policy} from './intercept/document.mjs';
 import {reserve_keepalive} from './keepalive_budget.mjs';
-import {remember_response,response_metadata,opaque_redirect_response,response_header} from '../response_metadata.mjs';
+import {remember_response,response_metadata,opaque_redirect_response,response_header,expose_response} from '../response_metadata.mjs';
 import {ResourcePreloads} from '../preloads.mjs';
 const native_fetch=globalThis.fetch;
 const preloads=new ResourcePreloads();
@@ -125,14 +125,17 @@ export async function fetch(url, options) {
   } catch (error) { cleanup(); release(); throw error; }
 };
 
-export async function public_response(response,redirect){
+export async function public_response(response,options={}){
   const metadata=response_metadata(response);
-  if(redirect==='manual'&&[301,302,303,307,308].includes(metadata.status)){
+  if(metadata.type==='opaque'&&options.redirect&&options.redirect!=='follow'){
+    await response.body?.cancel().catch(()=>{});throw new TypeError('Opaque requests require follow redirects');
+  }
+  if(options.redirect==='manual'&&[301,302,303,307,308].includes(metadata.status)){
     try{const location=response_header(response,'location');if(location)new URL(location,metadata.url);}
     catch(error){await response.body?.cancel().catch(()=>{});throw error;}
     return opaque_redirect_response(response);
   }
-  return restore_response({items:metadata,headers:metadata.headers,body:response.body},true);
+  return expose_response(response,options.credentials);
 }
 
 function restore_response(data,publicURL=false) {

@@ -118,7 +118,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
     requests.delete(key);
     throw error;
   }
-  var keys = ["ok", "redirected", "status", "statusText", "type", "url"];
+  var keys = ["ok", "redirected", "status", "statusText", "type", "url", "cors_exposed"];
   var payload = {
     request_referrer: response.request_referrer,
     request_cross_origin:response.request_cross_origin,

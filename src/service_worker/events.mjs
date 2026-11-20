@@ -8,6 +8,8 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
   const upon=(promise,yes,no)=>Reflect.apply(then,promise,[yes,no]);
   const HeaderClass=globalThis.Headers,StreamClass=globalThis.ReadableStream;
   const blobStream=Blob.prototype.stream;
+  // Standalone event realms have no relayed responses or private snapshots.
+  const consumeFiltered=typeof consume_filtered_response==='function'?consume_filtered_response:undefined;
   const wellFormed=String.prototype.toWellFormed;
   const timeout=globalThis.setTimeout.bind(globalThis),clear_timeout=globalThis.clearTimeout.bind(globalThis);
   const eventStop=NativeEvent.prototype.stopImmediatePropagation;
@@ -59,8 +61,8 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
     if(data.expired)throw invalid();
     if(metadata.type==='error'||metadata.type==='opaque'&&policy.mode!=='no-cors'||metadata.type==='opaqueredirect'&&policy.redirect!=='manual'||metadata.type==='cors'&&policy.mode==='same-origin')throw new TypeError('Service worker response type does not match the request');
     if(responseFields.bodyUsed.call(response)||body&&streamLocked.call(body))throw new TypeError('Service worker response body is used or locked');
-    const hidden=consume_filtered_response(response);
-    if(hidden)return hidden.then(blob=>{if(data.expired)throw invalid();return response_reader(data,response,metadata,blob===null?null:Reflect.apply(blobStream,blob,[]));});
+    const hidden=consumeFiltered?.(response);
+    if(hidden)return upon(hidden,blob=>{if(data.expired)throw invalid();return response_reader(data,response,metadata,blob===null?null:Reflect.apply(blobStream,blob,[]));});
     return response_reader(data,response,metadata,body);
   }
   function response_reader(data,response,metadata,body){

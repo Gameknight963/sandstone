@@ -74,6 +74,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
       });
       Object.defineProperties(output, {
         url: {value: url.href}, redirected: {value: redirected},
+        type:{value:mode==='no-cors'&&crossed_origin?'opaque':cors?'cors':'basic'},
         raw_headers: {value: response.raw_headers || [...response.headers]},
         request_referrer: {value:referrer},request_cross_origin:{value:crossed_origin},
         request_metadata:{value:Object.freeze({source:metadataSource.origin==='null'?'about:blank':metadataSource.origin+'/',site:metadataSite,user:metadataUser,opaque:metadataOpaque})}

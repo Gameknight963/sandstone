@@ -40,7 +40,7 @@ export class ServiceWorkerFetch{
       if(result.type!=='response')throw new TypeError('Invalid service worker response');
       // A filtered response returned by respondWith still carries its private
       // redirect headers and body for the browser's navigation pipeline.
-      const metadata=result.metadata.type==='opaqueredirect'&&result.metadata.internal_response?result.metadata.internal_response:result.metadata,responseHeaders=new Headers(metadata.headers);
+      const metadata=['opaque','opaqueredirect','cors'].includes(result.metadata.type)&&result.metadata.internal_response?result.metadata.internal_response:result.metadata,responseHeaders=new Headers(metadata.headers);
       responseHeaders.delete('set-cookie');responseHeaders.delete('set-cookie2');
       const hasBody=result.body&&request.method.toUpperCase()!=='HEAD';
       const body=hasBody?new ReadableStream({
@@ -54,7 +54,7 @@ export class ServiceWorkerFetch{
       if(result.body&&!hasBody)await job.cancel();
       const response=new Response(body,{status:metadata.status||200,statusText:metadata.statusText,headers:responseHeaders});
       const responseURL=context.navigation?url.href:metadata.url||url.href;
-      for(const [key,value] of Object.entries({url:responseURL,type:metadata.type||'default',redirected:!!metadata.redirected,...(metadata.status===0?{status:0,ok:false}:{})}))Object.defineProperty(response,key,{value,configurable:true});
+      for(const [key,value] of Object.entries({url:responseURL,type:metadata.type||'default',redirected:!!metadata.redirected,...(metadata.cors_exposed?{cors_exposed:metadata.cors_exposed}:{}),...(metadata.status===0?{status:0,ok:false}:{})}))Object.defineProperty(response,key,{value,configurable:true});
       remember_response(response,{...metadata,url:responseURL});
       await job.handled();if(!hasBody)cleanup();
       const location=responseHeaders.get('location');
@@ -77,7 +77,7 @@ export class ServiceWorkerFetch{
         const following=await this.fetch(next.href,init,context,network,depth+1);
         // Network responses have non-configurable metadata; wrap the body.
         const output=new Response(following.body,{status:following.status||200,statusText:following.statusText,headers:following.headers});
-        for(const key of ['url','type','request_referrer','request_cross_origin','request_metadata'])if(following[key]!==undefined)Object.defineProperty(output,key,{value:following[key]});
+        for(const key of ['url','type','request_referrer','request_cross_origin','request_metadata','cors_exposed'])if(following[key]!==undefined)Object.defineProperty(output,key,{value:following[key]});
         Object.defineProperty(output,'redirected',{value:true});
         if(following.status===0)Object.defineProperties(output,{status:{value:0},ok:{value:false}});
         return remember_response(output,{status:following.status,type:following.type,url:following.url,redirected:true});

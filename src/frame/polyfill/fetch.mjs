@@ -20,6 +20,6 @@ export async function fetch(resource, params = {}) {
     // bodies must reach the host synchronously, before the handler returns.
     const request = typeof prepared.then === 'function' ? await prepared : prepared;
     request.signal.throwIfAborted();
-    return await network.public_response(await network.fetch(request.url, {...request.options, signal: request.signal,sandstone_keepalive_release:release}),request.options.redirect);
+    return await network.public_response(await network.fetch(request.url, {...request.options, signal: request.signal,sandstone_keepalive_release:release}),request.options);
   } catch (error) { release?.(); throw error; }
 }

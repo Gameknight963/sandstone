@@ -1,5 +1,5 @@
 import {request_data,restore_cached_request,validate_put} from './storage.mjs';
-import {response_metadata,remember_response,consume_filtered_response,restore_opaque_redirect} from '../response_metadata.mjs';
+import {response_metadata,remember_response,consume_filtered_response,restore_filtered_response} from '../response_metadata.mjs';
 
 const NativeResponse=globalThis.Response;
 const NativeRequest=globalThis.Request;
@@ -7,6 +7,7 @@ const NativeAbortController=globalThis.AbortController;
 const response_body=Object.getOwnPropertyDescriptor(NativeResponse.prototype,'body').get;
 const response_used=Object.getOwnPropertyDescriptor(NativeResponse.prototype,'bodyUsed').get;
 const read_body=NativeResponse.prototype.blob;
+const array_filter=Array.prototype.filter;
 function required(args,count){if(args.length<count)throw new TypeError('Not enough arguments');}
 function query_options(value={},storage=false){
   if(value!==null&&!['object','function'].includes(typeof value))throw new TypeError('Cache options must be an object');
@@ -17,17 +18,22 @@ async function snapshot(response){
   if(response_used.call(response)||body?.locked)throw new TypeError('Response body is already used or locked');
   const {headers,...items}=response_metadata(response);
   const hidden=consume_filtered_response(response);
-  if(hidden)return {headers:[...headers],items,body:await hidden};
+  if(hidden)return {headers:[],items,body:await hidden};
+  if(items.type==='cors'&&items.internal_response){
+    // CacheStorage serializes the internal response, rather than changes to
+    // the mutable header list of a previously matched filtered response.
+    const names=new Set(items.cors_exposed||items.internal_response.cors_exposed);
+    return {headers:Reflect.apply(array_filter,items.internal_response.headers,[pair=>names.has(pair[0])&&!['set-cookie','set-cookie2'].includes(pair[0])]),items,body:body===null?null:await read_body.call(response)};
+  }
   return {headers:[...headers],items,body:body===null?null:await read_body.call(response)};
 }
 function response_from(data){
   if(!data)return undefined;
-  if(data.items.type==='opaqueredirect'&&data.items.internal_response)return restore_opaque_redirect(data.items,data.body);
+  if(['opaque','opaqueredirect'].includes(data.items.type)&&data.items.internal_response)return restore_filtered_response(data.items,data.body,data.headers);
   const response=data.items.status===0?NativeResponse.error():new NativeResponse(data.body,{status:data.items.status,statusText:data.items.statusText,headers:data.headers});
   for(const key of ['url','type','redirected']){
     const value=data.items[key];Object.defineProperty(response,key,{value:key==='url'&&typeof value==='string'?value.split('#')[0]:value});
   }
-  const clone=response.clone.bind(response);Object.defineProperty(response,'clone',{value:()=>response_from({...data,body:clone().body})});
   return remember_response(response,data.items);
 }
 
