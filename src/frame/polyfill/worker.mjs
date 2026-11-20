@@ -6,6 +6,7 @@ import * as parser from "../parser.mjs";
 import { ctx, ctx_vars, update_ctx, convert_url } from "../context.mjs";
 import { modules,evaluate_worker_module } from "./module.mjs";
 import { prefetch_worker_scripts } from "../worker_scripts.mjs";
+import {create_worker_script_loader} from '../worker_loader.mjs';
 import {on_document_unload} from '../runtime_events.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {parse_referrer_policy,default_referrer_policy} from '../../referrer.mjs';
@@ -39,6 +40,18 @@ function replace_worker_method(name,value){
   else globalThis[name]=value;
 }
 let worker_options;
+let callback_script_loader;
+export function load_worker_scripts(...args){
+  callback_script_loader??=create_worker_script_loader({cache:network.resource_cache,
+    resolve:path=>convert_url(String(path),loader.url),base:()=>loader.url,execute:fakeImportScripts,
+    fetch:url=>network.fetch(url,{mode:'no-cors',credentials:'include',destination:'script',referrer:loader.url,referrerPolicy:loader.referrer_policy}),
+    remember(url,response){
+      (worker_options.source_urls??={})[url]=response.url||url;
+      (worker_options.source_cross_origins??={})[url]=response.request_cross_origin??response.type==='opaque';
+    }
+  });
+  return callback_script_loader(...args);
+}
 let worker_ready = false;
 let message_queue = [];
 let pumping = false;
@@ -85,7 +98,7 @@ export function fakeImportScripts(...paths) {
     if (!imported_blobs.has(url)) {
       const scriptURL=worker_options?.source_urls?.[url]||url;
       const crossed=worker_options?.source_cross_origins?.[url]??new URL(scriptURL).origin!==ctx.origin;
-      const rewritten = parser.rewrite_js(source, {url:scriptURL,sourceURL:scriptURL,importReferrer:{url:crossed?'about:blank':scriptURL,credentials:'same-origin',referrerPolicy:loader.referrer_policy}});
+      const rewritten = parser.rewrite_js(source, {url:scriptURL,sourceURL:scriptURL,workerLoaders:!worker_options?.probe&&!worker_options?.service_worker,importReferrer:{url:crossed?'about:blank':scriptURL,credentials:'same-origin',referrerPolicy:loader.referrer_policy}});
       imported_blobs.set(url, network.create_blob_url(new Blob([rewritten], {type: "text/javascript"}), scriptURL));
     }
     return imported_blobs.get(url);

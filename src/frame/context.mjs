@@ -99,6 +99,7 @@ export class CustomCTX {
   get URL() {return polyfill.FakeURL}
   get Worker() {return loader.service_worker?undefined:polyfill.FakeWorker}
   get importScripts() {return is_worker ? polyfill.fakeImportScripts : undefined}
+  __load_worker_scripts__(paths,loaded,failed,importScripts){return polyfill.load_worker_scripts(paths,loaded,failed,importScripts);}
   get XMLHttpRequest() {return polyfill.FakeXMLHttpRequest}
   get EventSource() {return polyfill.FakeEventSource}
   get XMLHttpRequestUpload() {return polyfill.FakeXMLHttpRequest.Upload}

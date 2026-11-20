@@ -1,6 +1,7 @@
 import { parse } from "../javascript_parser.mjs";
 import {function_source_entries} from './function_sources.mjs';
 import {static_module_type} from '../module_attributes.mjs';
+import {worker_loader_imports} from './worker_loaders.mjs';
 const terminated_nodes=new Set(['ExpressionStatement','VariableDeclaration','ReturnStatement','ThrowStatement','BreakStatement','ContinueStatement','DebuggerStatement','DoWhileStatement','PropertyDefinition','FieldDefinition']);
 
 class Scope {
@@ -19,7 +20,7 @@ function children(node, callback) {
   }
 }
 
-export function rewrite_source(source, globals, {module = false, url,importReferrer=url, resolve,resolveNamespace, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',withContext='(function(){return this})().__ctx__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false,functionSources,rewriteThis=true,directEval=false,evalContext} = {}) {
+export function rewrite_source(source, globals, {module = false, url,importReferrer=url, resolve,resolveNamespace, stripAttributes = false, sourceURL, contextName='__ctx__',globalName=contextName,thisName='__get_this__',withContext='(function(){return this})().__ctx__',dynamicImport=false,preserveWith=false,preserveDirectEval=false,preserveGlobalScope=false,evalMode=false,functionSources,rewriteThis=true,directEval=false,evalContext,workerLoaders=false} = {}) {
   const runtimeContext=evalContext?.withToken?evalContext.withToken+'.context':contextName;
   let named=false;
   const onComment=sourceURL?(type,text)=>{
@@ -140,6 +141,14 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
   root.container=ast;
   if(evalContext?.declarationScope){root.evalScope=evalContext.declarationScope;root.evalScopeOptional=true;}
   build(ast,root);
+  const workerImports=new WeakSet();
+  if(workerLoaders&&!module)for(const entry of worker_loader_imports(ast)){
+    const scope=scopes.get(entry.imported.callee);let dynamic=false;
+    for(let current=scope;current;current=current.parent)if(current.kind==='with')dynamic=true;
+    if(dynamic||scope?.has('importScripts')||scope?.owner(entry.failed)!==scopes.get(entry.failedReference)?.owner(entry.failed))continue;
+    workerImports.add(entry.imported);workerImports.add(entry.callback);
+    edits.push([entry.start,entry.end,`${runtimeContext}.__load_worker_scripts__([${entry.url}],${entry.loaded},${entry.failed},${globalName}.importScripts)${entry.statement?';':''}`]);
+  }
   const targets=new WeakSet(),defaultShorthands=new WeakSet(),hoisted=new Set(),movedInitializers=[];
   const globalScript=!module&&!(evalMode&&root.strict)&&(!evalContext||evalContext.global);
   const renameEval=directEval&&!preserveDirectEval;
@@ -351,6 +360,7 @@ export function rewrite_source(source, globals, {module = false, url,importRefer
   let with_index=0;
   const with_name=()=>{let name;do{name='__sandstone_with_'+(++with_index)}while(identifiers.has(name)||source.includes(name));return name};
   function visit(node, parent, key, inWith=false,withToken=null) {
+    if(workerImports.has(node))return;
     if(untouchedAsm(node))return;
     const initialize=functionScopes.get(node)?.evalInitializeEdit;
     if(initialize&&withToken)initialize[2]=initialize[2].replace(runtimeContext+'.__eval_scope__()',withToken+'.context.__eval_scope__()');

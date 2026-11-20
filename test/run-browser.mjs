@@ -29,6 +29,7 @@ import {verifyServiceWorkerClients} from './service-worker-clients.playwright.mj
 import {verifyServiceWorkerNavigation} from './service-worker-navigation.playwright.mjs';
 import {verifyPublicServiceWorker} from './service-worker-public.playwright.mjs';
 import {verifyServiceWorkerWindowClients} from './service-worker-window-clients.playwright.mjs';
+import {verifyWorkerLoaders} from './worker-loaders.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -381,6 +382,7 @@ try {
     result.passed.push(...await timed(verifyServiceWorkerNavigation(page), 'Service worker navigation fixture'));
     result.passed.push(...await timed(verifyPublicServiceWorker(page), 'Public service worker fixture'));
     result.passed.push(...await timed(verifyServiceWorkerWindowClients(page), 'Service worker window clients fixture'));
+    result.passed.push(...await timed(verifyWorkerLoaders(page), 'Lazy AMD worker loaders fixture'));
     result.passed.push(...await timed(verifyWorkerCycles(page), 'Cyclic worker module fixture'));
     result.passed.push(...await timed(verifyWorkerNames(page), 'Worker function name fixture'));
     result.passed.push(...await timed(verifyWorkerScopes(page), 'Worker script scope fixture'));

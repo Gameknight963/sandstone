@@ -3,7 +3,7 @@ export { FakeURL } from "./url.mjs";
 export { FakeHistory } from "./history.mjs";
 export {Function} from './function.mjs';
 export { FakeStorage } from "./storage.mjs";
-export { fakeImportScripts, FakeWorker, mark_worker_started } from "./worker.mjs";
+export { fakeImportScripts, FakeWorker, mark_worker_started,load_worker_scripts } from "./worker.mjs";
 
 export { fetch, FakeRequest } from "./fetch.mjs";
 export { FakeXMLHttpRequest } from "./xhr.mjs";
