@@ -1,3 +1,4 @@
+import {consume_filtered_response} from '../response_metadata.mjs';
 // This runtime is private until a service-worker host supplies trusted events.
 // Ordinary constructors and authored dispatches cannot grant lifetime rights.
 export function create_service_worker_events({Event:NativeEvent=globalThis.Event,Request:NativeRequest=globalThis.Request,Response:NativeResponse=globalThis.Response,requestMetadata,responseMetadata,sourceValid}={}){
@@ -6,6 +7,7 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
   const resolve=PromiseClass.resolve.bind(PromiseClass),then=PromiseClass.prototype.then;
   const upon=(promise,yes,no)=>Reflect.apply(then,promise,[yes,no]);
   const HeaderClass=globalThis.Headers,StreamClass=globalThis.ReadableStream;
+  const blobStream=Blob.prototype.stream;
   const wellFormed=String.prototype.toWellFormed;
   const timeout=globalThis.setTimeout.bind(globalThis),clear_timeout=globalThis.clearTimeout.bind(globalThis);
   const eventStop=NativeEvent.prototype.stopImmediatePropagation;
@@ -57,6 +59,11 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
     if(data.expired)throw invalid();
     if(metadata.type==='error'||metadata.type==='opaque'&&policy.mode!=='no-cors'||metadata.type==='opaqueredirect'&&policy.redirect!=='manual'||metadata.type==='cors'&&policy.mode==='same-origin')throw new TypeError('Service worker response type does not match the request');
     if(responseFields.bodyUsed.call(response)||body&&streamLocked.call(body))throw new TypeError('Service worker response body is used or locked');
+    const hidden=consume_filtered_response(response);
+    if(hidden)return hidden.then(blob=>{if(data.expired)throw invalid();return response_reader(data,response,metadata,blob===null?null:Reflect.apply(blobStream,blob,[]));});
+    return response_reader(data,response,metadata,body);
+  }
+  function response_reader(data,response,metadata,body){
     let reader=null;
     if(body){
       const original=streamReader.call(body);
@@ -104,7 +111,7 @@ export function create_service_worker_events({Event:NativeEvent=globalThis.Event
       if(!dispatching(data)||data.responded)throw invalid();
       extend(data,promise);eventStop.call(data.raw);if(data.parent)eventStop.call(data.parent);data.responded=true;data.response=deferred();
       upon(promise,value=>{
-        try{data.response.resolve(response_handle(data,value));}catch(error){data.response.reject(error);}
+        try{upon(resolve(response_handle(data,value)),handle=>data.response.resolve(handle),error=>data.response.reject(error));}catch(error){data.response.reject(error);}
       },error=>data.response.reject(error));
     }
   }

@@ -38,7 +38,9 @@ export class ServiceWorkerFetch{
         await job.handled();cleanup();return response;
       }
       if(result.type!=='response')throw new TypeError('Invalid service worker response');
-      const metadata=result.metadata,responseHeaders=new Headers(metadata.headers);
+      // A filtered response returned by respondWith still carries its private
+      // redirect headers and body for the browser's navigation pipeline.
+      const metadata=result.metadata.type==='opaqueredirect'&&result.metadata.internal_response?result.metadata.internal_response:result.metadata,responseHeaders=new Headers(metadata.headers);
       responseHeaders.delete('set-cookie');responseHeaders.delete('set-cookie2');
       const hasBody=result.body&&request.method.toUpperCase()!=='HEAD';
       const body=hasBody?new ReadableStream({
@@ -57,13 +59,11 @@ export class ServiceWorkerFetch{
       await job.handled();if(!hasBody)cleanup();
       const location=responseHeaders.get('location');
       if(location&&[301,302,303,307,308].includes(metadata.status)){
+        // The internal transport remains unfiltered. The page/worker fetch API
+        // applies its opaque-redirect filter after receiving this response.
+        if(request.redirect==='manual'&&!context.navigation&&!context.service_worker_entry)return response;
         await response.body?.cancel();cleanup();
         if(request.redirect==='error')throw new TypeError('Redirect disallowed');
-        if(request.redirect==='manual'&&!context.navigation&&!context.service_worker_entry){
-          const manual=Response.error();
-          Object.defineProperties(manual,{type:{value:'opaqueredirect'},url:{value:url.href}});
-          return remember_response(manual,{type:'opaqueredirect',url:url.href});
-        }
         if(context.navigation||context.service_worker_entry)return response;
         if(depth===20)throw new TypeError('Too many redirects');
         const next=redirect_url(location,url);

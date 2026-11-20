@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {CacheService} from '../src/cache/service.mjs';
 import {create_cache_api} from '../src/cache/client.mjs';
 import {create_request_class} from '../src/frame/request.mjs';
-import {remember_response,response_metadata} from '../src/response_metadata.mjs';
+import {remember_response,response_metadata,opaque_redirect_response,consume_filtered_response} from '../src/response_metadata.mjs';
 
 test('Cache snapshots preserve trusted response metadata across property shadowing and clones',async()=>{
   const {api}=environment(),cache=await api.caches.open('metadata');
@@ -17,6 +17,15 @@ test('Cache snapshots preserve trusted response metadata across property shadowi
 });
 
 const origin='https://cache.test';
+test('Cached opaque redirects preserve hidden navigation bodies and cannot be consumed twice',async()=>{
+  const {api}=environment(),cache=await api.caches.open('manual');
+  const response=opaque_redirect_response(remember_response(new Response('private navigation',{status:302,headers:{'x-private':'secret'}}),{url:origin+'/source'}));
+  const pending=cache.put('/saved',response);assert.equal(response.bodyUsed,true);await pending;
+  await assert.rejects(cache.put('/again',response),TypeError);
+  const restored=await cache.match('/saved');assert.equal(restored.type,'opaqueredirect');assert.equal(restored.status,0);assert.equal(restored.body,null);assert.deepEqual([...restored.headers],[]);assert.equal(await restored.text(),'');
+  assert.equal(await(await consume_filtered_response(restored)).text(),'private navigation');
+});
+
 function environment(fetch=async request=>new Response(request.url)){
   const service=new CacheService();
   const client=(id,source=origin)=>create_cache_api({command:command=>service.command(id,source,command),fetch,Request:create_request_class(()=>source+'/base/',()=>source+'/page')});

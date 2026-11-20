@@ -1,5 +1,5 @@
 import {request_data,restore_cached_request,validate_put} from './storage.mjs';
-import {response_metadata,remember_response} from '../response_metadata.mjs';
+import {response_metadata,remember_response,consume_filtered_response,restore_opaque_redirect} from '../response_metadata.mjs';
 
 const NativeResponse=globalThis.Response;
 const NativeRequest=globalThis.Request;
@@ -16,10 +16,13 @@ async function snapshot(response){
   const body=response_body.call(response);
   if(response_used.call(response)||body?.locked)throw new TypeError('Response body is already used or locked');
   const {headers,...items}=response_metadata(response);
+  const hidden=consume_filtered_response(response);
+  if(hidden)return {headers:[...headers],items,body:await hidden};
   return {headers:[...headers],items,body:body===null?null:await read_body.call(response)};
 }
 function response_from(data){
   if(!data)return undefined;
+  if(data.items.type==='opaqueredirect'&&data.items.internal_response)return restore_opaque_redirect(data.items,data.body);
   const response=data.items.status===0?NativeResponse.error():new NativeResponse(data.body,{status:data.items.status,statusText:data.items.statusText,headers:data.headers});
   for(const key of ['url','type','redirected']){
     const value=data.items[key];Object.defineProperty(response,key,{value:key==='url'&&typeof value==='string'?value.split('#')[0]:value});

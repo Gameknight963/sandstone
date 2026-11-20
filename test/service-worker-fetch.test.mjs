@@ -81,7 +81,7 @@ test('Worker redirects retain the current fragment until a Location explicitly r
 test('Manual and disallowed redirects never issue a destination request',async()=>{
   const api=environment(()=>({type:'response',metadata:{status:302,headers:[['location','/next']]},body:true}));
   const manual=await api.fetch(undefined,{redirect:'manual'});
-  assert.equal(manual.type,'opaqueredirect');assert.equal(manual.status,0);assert.equal(manual.body,null);
+  assert.equal(manual.status,302);assert.equal(manual.headers.get('location'),'/next');await manual.body.cancel();
   await assert.rejects(api.fetch(undefined,{redirect:'error'}),/Redirect disallowed/);assert.equal(api.networks.length,0);
 });
 
