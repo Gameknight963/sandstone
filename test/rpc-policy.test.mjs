@@ -177,3 +177,16 @@ test('Cookie snapshots require the calling frame current document capability',()
   assert.throws(()=>call('cookies_ready',['root','root-document'],nested),{name:'SecurityError'});
   assert.throws(()=>call('cookies_ready',['child','root-document'],nested),{name:'SecurityError'});
 });
+
+test('Explicit site-data revocation blocks old storage capabilities without disabling unrelated areas or fresh documents',()=>{
+  const {call,contexts,policy}=fixture(),entry=contexts.get('root-document');entry.cleared_storage={localStorage:true,cookies:true,indexedDB:true,cacheStorage:true,fileSystems:true,serviceWorkers:true};
+  for(const [procedure,args] of [
+    ['local_storage',['root',[],{context:'root-document'}]],['storage_ready',['root','root-document']],['cookie_set',['root','x=y']],['cookies_ready',['root','root-document']],
+    ['idb_command',['root',{}]],['idb_poll',['root']],['idb_databases',['root']],['cache_command',['root',{}]],['filesystem_command',['root-document',{op:'root'}]],
+    ['service_worker_open',['root','root-document']],['service_worker_command',['root',{}]]
+  ])assert.throws(()=>call(procedure,args),{name:'SecurityError'},procedure);
+  assert.deepEqual(call('session_storage',['root',[],{context:'root-document'}]),['root',[],{context:'root-document'}]);
+  entry.retired=true;assert.throws(()=>call('local_storage',['root',[],{context:'root-document'}]),{name:'SecurityError'});
+  const replacement={};contexts.set('fresh',{frame:'root',context:{}});policy.bind_root(replacement,'fresh');
+  assert.deepEqual(call('local_storage',['root',[],{context:'fresh'}],replacement),['root',[],{context:'fresh'}]);
+});

@@ -15,10 +15,12 @@ import {navigation_sandbox} from '../navigation_policy.mjs';
 import {RPCSourcePolicy} from './rpc_policy.mjs';
 import {bootstrap_html,create_bootstrap_nonce,runtime_seed} from '../bootstrap.mjs';
 import {decode_document_response} from '../text_encoding.mjs';
+import {prepare_site_data_clear as prepare_clear} from '../site_data_clear.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 export {cache_storage} from './cache.mjs';
 export {file_system} from './filesystem.mjs';
+export function prepare_site_data_clear(hostname,selection,root){return prepare_clear(hostname,selection,root,iframes,network.beacons.contexts);}
 
 import { version } from "./index.mjs";
 
@@ -318,7 +320,7 @@ rpc.rpc_handlers["history_go"] = (id, delta, scroll,activation) => {
 
 rpc.rpc_handlers["cookie_set"] = async (frame_id, value, url, token) => {
   const context=network.beacons.contexts.get(token);
-  if(!context||context.frame!==frame_id||context.context.broadcast_origin?.startsWith('opaque:'))return;
+  if(!context||context.frame!==frame_id||context.cleared_storage?.cookies||context.context.broadcast_origin?.startsWith('opaque:'))return;
   const base=context.context.cookie_url||context.context.url,target=new URL(url||base);
   if(target.origin!==new URL(base).origin)throw new DOMException('Cookie origin is unavailable','SecurityError');
   site_data.setCookie(target.href,value,false,{crossSite:context.context.cross_site});

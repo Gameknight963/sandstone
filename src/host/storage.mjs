@@ -41,7 +41,7 @@ rpc.rpc_handlers.storage_ready=(id,token)=>{
 
 function mutate(id,_entries,change,kind){
   const context=beacons.contexts.get(change?.context);
-  if(!context||context.frame!==id||!context.storage)return;
+  if(!context||context.frame!==id||!context.storage||kind==='local'&&context.cleared_storage?.localStorage)return;
   // The document token is required: a reusable frame ID cannot authorize writes
   // to its new destination. Retiring documents retain their original area.
   const source=context.storage;
@@ -55,6 +55,7 @@ function mutate(id,_entries,change,kind){
   }else commit(id,source,change,kind);
 }
 function commit(id,source,change,kind){
+  if(kind==='local'&&source.cleared_local)return;
   const {origin}=source;
   const previous=kind==='local'?site_data.local[origin]:source.session[origin];
   const next=apply_storage_change(previous,change);

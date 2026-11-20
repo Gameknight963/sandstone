@@ -73,7 +73,7 @@ async function render_site_data() {
       button.onclick = async () => {
         // Discard the current runtime before deletion so it cannot write stale data back.
         const current = main_frame.url;
-        const affects_current = current && (current.hostname === site.hostname || selection.cookies && current.hostname.endsWith("." + site.hostname));
+        const affects_current = current && sandstone.controller.prepare_site_data_clear(site.hostname,selection,main_frame.id);
         if (affects_current) main_frame.iframe.src = "about:blank";
         if(selection.serviceWorkers)await service_workers.clear_registrations(site.hostname);
         if (selection.indexedDB) await indexed_db.clear(site.hostname);

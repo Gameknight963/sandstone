@@ -8,7 +8,7 @@ try{factory=globalThis.indexedDB;}catch{}
 try{manager=globalThis.navigator?.storage;}catch{}
 export const file_system=new FileService(factory,{onCatalog:catalog=>site_data.fileSystems=catalog});
 rpc_handlers.filesystem_command=async(token,command)=>{
-  const entry=beacons.contexts.get(token);if(!entry||entry.retired)throw new DOMException('File document is unavailable','InvalidStateError');
+  const entry=beacons.contexts.get(token);if(!entry||entry.retired||entry.cleared_storage?.fileSystems)throw new DOMException('File document is unavailable','InvalidStateError');
   const context=entry.context,origin=context.broadcast_origin||new URL(context.url).origin;
   if(origin==='null'||origin.startsWith('opaque:'))throw new DOMException('File origin is unavailable','SecurityError');
   if(command?.op==='estimate'){

@@ -2,6 +2,13 @@ import {worker_renderer} from '../worker_context.mjs';
 const self_calls=new Set(['navigate','navigate_target','history_mutate','history_go','window_name','storage_ready','cookies_ready','document_open','idb_command','idb_poll','idb_databases','cache_command','crypto','ws_new','ws_event','ws_send','ws_close','service_worker_open','service_worker_client','worker_entry_cancel']);
 const context_calls=new Set(['beacon','fetch_keepalive','fetch_keepalive_read','fetch_keepalive_abort','fetch_keepalive_done','download_request','download_blob','broadcast_open','broadcast_command','lock_open','lock_query','filesystem_command']);
 const denied=()=>{throw new DOMException('RPC source is not authorized','SecurityError');};
+const storage_calls=new Map([
+  ...['local_storage','storage_ready'].map(name=>[name,'localStorage']),
+  ...['cookie_set','cookies_ready'].map(name=>[name,'cookies']),
+  ...['idb_command','idb_poll','idb_databases'].map(name=>[name,'indexedDB']),
+  ['cache_command','cacheStorage'],['filesystem_command','fileSystems'],
+  ...['service_worker_open','service_worker_client','service_worker_command'].map(name=>[name,'serviceWorkers'])
+]);
 
 // Source identity belongs to the receiving MessagePort, not a frame ID supplied
 // in its messages. Retired ports retain only their original document token.
@@ -37,6 +44,7 @@ export class RPCSourcePolicy {
     const scope=this.scope(source),args=message.arguments;
     if(message.type!=='procedure'||!Array.isArray(args))denied();
     const procedure=message.procedure;
+    if(scope.entry.cleared_storage?.[storage_calls.get(procedure)])denied();
     if(context_calls.has(procedure)){if(args[0]!==scope.context)denied();return args;}
     if(procedure==='local_storage'||procedure==='session_storage'){
       if(args[0]!==scope.id||args[2]?.context!==scope.context)denied();return args;
