@@ -4,6 +4,17 @@ import {NavigationMetadata} from '../src/host/navigation_metadata.mjs';
 import {NavigationHistory} from '../src/history.mjs';
 
 const metadata={source:'https://source.test/',site:'cross-site',user:false,opaque:false};
+test('Navigation receipts retain private attachments and release discarded reservations',()=>{
+  let now=0,next=0,released=0;const owner={token:'owner'};
+  const broker=new NavigationMetadata(()=>owner.token,{nonce:()=>String(++next),now:()=>now,limit:1,ttl:10});
+  const scope=broker.capture('parent','child'),attachment={release:()=>released++};
+  const first=broker.issue(scope,'https://target.test/',metadata,attachment);
+  broker.issue(scope,'https://target.test/',metadata,attachment);assert.equal(released,1);assert.equal(broker.claim(first,'parent','child','https://target.test/'),undefined);
+  const receipt=broker.issue(scope,'https://target.test/',metadata,attachment);
+  const result=broker.take(receipt,'parent','child','https://target.test/');assert.equal(result.attachment,attachment);assert.deepEqual(result.metadata,metadata);assert.equal('attachment' in result.metadata,false);
+  const expired=broker.issue(scope,'https://target.test/',metadata,attachment);now=10;
+  assert.equal(broker.take(expired,'parent','child','https://target.test/'),undefined);assert.equal(released,3);
+});
 test('Navigation receipts only authorize their frame, URL and current parent document once',()=>{
   const owners=new Map([['parent','document-1'],['other','document-2']]);
   const broker=new NavigationMetadata(id=>owners.get(id),{nonce:()=> 'receipt'});

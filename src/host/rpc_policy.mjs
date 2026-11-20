@@ -47,7 +47,7 @@ export class RPCSourcePolicy {
       if(args[0]!==scope.id)denied();return [...args.slice(0,3),scope.context];
     }
     if(procedure==='frame_unregister'){
-      if(this.frames()[args[0]]&&!this.owns(scope,args[0]))denied();return args;
+      if(this.frames()[args[0]]&&!this.owns(scope,args[0]))denied();return [args[0],{...args[1],source_frame:scope.id,source_document:scope.context}];
     }
     if(procedure==='storage_ready'||procedure==='cookies_ready'){
       if(args[0]!==scope.id||args[1]!==scope.context)denied();

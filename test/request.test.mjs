@@ -4,13 +4,21 @@ import {create_request_class} from '../src/frame/request.mjs';
 import {serialize_request} from '../src/frame/polyfill/request.mjs';
 import {remember_request} from '../src/request_metadata.mjs';
 
+test('Navigation requests preserve trusted mode across clones without accepting authored navigate mode',()=>{
+  const Request=create_request_class(()=> 'https://site.test/',()=> 'https://site.test/');
+  const request=remember_request(new Request('/page',{mode:'same-origin'}),{mode:'navigate',redirect:'manual',destination:'document'});
+  assert.equal(request.mode,'navigate');assert.equal(request.clone().mode,'navigate');assert.equal(new Request(request).mode,'navigate');
+  let reads=0;const copy=new Request(request,{get mode(){reads++;return 'cors';}});
+  assert.equal(copy.mode,'cors');assert.equal(reads,1);assert.throws(()=>new Request(request,{mode:'navigate'}),TypeError);
+});
+
 test('Trusted worker requests retain destination and referrer through clones and pass-through serialization',async()=>{
   const Request=create_request_class(()=> 'https://site.test/worker.js',()=> 'about:blank');
   const request=remember_request(new Request('https://cdn.test/image'),{destination:'image',referrer:'https://site.test/page'});
   const clone=request.clone(),copy=new Request(clone);
-  assert.equal(copy.destination,'image');assert.equal(copy.referrer,'https://site.test/page');
+  assert.equal(clone.destination,'image');assert.equal(copy.destination,'');assert.equal(copy.referrer,'https://site.test/page');
   const serialized=await serialize_request(clone,{},'https://site.test/worker.js','about:blank');
-  assert.equal(serialized.options.destination,'image');assert.equal(serialized.options.referrer,'https://site.test/page');
+  assert.equal(serialized.options.destination,undefined);assert.equal(serialized.options.referrer,'https://site.test/page');
   assert.equal(new Request(copy,{referrer:''}).referrer,'');
   assert.equal((await serialize_request(copy,{referrer:''},'https://site.test/worker.js','about:blank')).options.referrer,'');
 });

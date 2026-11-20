@@ -11,21 +11,24 @@ export class NavigationMetadata {
     const owner=this.owner(parent);
     return owner?Object.freeze({parent,child,owner}):undefined;
   }
-  issue(scope,url,metadata){
+  issue(scope,url,metadata,attachment){
     if(!scope||!metadata)return;
     const {parent,child,owner}=scope;
     if(this.owner(parent)!==owner)return;
     const now=this.now();
-    for(const [token,record] of this.records)if(record.expires<=now||this.owner(record.parent)!==record.owner)this.records.delete(token);
-    while(this.records.size>=this.limit)this.records.delete(this.records.keys().next().value);
+    for(const [token,record] of this.records)if(record.expires<=now||this.owner(record.parent)!==record.owner){this.records.delete(token);record.attachment?.release();}
+    while(this.records.size>=this.limit){const token=this.records.keys().next().value;this.records.get(token).attachment?.release();this.records.delete(token);}
     const token=this.nonce();
-    this.records.set(token,{parent,child,url:new URL(url).href,owner,metadata:Object.freeze({...metadata}),expires:now+this.ttl});
+    this.records.set(token,{parent,child,url:new URL(url).href,owner,metadata:Object.freeze({...metadata}),attachment,expires:now+this.ttl});
     return token;
   }
   claim(token,parent,child,url){
+    return this.take(token,parent,child,url)?.metadata;
+  }
+  take(token,parent,child,url){
     const record=this.records.get(token);if(!record)return;
-    if(record.expires<=this.now()||this.owner(record.parent)!==record.owner){this.records.delete(token);return;}
+    if(record.expires<=this.now()||this.owner(record.parent)!==record.owner){this.records.delete(token);record.attachment?.release();return;}
     if(record.parent!==parent||record.child!==child||record.url!==new URL(url).href)return;
-    this.records.delete(token);return record.metadata;
+    this.records.delete(token);return record;
   }
 }

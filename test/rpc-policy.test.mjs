@@ -57,7 +57,8 @@ test('Child registration and channel attachment cannot replace unrelated or ance
   policy.attach(first,{},'pending');
   assert.throws(()=>call('frame_register',['second','pending','https://site.test'],second),{name:'SecurityError'});
   assert.deepEqual(call('frame_register',['first','pending','https://site.test'],first),['first','pending','https://site.test']);
-  assert.deepEqual(call('frame_unregister',['first']),['first']);
+  assert.deepEqual(call('frame_unregister',['first']),['first',{source_frame:'root',source_document:'root-document'}]);
+  assert.deepEqual(call('frame_unregister',['pending',{source_frame:'second',source_document:'forged'}],first),['pending',{source_frame:'first',source_document:'first-document'}]);
 });
 
 test('Retired channels retain only their own storage and network document leases',()=>{

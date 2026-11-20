@@ -178,7 +178,7 @@ export class ServiceWorkerManager{
   async claim(record,worker){
     await this.list(record.origin);this.valid(record);
     if(record.active!==worker||!['activating','activated'].includes(worker.state))throw new DOMException('Worker is not active','InvalidStateError');
-    for(const client of this.clients.values())if(new URL(client.creationURL).origin===record.origin){
+    for(const client of this.clients.values())if(!client.reserved&&new URL(client.creationURL).origin===record.origin){
       const matches=select_registration([...this.records.values()].filter(value=>(value.active||value.waiting||value.installing)&&!value.unregistered&&!value.revoked),client.creationURL,record.origin);
       if(matches===record)this.control(client,record,worker);
     }

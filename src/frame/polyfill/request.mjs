@@ -46,10 +46,10 @@ export function prepare_request(resource, init, base, source_url = base, reserve
       redirect: request.redirect,
       cache: request.cache,
       keepalive: request.keepalive,
-      mode: request.mode,
+      mode: options.mode===undefined?request_metadata(resource)?.mode||request.mode:request.mode,
       referrer,
       referrerPolicy: request.referrerPolicy,
-      ...(request_metadata(resource)?.destination?{destination:request_metadata(resource).destination}:{})
+      ...(request_metadata(resource)?.context?{sandstone_request_context:request_metadata(resource).context,destination:''}:{})
     }
   };
   };

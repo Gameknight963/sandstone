@@ -8,19 +8,25 @@ import {site_data} from './site_data.mjs';
 import {ServiceWorkerManager} from '../service_worker/manager.mjs';
 import {ServiceWorkerFetch} from '../service_worker/fetch.mjs';
 import {ServiceWorkerClients} from '../service_worker/clients.mjs';
+import {ServiceWorkerNavigations} from '../service_worker/navigation.mjs';
+import {ServiceWorkerRequests} from '../service_worker/requests.mjs';
 
 let factory;try{factory=globalThis.indexedDB;}catch{}
 export const registrations=new ServiceWorkerStorage(factory,{onCatalog:catalog=>site_data.serviceWorkers=catalog});
 export const manager=new ServiceWorkerManager({storage:registrations,createWorker:(profile,options)=>create_service_worker_driver(profile,{timeout:300000,...options}),
   fetch:(url,options,context)=>network.fetch(url,options,{...context,service_worker_bypass:true,url:context.url||context.base||url,top_url:context.top_url||context.url||context.base||url})});
 export const fetch_router=new ServiceWorkerFetch({manager,client:context=>{
+  if(context.service_worker_navigation)return context.service_worker_navigation;
   const frame=iframes[context.frame_id];
   if(!frame||frame.service_worker_host||iframes[frame.root_id]?.service_worker_host)return null;
   const client=manager.clients.get(context.service_worker_client);
   return client?.frame===frame.id?client:null;
 }});
 export const clients=new ServiceWorkerClients({manager,frames:()=>iframes});
-network.set_service_worker_fetch((...args)=>fetch_router.fetch(...args),frame=>clients.disconnect(frame),(frame,signal)=>clients.bind(frame,signal));
+export const navigations=new ServiceWorkerNavigations({manager,frames:()=>iframes,route:(...args)=>fetch_router.fetch(...args)});
+network.set_service_worker_fetch((url,options,context,network)=>context?.navigation?navigations.fetch(url,options,context,network):fetch_router.fetch(url,options,context,network),
+  (frame,options)=>{clients.disconnect(frame);navigations.disconnect(frame,options);},(frame,signal)=>clients.bind(frame,signal),
+  Object.fromEntries(['response','commit','cancel','reserved'].map(key=>[key,navigations[key].bind(navigations)])));
 export async function clear_registrations(hostname){
   manager.revoke(hostname);
   for(const owner of [...owners.values()])if(new URL(owner.profile.origin).hostname===hostname)owner.close();
@@ -28,6 +34,12 @@ export async function clear_registrations(hostname){
 }
 
 const owners=new Map();
+export const request_contexts=new ServiceWorkerRequests();
+network.set_service_worker_request_context((id,token,url)=>{
+  const frame=iframes[id],owner=frame&&owners.get(frame.root_id);
+  if(!frame?.worker||!owner||!owner.frame.service_worker_host)throw new DOMException('Not a service worker request owner','SecurityError');
+  return request_contexts.restore(owner.frame.id,token,url);
+});
 rpc.rpc_handlers.service_worker_command=(id,method,args)=>{
   const owner=owners.get(id);
   if(!owner||iframes[id]!==owner.frame||!owner.frame.service_worker_host)throw new DOMException('Unknown service worker owner','SecurityError');
@@ -52,13 +64,15 @@ export async function create_service_worker_driver(profile,{command,timeout=3000
     scripts:()=>call('scripts'),
     dispatch(event){
       if(closed)throw new DOMException('Service worker owner was terminated','InvalidStateError');
-      const id=++next,result=call('dispatch',[{...event,id}],event.ports||[]),lifetime=call('wait',[id]);
+      const {request_context,...packet}=event;
+      if(packet.request&&request_context)packet.request={...packet.request,context:request_contexts.issue(frame.id,packet.request.url,request_context)};
+      const id=++next,result=call('dispatch',[{...packet,id}],event.ports||[]),lifetime=call('wait',[id]);
       result.catch(()=>{});lifetime.catch(()=>{});
       return {id,result,lifetime,read:()=>call('read',[id]),cancel:reason=>call('cancel',[id,reason]),
         abort:reason=>call('abort',[id,reason]),handled:error=>call('handled',[id,error]),release:()=>call('release',[id])};
     },
     close(reason=new DOMException('Service worker owner was terminated','AbortError')){
-      if(closed)return;closed=true;owners.delete(frame.id);abort.abort(reason);
+      if(closed)return;closed=true;owners.delete(frame.id);request_contexts.disconnect(frame.id);abort.abort(reason);
       signal?.removeEventListener('abort',externalAbort);
       try{rpc.notify(frame.rpc_target,'service_worker_control',['close']);}catch{}
       frame.runtime_wait?.abort(reason);frame.navigation_id++;frame.is_navigating=false;

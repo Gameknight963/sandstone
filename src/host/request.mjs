@@ -4,7 +4,7 @@ import {parse_referrer_policy, request_referrer, request_origin} from '../referr
 import {cookie_header} from './cookie_policy.mjs';
 
 // Redirects must pass through the cookie jar at every hop, including login flows.
-export async function fetch_with_cookies(transport, data, input, init = {}, context = {}) {
+export async function fetch_with_cookies(transport, data, input, init = {}, context = {}, worker) {
   let url = new URL(input);
   const source = new URL(context.url || url);
   const top = new URL(context.top_url || source);
@@ -48,12 +48,16 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
     if (origin !== null) headers.set('origin',origin);
     referrer = request_referrer(referrer,url.href,policy);
     if (referrer) headers.set('referer',referrer);
-    if (allowed) {
+    const synthetic=worker?await worker(url.href,{...options,mode,redirect:'manual',referrer,referrerPolicy:policy}):undefined;
+    if (allowed&&!synthetic) {
       const cookies = cookie_header(data.cookies,url.href,{sameSiteContext,allowUnsafe:context.navigation&&!context.nested&&!safe_method});
       if (cookies) headers.set("cookie", cookies);
     }
-    const response = await transport(url.href, {...options, headers: Object.fromEntries(headers), redirect: "manual"});
-    if (allowed) {
+    // Navigation redirects can enter a different worker scope at each hop.
+    // Consult the worker before attaching transport cookies, and never process
+    // its synthetic response as an HTTP cookie/cache response.
+    const response = synthetic||await transport(url.href, {...options, headers: Object.fromEntries(headers), redirect: "manual"});
+    if (allowed&&!synthetic) {
       const raw = response.raw_headers || [...response.headers];
       const setCookies = response.headers.getSetCookie?.() || [];
       for (const [key, value] of raw) {

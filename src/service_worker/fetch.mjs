@@ -7,7 +7,7 @@ export class ServiceWorkerFetch{
   constructor({manager,client}){Object.assign(this,{manager,client});}
   async fetch(input,options={},context={},network,depth=0){
     const client=this.client(context),worker=client?.controller,record=client?.registration;
-    if(context.service_worker_bypass||context.navigation||!worker||!record||record.revoked)return network(input,options,context);
+    if(context.service_worker_bypass||context.navigation&&!context.service_worker_navigation||!worker||!record||record.revoked)return network(input,options,context);
     const url=new URL(input),signal=options.signal;
     if(!/^https?:$/.test(url.protocol))return network(input,options,context);
     signal?.throwIfAborted();
@@ -29,7 +29,7 @@ export class ServiceWorkerFetch{
     const race=operation=>Promise.race([operation,abortPromise]);
     signal?.addEventListener('abort',abort,{once:true});
     try{
-      const starting=Promise.resolve(this.manager.dispatch(record,worker,{event:'fetch',request,clientId:client.id},{waitHandled:true})).then(value=>{job=value;if(aborted)stop(signal.reason);return value;});
+      const starting=Promise.resolve(this.manager.dispatch(record,worker,{event:'fetch',request,request_context:context,clientId:context.navigation?context.navigation_previous||'':client.id,resultingClientId:context.navigation?client.id:''},{waitHandled:true})).then(value=>{job=value;if(aborted)stop(signal.reason);return value;});
       job=await race(starting);
       const result=await race(job.result);
       if(result.type==='fallback'){
@@ -50,18 +50,20 @@ export class ServiceWorkerFetch{
       },{highWaterMark:0}):null;
       if(result.body&&!hasBody)await job.cancel();
       const response=new Response(body,{status:metadata.status||200,statusText:metadata.statusText,headers:responseHeaders});
-      for(const [key,value] of Object.entries({url:metadata.url||url.href,type:metadata.type||'default',redirected:!!metadata.redirected,...(metadata.status===0?{status:0,ok:false}:{})}))Object.defineProperty(response,key,{value,configurable:true});
-      remember_response(response,{...metadata,url:metadata.url||url.href});
+      const responseURL=context.navigation?url.href:metadata.url||url.href;
+      for(const [key,value] of Object.entries({url:responseURL,type:metadata.type||'default',redirected:!!metadata.redirected,...(metadata.status===0?{status:0,ok:false}:{})}))Object.defineProperty(response,key,{value,configurable:true});
+      remember_response(response,{...metadata,url:responseURL});
       await job.handled();if(!hasBody)cleanup();
       const location=responseHeaders.get('location');
       if(location&&[301,302,303,307,308].includes(metadata.status)){
         await response.body?.cancel();cleanup();
         if(request.redirect==='error')throw new TypeError('Redirect disallowed');
-        if(request.redirect==='manual'){
+        if(request.redirect==='manual'&&!context.navigation){
           const manual=Response.error();
           Object.defineProperties(manual,{type:{value:'opaqueredirect'},url:{value:url.href}});
           return remember_response(manual,{type:'opaqueredirect',url:url.href});
         }
+        if(context.navigation)return response;
         if(depth===20)throw new TypeError('Too many redirects');
         const next=new URL(location,url);
         if(!/^https?:$/.test(next.protocol)||next.username||next.password)throw new TypeError('Invalid redirect URL');

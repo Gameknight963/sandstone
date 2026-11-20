@@ -15,6 +15,8 @@ export class ServiceWorkerClients{
     const parent=this.manager.clients.get(frame.parent_context);
     const creationURL=inherited?frame.request_url||parent?.creationURL:frame.url.href;
     if(!creationURL||new URL(creationURL).origin!==origin)return null;
+    const existing=this.manager.clients.get(id);
+    if(existing?.navigation_committed&&existing.frame===frame.id)return existing;
     const client=this.manager.addClient({id,frame:frame.id,url:frame.url.href,creationURL,type:'window'});
     const current=()=>this.frames()[frame.id]===frame&&frame.document_context===id&&this.manager.clients.get(id)===client&&!signal?.aborted;
     const retire=()=>{if(this.manager.clients.get(id)===client)this.manager.removeClient(id);};

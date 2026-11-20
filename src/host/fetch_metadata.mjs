@@ -18,11 +18,11 @@ export function metadata_site(site,source,target,opaque=false){
   return site==='same-site'||source.origin!==target.origin?'same-site':'same-origin';
 }
 
-export function set_fetch_metadata(headers,url,{mode='no-cors',destination='',site='cross-site',user=false,nested=false}={}){
+export function set_fetch_metadata(headers,url,{mode='no-cors',destination,site='cross-site',user=false,nested=false}={}){
   for(const name of [...headers.keys()])if(name.startsWith('sec-fetch-'))headers.delete(name);
   if(!metadata_url(url))return;
   mode=modes.has(mode)?mode:'no-cors';
-  destination=mode==='navigate'?(nested?'iframe':'document'):destinations.has(destination)?destination:'empty';
+  destination=mode==='navigate'?(destination===''?'empty':nested?'iframe':'document'):destinations.has(destination)?destination:'empty';
   headers.set('Sec-Fetch-Dest',destination);
   headers.set('Sec-Fetch-Mode',mode);
   headers.set('Sec-Fetch-Site',site);

@@ -109,7 +109,8 @@ export function rewrite_iframe(iframe_element) {
     generation++;active_request?.abort();iframe_url='';active_target=undefined;blank_ready=false;blank_load_pending=true;release_load();
     const closing=generation;
     const release=commit.then(async()=>{
-      if(registered){await unregister(frame_id);registered=false;}
+      if(registered){await unregister(frame_id,{keep_navigation:generation!==closing});registered=false;}
+      else if(generation===closing)await unregister(frame_id);
       if(generation===closing){loader.child_navigators.delete(frame_id);loader.child_names.delete(frame_id);loader.child_urls.delete(frame_id);}
     });
     commit=release.catch(console.error);
@@ -200,12 +201,14 @@ export function rewrite_iframe(iframe_element) {
         sandstone_navigation_source:navigation.source_context,
         sandstone_navigation_activation:!!navigation.activation?.transient,
         sandstone_navigation_target:frame_id,
+        sandstone_navigation_opaque:!!(authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'))||ctx.origin==='null',
         cache:navigation.history_mode === 'reload' ? 'no-cache' : 'default',
         referrerPolicy:navigation.referrerPolicy || iframe_element.referrerPolicy || document_referrer_policy(),
         ...(form_data ? {
         method: "POST", headers: form_data.headers || {"Content-Type": form_data.enctype}, body: form_data.body
       } : {})});
       if(!current())return;
+      if([204,205].includes(response.status)){await response.body?.cancel();iframe_element.setAttribute('__src',previous_url);release_load();return {no_navigation:true};}
       if(is_download(response.headers)){
         try{const filename=await save_response(response);return current()?{download:true,filename}:undefined;}
         catch(error){if(!current())return;console.error(error);return {download:true};}

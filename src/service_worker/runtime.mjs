@@ -1,11 +1,11 @@
 import {create_service_worker_events} from './events.mjs';
 import {create_service_worker_dispatcher} from './dispatcher.mjs';
 import {response_metadata} from '../response_metadata.mjs';
-import {remember_request} from '../request_metadata.mjs';
+import {remember_request,request_metadata} from '../request_metadata.mjs';
 
 // The owner supplies this private transport. Pages never receive the control
 // port: authored postMessage traffic is delivered as ExtendableMessageEvent.
-export function create_service_worker_runtime({profile,target=globalThis,send,scripts=()=>[],Request:RequestClass=globalThis.Request,requestMetadata,responseMetadata=response_metadata}){
+export function create_service_worker_runtime({profile,target=globalThis,send,scripts=()=>[],Request:RequestClass=globalThis.Request,requestMetadata=request_metadata,responseMetadata=response_metadata}){
   const events=create_service_worker_events({requestMetadata,responseMetadata});
   const jobs=new Map(),readers=new Map(),commands=new Map(),queued=[];
   const collect=id=>{const job=jobs.get(id);if(job?.complete&&(!job.fetch||job.handled&&!readers.has(id)))jobs.delete(id);};
@@ -31,9 +31,9 @@ export function create_service_worker_runtime({profile,target=globalThis,send,sc
   async function dispatch(packet){
     let event,controller;
     if(packet.event==='fetch'){
-      const {url,body,destination,virtualReferrer,aborted,...init}=packet.request;
+      const {url,body,destination,virtualReferrer,aborted,context,...init}=packet.request;
       controller=new AbortController();if(aborted)controller.abort();
-      const request=remember_request(new RequestClass(url,{...init,referrer:virtualReferrer||'',signal:controller.signal,...(body===undefined?{}:{body})}),{destination:destination||'',referrer:virtualReferrer||''});
+      const request=remember_request(new RequestClass(url,{...init,mode:init.mode==='navigate'?'same-origin':init.mode,referrer:virtualReferrer||'',signal:controller.signal,...(body===undefined?{}:{body})}),{context,mode:init.mode,redirect:init.redirect,destination:destination||'',referrer:virtualReferrer||''});
       event=new events.FetchEvent('fetch',{request,clientId:packet.clientId||'',resultingClientId:packet.resultingClientId||'',cancelable:true});
     }else if(packet.event==='message'||packet.event==='messageerror'){
       event=new events.ExtendableMessageEvent(packet.event,{data:packet.data,origin:packet.origin,ports:packet.ports||[]});

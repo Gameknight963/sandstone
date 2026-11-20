@@ -20,9 +20,15 @@ export {http_cache} from './http_cache.mjs';
 export {broadcast_channels};
 
 export const ws_connections = {};
-let service_worker_fetch,service_worker_disconnect,service_worker_bind;
-export function set_service_worker_fetch(fetch,disconnect,bind){service_worker_fetch=fetch;service_worker_disconnect=disconnect;service_worker_bind=bind;}
+let service_worker_fetch,service_worker_disconnect,service_worker_bind,service_worker_navigation={};
+let service_worker_request_context;
+export function set_service_worker_request_context(callback){service_worker_request_context=callback;}
+export function set_service_worker_fetch(fetch,disconnect,bind,navigation={}){service_worker_fetch=fetch;service_worker_disconnect=disconnect;service_worker_bind=bind;service_worker_navigation=navigation;}
 export function bind_service_worker_client(frame,signal){return service_worker_bind?.(frame,signal);}
+export function navigation_client(response){return service_worker_navigation.response?.(response);}
+export function commit_navigation_client(frame,lease){return service_worker_navigation.commit?.(frame,lease);}
+export function cancel_navigation_client(target,owner,document){return service_worker_navigation.cancel?.(target,owner,document);}
+export function reserved_navigation_client(id){return service_worker_navigation.reserved?.(id);}
 export let session = null;
 export const navigation_metadata=new NavigationMetadata(parent=>iframes[parent]?.document_context);
 const context_cookies=(url,context)=>site_data.documentCookies(url,{crossSite:!!context?.cross_site});
@@ -38,7 +44,7 @@ rpc_handlers.fetch_keepalive_abort = (...args) => keepalives.abort(...args);
 rpc_handlers.fetch_keepalive_done = (...args) => keepalives.completed(...args);
 
 export async function fetch(url, options, context) {
-  const transport=(url,options,context)=>fetch_with_cookies((url,init)=>http_cache.fetch((url,init)=>session.fetch(url,init),url,init,context),site_data,url,options,context);
+  const transport=(url,options,context,worker)=>fetch_with_cookies((url,init)=>http_cache.fetch((url,init)=>session.fetch(url,init),url,init,context),site_data,url,options,context,worker);
   return service_worker_fetch?service_worker_fetch(url,options,context,transport):transport(url,options,context);
 }
 
@@ -73,16 +79,23 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
     user_activation:!!options?.sandstone_navigation_activation,nested:true,cross_site:frame_cross_site(frame,iframes),frame_id:frame.id,service_worker_client:frame.document_context
   };
   const key = request_key(frame_id, request_id);
+  if(options?.sandstone_request_context){
+    if(!service_worker_request_context)throw new DOMException('Unknown service worker request context','SecurityError');
+    const snapshot=service_worker_request_context(frame_id,options.sandstone_request_context,url);
+    Object.assign(source_context,snapshot,{navigation:snapshot.navigation&&options.mode==='navigate',frame_id:frame.id,service_worker_client:frame.document_context});
+    if(options.referrer==='about:client')source_context.referrer_url=frame.referrer_url??frame.request_url??frame.url.href;
+  }
   const metadataTarget=options?.sandstone_navigation_target,metadataFrame=iframes[metadataTarget];
   const metadataParent=metadataFrame
     ?(!metadataFrame.worker&&(metadataFrame.id===frame_id||metadataFrame.parent_id===frame_id)?metadataFrame.parent_id:undefined)
     :frame_id;
   const metadataScope=source_context.navigation&&metadataTarget&&metadataParent?navigation_metadata.capture(metadataParent,metadataTarget):undefined;
+  if(metadataScope)Object.assign(source_context,{navigation_target:metadataTarget,navigation_owner:metadataParent,navigation_previous:metadataFrame?.document_context||frame.document_context,navigation_opaque:!!options?.sandstone_navigation_opaque});
   const request = {frame_id, controller: new AbortController(), reader: null};
   requests.set(key, request);
   let response;
   try {
-    const {sandstone_navigation_activation,sandstone_navigation_target,...request_options}=options||{};
+    const {sandstone_navigation_activation,sandstone_navigation_target,sandstone_navigation_opaque,sandstone_request_context,...request_options}=options||{};
     response = await fetch(url, {...request_options, signal: request.controller.signal},source_context);
     request.reader = response.body?.getReader();
   } catch (error) {
@@ -93,7 +106,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
   var payload = {
     request_referrer: response.request_referrer,
     request_cross_origin:response.request_cross_origin,
-    navigation_metadata:navigation_metadata.issue(metadataScope,response.url,response.request_metadata),
+    navigation_metadata:navigation_metadata.issue(metadataScope,response.url,response.request_metadata,navigation_client(response)),
     has_body: !!request.reader,
     headers: [],
     items: {},
@@ -204,8 +217,8 @@ rpc_handlers["ws_close"] = function (frame_id, ws_id) {
 }
 
 //when navigating to a new page we need to close unused connections
-export function clean_ws_connections(id_to_clean) {
-  service_worker_disconnect?.(id_to_clean);
+export function clean_ws_connections(id_to_clean,options={}) {
+  service_worker_disconnect?.(id_to_clean,options);
   cache_storage.disconnect(id_to_clean);
   disconnect_storage(id_to_clean);
   broadcast_channels.disconnect(id_to_clean);

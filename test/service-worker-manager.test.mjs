@@ -169,8 +169,10 @@ test('Client claims honor the longest registration scope and the original creati
     const root=await api.register();await api.manager.settled(root);
     const nested=await api.manager.register(origin+'/worker.js',{scope:origin+'/nested/'},context);await api.manager.settled(nested);
     const inside=api.manager.addClient({id:'nested',url:origin+'/nested/page'}),outside=api.manager.addClient({id:'root',url:origin+'/elsewhere'}),foreign=api.manager.addClient({id:'foreign',url:'https://other.test/'});
+    const reserved=api.manager.addClient({id:'incoming',url:origin+'/incoming',reserved:true});
     inside.url=origin+'/moved-by-history';
-    await api.manager.claim(root,root.active);assert.equal(outside.controller,root.active);assert.equal(inside.controller,null);assert.equal(foreign.controller,null);
+    await api.manager.claim(root,root.active);assert.equal(outside.controller,root.active);assert.equal(inside.controller,null);assert.equal(foreign.controller,null);assert.equal(reserved.controller,null);
+    reserved.reserved=false;await api.manager.claim(root,root.active);assert.equal(reserved.controller,root.active);
     await api.manager.claim(nested,nested.active);assert.equal(inside.controller,nested.active);
   }finally{api.close();}
 });
