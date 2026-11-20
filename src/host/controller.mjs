@@ -224,6 +224,8 @@ export class ProxyFrame {
     const beacon_context = network.beacons.register(this.id, {url: this.url.href, top_url: this.url.href,broadcast_origin:this.broadcast_origin,root_id:this.id});
     this.document_context=beacon_context;
     this.rpc_policy.bind_root(msg_channel.port1,beacon_context);
+    await network.bind_service_worker_client(this,runtime_wait.signal);
+    if(navigation_id!==this.navigation_id)return;
 
     try {
       await this.send_page({
@@ -322,7 +324,7 @@ rpc.rpc_handlers.window_name=(id,token,value)=>{
   if(port)rpc.notify(port,'child_window_name',[id,value]);
 };
 
-rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) => {
+rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = {}) => {
   const parent = iframes[parent_id];
   if (!parent || iframes[child_id]) throw new TypeError("Invalid child frame");
   if(options.beacon_context!==undefined&&(typeof options.beacon_context!=='string'||!/^[a-f0-9]{32}$/.test(options.beacon_context)||network.beacons.contexts.has(options.beacon_context)))throw new TypeError('Invalid document context');
@@ -374,6 +376,8 @@ rpc.rpc_handlers["frame_register"] = (parent_id, child_id, url, options = {}) =>
     request_metadata:network.navigation_metadata.claim(options.request_metadata_token,parent_id,child_id,url)});
   child.document_context=network.beacons.register(child_id, {url:child.request_url||(child.url.origin === 'null' && child.origin && child.origin !== 'null' ? child.origin+'/' : child.url.href),cookie_url:child.cookie_url,referrer_url:child.referrer_url,top_url:root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id},options.beacon_context);
   root.rpc_policy.document(child_id,child.document_context,parent.document_context);
+  await network.bind_service_worker_client(child);
+  if(iframes[child_id]!==child||iframes[parent_id]!==parent||parent.document_context!==child.parent_context)throw new DOMException('Frame was superseded','AbortError');
   return {
     window_name:child.window_name,
     beacon_context: child.document_context,

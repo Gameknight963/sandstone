@@ -20,8 +20,9 @@ export {http_cache} from './http_cache.mjs';
 export {broadcast_channels};
 
 export const ws_connections = {};
-let service_worker_fetch,service_worker_disconnect;
-export function set_service_worker_fetch(fetch,disconnect){service_worker_fetch=fetch;service_worker_disconnect=disconnect;}
+let service_worker_fetch,service_worker_disconnect,service_worker_bind;
+export function set_service_worker_fetch(fetch,disconnect,bind){service_worker_fetch=fetch;service_worker_disconnect=disconnect;service_worker_bind=bind;}
+export function bind_service_worker_client(frame,signal){return service_worker_bind?.(frame,signal);}
 export let session = null;
 export const navigation_metadata=new NavigationMetadata(parent=>iframes[parent]?.document_context);
 const context_cookies=(url,context)=>site_data.documentCookies(url,{crossSite:!!context?.cross_site});

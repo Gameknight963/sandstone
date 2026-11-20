@@ -12,7 +12,7 @@ const stored=worker=>worker?Object.fromEntries(['id','scriptURL','type','source'
 export class ServiceWorkerManager{
   constructor({storage,fetch,createWorker,notify=()=>{},id=create_bootstrap_nonce}){
     Object.assign(this,{storage,fetch,createWorker,notify,id});
-    this.records=new Map();this.retired=new Set();this.tails=new Map();this.epochs=new Map();this.clients=new Map();
+    this.records=new Map();this.loading=new Map();this.retired=new Set();this.tails=new Map();this.epochs=new Map();this.clients=new Map();
   }
   epoch(origin){return this.epochs.get(new URL(origin).hostname)||0;}
   valid(record){if(record.revoked||record.epoch!==this.epoch(record.origin))throw abort();record.abort.signal.throwIfAborted();}
@@ -20,12 +20,18 @@ export class ServiceWorkerManager{
   async load(origin,scope){
     scope=canonical(scope);
     const identity=key(origin,scope),cached=this.records.get(identity);if(cached)return cached;
-    const epoch=this.epoch(origin),ticket=await this.storage.begin(origin),saved=await this.storage.read(origin,scope);
-    if(epoch!==this.epoch(origin))throw abort();
-    const value=saved.state,record={origin,scope,updateViaCache:value?.updateViaCache||'imports',ticket,revision:saved.revision,
-      active:value?.active?this.version(value.active,'activated'):null,waiting:value?.waiting?this.version(value.waiting,'installed'):null,
-      installing:null,epoch,abort:new AbortController(),revoked:false,unregistered:false};
-    this.records.set(identity,record);return record;
+    const epoch=this.epoch(origin),previous=this.loading.get(identity);if(previous?.epoch===epoch)return previous.promise;
+    const pending={epoch};
+    pending.promise=(async()=>{
+      const ticket=await this.storage.begin(origin),saved=await this.storage.read(origin,scope);
+      if(epoch!==this.epoch(origin))throw abort();
+      const value=saved.state,record={origin,scope,updateViaCache:value?.updateViaCache||'imports',ticket,revision:saved.revision,
+        active:value?.active?this.version(value.active,'activated'):null,waiting:value?.waiting?this.version(value.waiting,'installed'):null,
+        installing:null,epoch,abort:new AbortController(),revoked:false,unregistered:false};
+      this.records.set(identity,record);return record;
+    })();
+    this.loading.set(identity,pending);
+    try{return await pending.promise;}finally{if(this.loading.get(identity)===pending)this.loading.delete(identity);}
   }
   enqueue(origin,scope,action){
     const identity=key(origin,scope),previous=this.tails.get(identity)||Promise.resolve();

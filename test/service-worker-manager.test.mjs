@@ -35,6 +35,24 @@ test('Registration resolves while install work is pending, then persists and act
     assert.equal(api.requests[0].options.headers['Service-Worker'],'script');
   }finally{api.close();}
 });
+
+test('Concurrent document lookups share one registration object and one storage read',async()=>{
+  const api=environment();let reads=0;const read=api.storage.read.bind(api.storage);api.storage.read=(...args)=>{reads++;return read(...args);};
+  try{
+    const records=await Promise.all(Array.from({length:20},()=>api.manager.load(origin,scope)));
+    assert.equal(reads,1);assert.ok(records.every(record=>record===records[0]));assert.equal(api.manager.records.size,1);
+  }finally{api.close();}
+});
+
+test('A cleared generation cannot hold up or overwrite a fresh registration lookup',async()=>{
+  const api=environment(),pending=gate(),begin=api.storage.begin.bind(api.storage);let calls=0;
+  api.storage.begin=async(...args)=>{if(++calls===1)await pending.promise;return begin(...args);};
+  try{
+    const old=assert.rejects(api.manager.load(origin,scope),{name:'AbortError'});api.manager.revoke('lifecycle.test');
+    const fresh=await api.manager.load(origin,scope);pending.resolve();await old;
+    assert.equal(calls,2);assert.equal(await api.manager.load(origin,scope),fresh);
+  }finally{pending.resolve();api.close();}
+});
 test('A rejected install preserves the old active worker and controller',async()=>{
   const api=environment();
   try{

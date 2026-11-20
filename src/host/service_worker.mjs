@@ -7,6 +7,7 @@ import {ServiceWorkerStorage} from '../service_worker/storage.mjs';
 import {site_data} from './site_data.mjs';
 import {ServiceWorkerManager} from '../service_worker/manager.mjs';
 import {ServiceWorkerFetch} from '../service_worker/fetch.mjs';
+import {ServiceWorkerClients} from '../service_worker/clients.mjs';
 
 let factory;try{factory=globalThis.indexedDB;}catch{}
 export const registrations=new ServiceWorkerStorage(factory,{onCatalog:catalog=>site_data.serviceWorkers=catalog});
@@ -18,9 +19,8 @@ export const fetch_router=new ServiceWorkerFetch({manager,client:context=>{
   const client=manager.clients.get(context.service_worker_client);
   return client?.frame===frame.id?client:null;
 }});
-network.set_service_worker_fetch((...args)=>fetch_router.fetch(...args),frame=>{
-  for(const client of manager.clients.values())if(client.frame===frame)manager.removeClient(client.id);
-});
+export const clients=new ServiceWorkerClients({manager,frames:()=>iframes});
+network.set_service_worker_fetch((...args)=>fetch_router.fetch(...args),frame=>clients.disconnect(frame),(frame,signal)=>clients.bind(frame,signal));
 export async function clear_registrations(hostname){
   manager.revoke(hostname);
   for(const owner of [...owners.values()])if(new URL(owner.profile.origin).hostname===hostname)owner.close();

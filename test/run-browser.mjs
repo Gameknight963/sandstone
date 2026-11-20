@@ -25,6 +25,7 @@ import {verifyServiceWorkerScripts} from './service-worker-scripts.playwright.mj
 import {verifyServiceWorkerManager} from './service-worker-manager.playwright.mjs';
 import {verifyServiceWorkerFetch} from './service-worker-fetch.playwright.mjs';
 import {verifyServiceWorkerRedirects} from './service-worker-redirect.playwright.mjs';
+import {verifyServiceWorkerClients} from './service-worker-clients.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -373,6 +374,7 @@ try {
     result.passed.push(...await timed(verifyServiceWorkerManager(page,{storageDenied}), 'Service worker lifecycle fixture'));
     result.passed.push(...await timed(verifyServiceWorkerFetch(page), 'Service worker fetch fixture'));
     result.passed.push(...await timed(verifyServiceWorkerRedirects(page), 'Service worker redirect fixture'));
+    result.passed.push(...await timed(verifyServiceWorkerClients(page), 'Service worker client fixture'));
     result.passed.push(...await timed(verifyWorkerCycles(page), 'Cyclic worker module fixture'));
     result.passed.push(...await timed(verifyWorkerNames(page), 'Worker function name fixture'));
     result.passed.push(...await timed(verifyWorkerScopes(page), 'Worker script scope fixture'));
