@@ -26,6 +26,7 @@ export class SiteDataStore {
     this.cookies = new CookieJar();
     this.indexed = [];
     this.cacheStorage=[];
+    this.serviceWorkers=[];
     this.persistent = false;
     this.localListeners=new Set();
     this.cookieListeners=new Set();this.cookieSnapshots=new Map();
@@ -125,6 +126,12 @@ export class SiteDataStore {
       if(!sites.has(hostname))sites.set(hostname,{hostname,origins:[],cookies:0,localStorage:0,indexedDB:0});
       const site=sites.get(hostname);if(!site.origins.includes(cache.origin))site.origins.push(cache.origin);
       site.cacheStorage=(site.cacheStorage||0)+1;
+    }
+    for(const worker of this.serviceWorkers){
+      const hostname=new URL(worker.origin).hostname;
+      if(!sites.has(hostname))sites.set(hostname,{hostname,origins:[],cookies:0,localStorage:0,indexedDB:0});
+      const site=sites.get(hostname);if(!site.origins.includes(worker.origin))site.origins.push(worker.origin);
+      site.serviceWorkers=(site.serviceWorkers||0)+1;
     }
     return [...sites.values()].sort((a, b) => a.hostname.localeCompare(b.hostname));
   }

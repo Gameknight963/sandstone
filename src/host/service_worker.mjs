@@ -3,6 +3,15 @@ import * as rpc from '../rpc.mjs';
 import * as network from './network.mjs';
 import {indexed_db} from './indexeddb.mjs';
 import {normalize_registration} from '../service_worker/registration.mjs';
+import {ServiceWorkerStorage} from '../service_worker/storage.mjs';
+import {site_data} from './site_data.mjs';
+
+let factory;try{factory=globalThis.indexedDB;}catch{}
+export const registrations=new ServiceWorkerStorage(factory,{onCatalog:catalog=>site_data.serviceWorkers=catalog});
+export async function clear_registrations(hostname){
+  for(const owner of [...owners.values()])if(new URL(owner.profile.origin).hostname===hostname)owner.close();
+  await registrations.clear(hostname);
+}
 
 const owners=new Map();
 rpc.rpc_handlers.service_worker_command=(id,method,args)=>{
