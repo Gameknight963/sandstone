@@ -18,6 +18,7 @@ import {create_service_worker_runtime,install_service_worker_globals} from '../.
 import {bind_native_property} from '../global_functions.mjs';
 import {ServiceWorkerScripts} from '../../service_worker/scripts.mjs';
 import {encode_message} from './crypto.mjs';
+import {configure_filesystem_sync} from './filesystem.mjs';
 import {configure_service_worker_scripts,service_worker_script_snapshot,remember_service_worker_script} from '../service_worker_scripts.mjs';
 
 const NativeWorker = globalThis.Worker;
@@ -155,6 +156,15 @@ export function initialize_worker(options) {
   options.source??=options.sources?.[options.url];
   worker_options = options;
   loader.set_worker_context(options);
+  if(options.sync_http&&!options.service_worker&&!options.probe&&NativeSharedBuffer){
+    configure_filesystem_sync(command=>{
+      const response=sync_worker_request('sandstone-filesystem:command',{filesystem:command},0);
+      const result=JSON.parse(decodeURIComponent(new Headers(response.headers).get('x-sandstone-file-result')));
+      if(result.error)throw new DOMException(result.error.message,result.error.name);
+      return {...result,bytes:response.bytes};
+    });
+    if(!ctx_vars.includes('FileSystemSyncAccessHandle'))ctx_vars.push('FileSystemSyncAccessHandle');
+  }
   update_ctx();
   if(options.service_worker)configure_service_worker_scripts(options.service_worker);
   const service=options.service_worker&&create_service_worker_runtime({profile:options.service_worker,target:ctx.self,Request:ctx.Request,encode:encode_message,scripts:service_worker_script_snapshot,send:(packet,ports)=>native_post({sandstone_service_worker:options.token,...packet},ports)});
@@ -378,6 +388,12 @@ export class FakeWorker extends EventTarget {
     // origins, where native module-worker construction rejects parent blobs.
     this.#worker = new NativeWorker(this.#bootstrap, {...this.#options, type: "classic"});
     if(NativeSharedBuffer&&native_isolated)this.#syncServer=create_sync_http_server({SharedBuffer:NativeSharedBuffer,fetch:async(url,options,signal)=>{
+      if(url==='sandstone-filesystem:command'){
+        let result,bytes;
+        try{const value=await rpc.call_procedure(rpc.host,'filesystem_worker_command',[loader.frame_id,this.#id,options.filesystem]);if(value?.bytes instanceof Uint8Array){bytes=value.bytes;result={};}else result={value};}
+        catch(error){result={error:{name:error.name,message:error.message}};}
+        return new Response(bytes,{headers:{'x-sandstone-file-result':encodeURIComponent(JSON.stringify(result))}});
+      }
       if(options.script===true)return network.fetch(url,{signal,sandstone_worker_script:this.#id,referrerPolicy:this.#referrerPolicy});
       const request=await serialize_request(url,{method:options.method,headers:options.headers,body:restore_sync_body(options.body),credentials:options.credentials,signal},this.#url);
       signal.throwIfAborted();return network.fetch(request.url,{...request.options,signal,sandstone_worker_request:this.#id,referrerPolicy:this.#referrerPolicy});

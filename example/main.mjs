@@ -19,6 +19,7 @@ const theme_select = from_id("theme_select");
 const site_data = sandstone.controller.site_data;
 const indexed_db = sandstone.controller.indexed_db;
 const cache_storage=sandstone.controller.cache_storage;
+const file_system=sandstone.controller.file_system;
 const service_workers=sandstone.service_workers;
 let favicon_blob_url;
 let data_render_id = 0;
@@ -39,7 +40,7 @@ function set_ui_hidden(hidden) {
 
 async function render_site_data() {
   const render_id = ++data_render_id;
-  await Promise.all([indexed_db.catalog(),cache_storage.catalog(),service_workers.registrations.catalog()]);
+  await Promise.all([indexed_db.catalog(),cache_storage.catalog(),service_workers.registrations.catalog(),file_system.storage.catalog()]);
   if (render_id !== data_render_id) return;
   const list = from_id("site_data_list");
   list.replaceChildren();
@@ -48,6 +49,7 @@ async function render_site_data() {
     (indexed_db.persistent ? "Databases are saved in this browser. " : "Databases last until this file is closed. ") +
     (cache_storage.persistent ? 'Caches are saved in this browser. ' : 'Caches last until this file is closed. ') +
     (service_workers.registrations.persistent ? 'Service workers are saved in this browser. ' : 'Service workers last until this file is closed. ') +
+    (file_system.storage.persistent ? 'Files are saved in this browser. ' : 'Files last until this file is closed. ') +
     "Session cookies expire when this file is closed.";
   const sites = site_data.list();
   if (!sites.length) list.textContent = "No stored site data.";
@@ -55,7 +57,7 @@ async function render_site_data() {
     const row = document.createElement("div");
     row.className = "site_data_row";
     const label = document.createElement("span");
-    label.textContent = `${site.hostname}: ${site.cookies} cookies, ${site.localStorage} local storage entries, ${site.indexedDB} databases, ${site.cacheStorage||0} caches, ${site.serviceWorkers||0} service workers`;
+    label.textContent = `${site.hostname}: ${site.cookies} cookies, ${site.localStorage} local storage entries, ${site.indexedDB} databases, ${site.cacheStorage||0} caches, ${site.serviceWorkers||0} service workers, ${site.files||0} files`;
     row.append(label);
     for (const [text, selection] of [
       ["Clear cookies", {cookies: true, localStorage: false, indexedDB: false}],
@@ -63,7 +65,8 @@ async function render_site_data() {
       ["Clear IndexedDB", {cookies: false, localStorage: false, indexedDB: true}],
       ['Clear caches',{cookies:false,localStorage:false,indexedDB:false,cacheStorage:true}],
       ['Clear service workers',{cookies:false,localStorage:false,indexedDB:false,serviceWorkers:true}],
-      ["Clear all", {cookies: true, localStorage: true, indexedDB: true,cacheStorage:true,serviceWorkers:true}]
+      ['Clear files',{cookies:false,localStorage:false,indexedDB:false,fileSystems:true}],
+      ["Clear all", {cookies: true, localStorage: true, indexedDB: true,cacheStorage:true,serviceWorkers:true,fileSystems:true}]
     ]) {
       const button = document.createElement("button");
       button.textContent = text;
@@ -75,6 +78,7 @@ async function render_site_data() {
         if(selection.serviceWorkers)await service_workers.clear_registrations(site.hostname);
         if (selection.indexedDB) await indexed_db.clear(site.hostname);
         if(selection.cacheStorage)await cache_storage.clear(site.hostname);
+        if(selection.fileSystems)await file_system.clear(site.hostname);
         site_data.clear(site.hostname, selection);
         await render_site_data();
         if (affects_current) await main_frame.navigate_to(current.href, null, {history_mode: "reload"});

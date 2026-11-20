@@ -18,6 +18,7 @@ import {decode_document_response} from '../text_encoding.mjs';
 export { site_data } from "./site_data.mjs";
 export { indexed_db } from "./indexeddb.mjs";
 export {cache_storage} from './cache.mjs';
+export {file_system} from './filesystem.mjs';
 
 import { version } from "./index.mjs";
 

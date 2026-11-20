@@ -15,6 +15,7 @@ import {navigation_activation} from './user_activation.mjs';
 import {configure_document_encoding} from './document_encoding.mjs';
 import {configure_service_workers} from './polyfill/service_worker.mjs';
 import {configure_autofocus} from './autofocus.mjs';
+import {configure_filesystem} from './polyfill/filesystem.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -130,6 +131,7 @@ export function set_worker_context(options) {
   worker_origin = options.origin;
   worker_probe = !!options.probe;
   service_worker = !!options.service_worker;
+  configure_filesystem();
   runtime_src = options.runtime_src;
   is_loaded = true;
 }
@@ -168,6 +170,7 @@ function prepare_html(options) {
   if(options.window_name!==undefined)globalThis.name=options.window_name;
   get_frame_html();
   const ready=update_ctx(options);
+  configure_filesystem();
   configure_document_encoding(document,ctx.document,character_encoding);
   configure_window_messages(options);
   return Promise.all([ready,configure_cookies(options.cookies,ctx.document),configure_service_workers(options)]).then(result=>{configure_autofocus();return result;});

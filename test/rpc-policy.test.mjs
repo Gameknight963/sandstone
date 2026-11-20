@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {RPCSourcePolicy} from '../src/host/rpc_policy.mjs';
 
+test('Filesystem commands cannot borrow another document or worker capability',()=>{
+  const {call,child,policy,port,frames}=fixture(),nested={};policy.attach(port,nested,'child');child('child');
+  assert.deepEqual(call('filesystem_command',['root-document',{op:'root'}]),['root-document',{op:'root'}]);
+  assert.throws(()=>call('filesystem_command',['child-document',{op:'root'}]),{name:'SecurityError'});
+  assert.throws(()=>call('filesystem_command',['root-document',{op:'root'}],nested),{name:'SecurityError'});
+  assert.throws(()=>call('filesystem_worker_command',['root','child',{op:'syncSize'}]),{name:'SecurityError'});
+  frames.child.worker=true;
+  assert.deepEqual(call('filesystem_worker_command',['root','child',{op:'syncSize'}]),['root','child',{op:'syncSize'}]);
+  assert.throws(()=>call('filesystem_worker_command',['root','child',{op:'syncSize'}],nested),{name:'SecurityError'});
+});
+
 function fixture(){
   const frames={root:{id:'root',root_id:'root',document_context:'root-document'}},contexts=new Map([['root-document',{frame:'root'}]]);
   const policy=new RPCSourcePolicy({root:'root',frames:()=>frames,contexts:()=>contexts}),port={};

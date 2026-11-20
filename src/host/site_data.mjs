@@ -27,6 +27,7 @@ export class SiteDataStore {
     this.indexed = [];
     this.cacheStorage=[];
     this.serviceWorkers=[];
+    this.fileSystems=[];
     this.persistent = false;
     this.localListeners=new Set();
     this.cookieListeners=new Set();this.cookieSnapshots=new Map();
@@ -132,6 +133,12 @@ export class SiteDataStore {
       if(!sites.has(hostname))sites.set(hostname,{hostname,origins:[],cookies:0,localStorage:0,indexedDB:0});
       const site=sites.get(hostname);if(!site.origins.includes(worker.origin))site.origins.push(worker.origin);
       site.serviceWorkers=(site.serviceWorkers||0)+1;
+    }
+    for(const files of this.fileSystems){
+      const hostname=new URL(files.origin).hostname;
+      if(!sites.has(hostname))sites.set(hostname,{hostname,origins:[],cookies:0,localStorage:0,indexedDB:0});
+      const site=sites.get(hostname);if(!site.origins.includes(files.origin))site.origins.push(files.origin);
+      site.files=(site.files||0)+files.files;
     }
     return [...sites.values()].sort((a, b) => a.hostname.localeCompare(b.hostname));
   }

@@ -1,5 +1,5 @@
 const self_calls=new Set(['navigate','navigate_target','history_mutate','history_go','window_name','storage_ready','cookies_ready','document_open','idb_command','idb_poll','idb_databases','cache_command','crypto','ws_new','ws_event','ws_send','ws_close','service_worker_open','service_worker_client','worker_entry_cancel']);
-const context_calls=new Set(['beacon','fetch_keepalive','fetch_keepalive_read','fetch_keepalive_abort','fetch_keepalive_done','download_request','download_blob','broadcast_open','broadcast_command','lock_open','lock_query']);
+const context_calls=new Set(['beacon','fetch_keepalive','fetch_keepalive_read','fetch_keepalive_abort','fetch_keepalive_done','download_request','download_blob','broadcast_open','broadcast_command','lock_open','lock_query','filesystem_command']);
 const denied=()=>{throw new DOMException('RPC source is not authorized','SecurityError');};
 
 // Source identity belongs to the receiving MessagePort, not a frame ID supplied
@@ -59,7 +59,7 @@ export class RPCSourcePolicy {
     if(procedure==='service_worker_command'){
       if(args[0]!==scope.id||!this.frames()[scope.id]?.service_worker_host)denied();return args;
     }
-    if(procedure==='fetch_worker_script'||procedure==='fetch_worker_request'){
+    if(procedure==='fetch_worker_script'||procedure==='fetch_worker_request'||procedure==='filesystem_worker_command'){
       if(args[0]!==scope.id||!this.owns(scope,args[1])||!this.frames()[args[1]]?.worker)denied();return args;
     }
     if(procedure==='frame_register'){

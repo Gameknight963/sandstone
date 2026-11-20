@@ -28,6 +28,7 @@
     "html-encoding-sniffer": "7.0.0",
     "libcurl.js": "file:vendor/libcurl/libcurl.js-0.7.5-sandstone.1.tgz",
     "meriyah": "^6.0.3",
+    "mime-db": "1.52.0",
     "parse5": "8.1.1",
     "tough-cookie": "^6.1.0",
     "whatwg-mimetype": "5.0.0"

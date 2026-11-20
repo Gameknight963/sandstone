@@ -37,6 +37,8 @@ import {verifyWorkerLoaders} from './worker-loaders.playwright.mjs';
 import {verifyPromiseWorkerLoaders,verifyAMDServiceWorkerScripts} from './worker-promise-loaders.playwright.mjs';
 import {verifyWorkerImportAliases} from './worker-import-aliases.playwright.mjs';
 import {verifySyncXHR} from './sync-xhr.playwright.mjs';
+import {verifyFilesystem} from './filesystem.playwright.mjs';
+import {verifySynchronousFiles} from './filesystem-sync.playwright.mjs';
 import {verifyWorkerRuntimeImports} from './worker-runtime-imports.playwright.mjs';
 import {verifyIsolatedWorkerLoaders} from './worker-isolated-loaders.playwright.mjs';
 import {verifyLinkPreloads} from './link-preloads.playwright.mjs';
@@ -379,6 +381,7 @@ try {
     finally{expectedDiagnostics.clear();}
     for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyScriptBodies(page,{batch,batches:3}), 'Script body fixture '+(batch+1)));
     result.passed.push(...await timed(verifyCacheStorage(page), 'CacheStorage fixture'));
+    result.passed.push(...await timed(verifyFilesystem(page,{storageDenied}), 'Origin-private filesystem fixture'));
     try{result.passed.push(...await timed(verifyScriptErrors(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Script failure fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyWorkers(page), "Worker fixture"));
@@ -399,6 +402,7 @@ try {
     result.passed.push(...await timed(verifyWorkerImportAliases(page), 'Aliased worker imports fixture'));
     result.passed.push(...await timed(verifyAMDServiceWorkerScripts(page), 'AMD service worker scripts fixture'));
     result.passed.push(...await timed(verifySyncXHR(page), 'Synchronous worker XHR fixture'));
+    result.passed.push(...await timed(verifySynchronousFiles(page), 'Synchronous worker filesystem fixture'));
     result.passed.push(...await timed(verifyWorkerRuntimeImports(page), 'Runtime worker imports fixture'));
     result.passed.push(...await timed(verifyIsolatedWorkerLoaders(page), 'Isolated worker loaders fixture'));
     result.passed.push(...await timed(verifyWorkerCycles(page), 'Cyclic worker module fixture'));
