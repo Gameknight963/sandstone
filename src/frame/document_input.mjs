@@ -118,7 +118,10 @@ export async function load_document_html(source,{scriptingEnabled=true}={}){
 export async function load_document_xml(source,{scriptingEnabled=true}={}){
   // Parse without connecting nodes. Every resource must be rewritten before
   // adoption into the live XML document, where native loading can begin.
-  const parsed=new DOMParser().parseFromString(source,type.call(document));
+  const mime=type.call(document);
+  // DOMParser's enum omits feed types even though native navigation supports
+  // them. Parse their tree as generic XML; the live document retains its MIME.
+  const parsed=new DOMParser().parseFromString(source,mime==='application/rss+xml'||mime==='application/atom+xml'?'application/xml':mime);
   session?.controller.abort(new DOMException('The document was replaced','AbortError'));
   const current={controller:new AbortController(),source:true,xml:true,phase:'loading',async:[],deferred:[],finished:null};session=current;
   loader.set_ready_state('loading');

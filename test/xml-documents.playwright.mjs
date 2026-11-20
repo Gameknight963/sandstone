@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-const types=['image/svg+xml','application/xhtml+xml','application/xml','text/xml'];
+const types=['image/svg+xml','application/xhtml+xml','application/xml','text/xml','application/rss+xml','application/atom+xml'];
 export async function verifyXMLDocuments(page){
   const fixture=await page.context().newPage(),native=await page.context().newPage();
   const direct=[],errors=[];
@@ -56,8 +56,23 @@ export async function verifyXMLDocuments(page){
       assert.deepEqual(actual,expected,mime+' scripts, modules, styles and fetch');
       await native.unrouteAll();
     }
+    for(const mime of ['application/rss+xml','application/atom+xml']){
+      const source='<?xml-stylesheet type="text/css" href="/feed.css"?>'+(mime==='application/rss+xml'?'<rss version="2.0"><channel><title>Feed title</title><item><description><![CDATA[<p>Body & text</p>]]></description></item></channel></rss>':'<feed xmlns="http://www.w3.org/2005/Atom"><title>Feed title</title><entry><content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>Body &amp; text</p></div></content></entry></feed>');
+      const css=':root{color:rgb(21,43,65)}';
+      await native.route('https://feed.test/**',route=>route.fulfill({contentType:route.request().url().endsWith('.css')?'text/css':mime,body:route.request().url().endsWith('.css')?css:source}));
+      await native.goto('https://feed.test/document');
+      await fixture.evaluate(async({source,css,mime})=>{
+        sandstone.network.session.fetch=async input=>{const url=typeof input==='string'?input:input.url;return new Response(url.endsWith('.css')?css:source,{headers:{'content-type':url.endsWith('.css')?'text/css':mime}});};
+        await main_frame.navigate_to('https://feed.test/document');
+      },{source,css,mime});
+      const code='JSON.stringify({type:document.contentType,xml:document instanceof XMLDocument,root:document.documentElement.localName,namespace:document.documentElement.namespaceURI,title:document.getElementsByTagName("title")[0].textContent,description:document.getElementsByTagName("description")[0]?.firstChild.nodeType,color:getComputedStyle(document.documentElement).color,serialized:new XMLSerializer().serializeToString(document.documentElement)})';
+      const expected=JSON.parse(await native.evaluate(code=>eval(code),code)),actual=JSON.parse(await fixture.evaluate(code=>main_frame.eval_js(code),code));
+      assert.equal(expected.root,mime==='application/rss+xml'?'rss':'feed');assert.equal(expected.color,'rgb(21, 43, 65)');
+      assert.deepEqual(actual,expected,mime+' feed namespaces, CDATA and stylesheet rendering');
+      await native.unrouteAll();
+    }
     assert.deepEqual(errors,[],'XML documents raised script errors');
     assert.deepEqual(direct,[],'XML documents made direct HTTP requests');
   }finally{await native.close();await fixture.close();}
-  return ['Native SVG/XHTML/XML document identity, namespaces and parser script visibility','XML document lifecycle and SVG root load handlers match native navigation','SVG/XHTML classic scripts, modules, stylesheets and fetch stay behind the relay'];
+  return ['Native SVG/XHTML/XML document identity, namespaces and parser script visibility','XML document lifecycle and SVG root load handlers match native navigation','SVG/XHTML classic scripts, modules, stylesheets and fetch stay behind the relay','RSS and Atom feeds preserve their XML types, namespaces, CDATA and relayed stylesheets'];
 }

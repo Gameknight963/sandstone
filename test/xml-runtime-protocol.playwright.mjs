@@ -6,7 +6,7 @@ import {bootstrap_html,bootstrap_xml,runtime_seed} from '../src/bootstrap.mjs';
 export async function verifyXMLRuntimeProtocol(page){
   const runtime=await readFile(new URL('../dist/sandstone_frame.js',import.meta.url),'utf8');
   const parentFile=new URL('runtime-parent.html',import.meta.url),parentHTML=await readFile(parentFile,'utf8');
-  for(const parentURL of ['http://xml-protocol.test/parent',parentFile.href])for(const mime of ['text/html','image/svg+xml','application/xhtml+xml','application/xml','text/xml']){
+  for(const parentURL of ['http://xml-protocol.test/parent',parentFile.href])for(const mime of ['text/html','image/svg+xml','application/xhtml+xml','application/xml','text/xml','application/rss+xml','application/atom+xml']){
     const fixture=await page.context().newPage(),errors=[],direct=[];
     fixture.on('pageerror',error=>errors.push(error.message));
     try{

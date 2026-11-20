@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mime_essence} from '../src/mime.mjs';
+import {mime_essence,xml_document_type,xml_document_types} from '../src/mime.mjs';
 import {ModuleLoader} from '../src/frame/modules.mjs';
+
+test('Navigable XML MIME types include feeds without accepting arbitrary +xml types',()=>{
+  assert.ok(Object.isFrozen(xml_document_types));
+  for(const type of xml_document_types)assert.equal(xml_document_type(' '+type.toUpperCase()+'; charset=UTF-8'),type);
+  for(const type of [null,'text/html','application/mathml+xml','image/x-custom+xml','text/x-custom+xml','application/atom+xml-injected'])assert.equal(xml_document_type(type),null);
+});
 
 test('MIME essences use valid tokens, HTTP whitespace and the last valid header value',()=>{
   for(const [value,expected] of [

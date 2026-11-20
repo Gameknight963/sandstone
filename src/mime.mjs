@@ -17,7 +17,10 @@ export function mime_essence(header){
   return result;
 }
 
+// These types navigate as native XML documents in Chromium, including opaque
+// Blob runtimes. Other +xml types can download or render as plain text.
+export const xml_document_types=Object.freeze(['image/svg+xml','application/xhtml+xml','application/xml','text/xml','application/rss+xml','application/atom+xml']);
 export function xml_document_type(header){
   const type=mime_essence(header);
-  return ['image/svg+xml','application/xhtml+xml','application/xml','text/xml'].includes(type)?type:null;
+  return xml_document_types.includes(type)?type:null;
 }

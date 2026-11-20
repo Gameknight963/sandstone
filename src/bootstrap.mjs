@@ -1,6 +1,7 @@
+import {xml_document_types} from './mime.mjs';
 export const bootstrap_attribute='data-sandstone-bootstrap';
 export const bootstrap_global='__sandstone_bootstrap__';
-const runtime_types=Object.freeze(['text/html','image/svg+xml','application/xhtml+xml','application/xml','text/xml']);
+const runtime_types=Object.freeze(['text/html',...xml_document_types]);
 export function runtime_content_type(type='text/html'){
   if(!runtime_types.includes(type))throw new TypeError('Unsupported runtime document type');
   return type;

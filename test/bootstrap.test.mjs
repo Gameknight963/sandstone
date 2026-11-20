@@ -28,7 +28,7 @@ test('Worker bootstrap configuration exists before runtime evaluation',()=>{
 
 test('XML runtime markup retains script text across CDATA terminators and binds its nonce',()=>{
   const source='globalThis.sample="</script>]]>";';
-  for(const type of ['image/svg+xml','application/xhtml+xml','application/xml','text/xml']){
+  for(const type of ['image/svg+xml','application/xhtml+xml','application/xml','text/xml','application/rss+xml','application/atom+xml']){
     const markup=bootstrap_xml(source,type,'xml-secret',2);
     const config=JSON.parse(decodeURIComponent(markup.match(/data-sandstone-bootstrap="([^"]+)"/)[1]));
     assert.deepEqual(config,{nonce:'xml-secret',channels:2});
@@ -38,7 +38,7 @@ test('XML runtime markup retains script text across CDATA terminators and binds 
     assert.equal(text,source);
     assert.ok(markup.includes(type==='image/svg+xml'?'<svg xmlns="http://www.w3.org/2000/svg">':'<html xmlns="http://www.w3.org/1999/xhtml">'));
   }
-  for(const type of ['image/png','application/javascript','text/html;charset=shift_jis'])assert.throws(()=>runtime_content_type(type),TypeError);
+  for(const type of ['image/png','application/javascript','text/html;charset=shift_jis','application/mathml+xml','image/x-custom+xml','text/x-custom+xml'])assert.throws(()=>runtime_content_type(type),TypeError);
   assert.throws(()=>bootstrap_xml(source,'text/html','nonce'),TypeError);
 });
 
