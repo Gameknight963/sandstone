@@ -17,10 +17,31 @@ test('Public broker binds subscriptions and registration handles to the actual d
   frames.frame.document_context='replacement';assert.throws(()=>broker.snapshot('frame','document'),{name:'SecurityError'});broker.notify({event:'statechange',record,worker:record.active});assert.equal(broker.subscribers.size,0);
 });
 test('Worker client lookups wait for incoming execution readiness and cannot cross origins',async()=>{
-  const {broker,manager,record}=environment();const reserved={id:'incoming',reserved:true,creationURL:'https://app.test/new',url:'https://app.test/new',type:'window'};manager.clients.set(reserved.id,reserved);
-  const pending=broker.workerCommand(record,record.active,'clients.get',['incoming']);reserved.reserved=false;reserved.frame='frame';broker.notify({event:'clientready',client:reserved});assert.equal((await pending).id,'incoming');
+  const {broker,manager,record,frames}=environment();const reserved={id:'incoming',reserved:true,creationURL:'https://app.test/new',url:'https://app.test/new',type:'window'};manager.clients.set(reserved.id,reserved);
+  const pending=broker.workerCommand(record,record.active,'clients.get',['incoming']);reserved.reserved=false;reserved.frame='incoming-frame';frames[reserved.frame]={...frames.frame,id:reserved.frame,document_context:reserved.id};broker.notify({event:'clientready',client:reserved});assert.equal((await pending).id,'incoming');
   manager.clients.set('foreign',{id:'foreign',creationURL:'https://other.test/'});assert.equal(await broker.workerCommand(record,record.active,'clients.get',['foreign']),undefined);
   const list=await broker.workerCommand(record,record.active,'clients.matchAll',[{type:'window',includeUncontrolled:true}]);assert.equal(list.length,2);
+});
+
+test('Client navigation authorizes the current controller and binds results to the new same-origin document',async()=>{
+  const {broker,manager,frames,record,client}=environment();let navigated;
+  broker.navigateWindow=async(frame,url)=>{navigated=url;manager.clients.delete(client.id);frame.document_context='replacement';const next={...client,id:'replacement',url,creationURL:url};manager.clients.set(next.id,next);return {document_context:next.id};};
+  const next=await broker.workerCommand(record,record.active,'client.navigate',[client.id,'/new']);assert.equal(navigated,'https://app.test/new');assert.equal(next.id,'replacement');assert.equal(next.url,navigated);
+  await assert.rejects(broker.workerCommand(record,record.active,'client.navigate',[client.id,'/stale']),TypeError);
+  manager.clients.get('replacement').controller=null;await assert.rejects(broker.workerCommand(record,record.active,'client.navigate',['replacement','/forbidden']),TypeError);
+  manager.clients.get('replacement').controller=record.active;
+  assert.equal(await broker.workerCommand(record,record.active,'client.navigate',['replacement','https://foreign.test/']),null);
+});
+
+test('A superseded client navigation cannot return an unrelated replacement document',async()=>{
+  const {broker,manager,frames,record,client}=environment();
+  broker.navigateWindow=async(frame,url)=>{manager.clients.delete(client.id);frame.document_context='unrelated';manager.clients.set('unrelated',{...client,id:'unrelated'});return {document_context:'intended'};};
+  await assert.rejects(broker.workerCommand(record,record.active,'client.navigate',[client.id,'/new']),TypeError);
+});
+
+test('Client snapshots cannot complete after their inspected document is replaced',async()=>{
+  const {broker,frames,client}=environment();let release;
+  broker.inspectWindow=()=>new Promise(resolve=>release=resolve);const pending=broker.clientInfo(client);frames.frame.document_context='new';release({visibilityState:'hidden',focused:true});assert.equal(await pending,undefined);
 });
 
 test('Discarded incoming clients settle pending lookups and closed documents release broker handles',async()=>{

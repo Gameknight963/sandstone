@@ -53,7 +53,7 @@ export async function verifyPublicServiceWorker(page){
       const bytes=Uint8Array.of(1,2,3).buffer;navigator.serviceWorker.controller.postMessage({bytes},[bytes,channel.port2]);
       const detached=bytes.byteLength===0,value=await received;channel.port1.close();return JSON.stringify({detached,value});
     })()`)));
-    assert.deepEqual(reply,{detached:true,value:{version:1,bytes:[1,2,3],same:true,listed:true,origin}});
+    assert.deepEqual(reply,{detached:true,value:{version:1,bytes:[1,2,3],same:false,listed:true,origin}});
     const source=JSON.parse(await fixture.evaluate(()=>main_frame.eval_js(`(async()=>{
       const received=new Promise(resolve=>navigator.serviceWorker.onmessage=event=>resolve({value:event.data,origin:event.origin,trusted:event.isTrusted,same:event.source===navigator.serviceWorker.controller,target:event.target===navigator.serviceWorker}));
       navigator.serviceWorker.controller.postMessage('source');return JSON.stringify(await received);

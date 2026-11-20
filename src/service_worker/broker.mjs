@@ -3,7 +3,7 @@ import {select_registration} from './registration.mjs';
 import {trustworthy_url} from '../trustworthy.mjs';
 
 export class ServiceWorkerBroker{
-  constructor({manager,frames,id=create_bootstrap_nonce}){Object.assign(this,{manager,frames,id});this.subscribers=new Map();this.ids=new WeakMap();this.records=new Map();this.workers=new Map();this.mail=new Map();this.waiters=new Map();this.revision=0;}
+  constructor({manager,frames,inspectWindow=async()=>({visibilityState:'visible',focused:false}),navigateWindow,id=create_bootstrap_nonce}){Object.assign(this,{manager,frames,inspectWindow,navigateWindow,id});this.subscribers=new Map();this.ids=new WeakMap();this.records=new Map();this.workers=new Map();this.mail=new Map();this.waiters=new Map();this.revision=0;}
   principal(id,token){
     const frame=this.frames()[id],client=this.manager.clients.get(token),origin=frame?.origin||frame?.url?.origin;
     if(!frame||frame.worker||frame.service_worker_host||this.frames()[frame.root_id]?.service_worker_host||frame.document_context!==token||client?.frame!==id||frame.broadcast_origin?.startsWith('opaque:')||!origin||origin==='null'||!trustworthy_url(new URL(origin)))throw new DOMException('Service worker client is unavailable','SecurityError');
@@ -67,12 +67,16 @@ export class ServiceWorkerBroker{
     }
     if(method==='post'){
       const entry=this.workers.get(args[0]);if(!entry||entry.record.origin!==origin||entry.record.revoked||entry.worker.state==='redundant')throw new DOMException('Worker is unavailable','InvalidStateError');
-      const job=await this.manager.dispatch(entry.record,entry.worker,{event:'message',data:args[1].data,ports:args[1].ports,origin,source:this.clientInfo(client)});await job.result;return;
+      const source=await this.clientInfo(client);if(!source)throw new DOMException('Client was discarded','InvalidStateError');
+      const job=await this.manager.dispatch(entry.record,entry.worker,{event:'message',data:args[1].data,ports:args[1].ports,origin,source});await job.result;return;
     }
     throw new TypeError('Unknown service worker client operation');
   }
-  clientInfo(client){
-    const frame=this.frames()[client.frame];return {id:client.id,url:frame?.url?.href||client.url,type:client.type||'window',frameType:frame?.parent_id?'nested':'top-level',visibilityState:'visible',focused:false};
+  async clientInfo(client){
+    const frame=this.frames()[client.frame];if(!frame||frame.document_context!==client.id||this.manager.clients.get(client.id)!==client)return;
+    let state;try{state=await this.inspectWindow(frame,client.id);}catch{return;}
+    if(this.frames()[client.frame]!==frame||frame.document_context!==client.id||this.manager.clients.get(client.id)!==client)return;
+    return {id:client.id,url:client.url,type:client.type||'window',frameType:frame.parent_id?'nested':'top-level',visibilityState:state.visibilityState,focused:!!state.focused};
   }
   eligible(record,client){return client&&new URL(client.creationURL).origin===record.origin;}
   async workerCommand(record,worker,method,args){
@@ -82,7 +86,20 @@ export class ServiceWorkerBroker{
       if(client.reserved){client=await new Promise(resolve=>{let entries=this.waiters.get(args[0]);if(!entries)this.waiters.set(args[0],entries=[]);entries.push(resolve);});}
       return this.eligible(record,client)?this.clientInfo(client):undefined;
     }
-    if(method==='clients.matchAll')return [...this.manager.clients.values()].filter(client=>!client.reserved&&this.eligible(record,client)&&(args[0].includeUncontrolled||client.controller===worker)&&['all',client.type||'window'].includes(args[0].type)).map(client=>this.clientInfo(client));
+    if(method==='clients.matchAll')return (await Promise.all([...this.manager.clients.values()].filter(client=>!client.reserved&&this.eligible(record,client)&&(args[0].includeUncontrolled||client.controller===worker)&&['all',client.type||'window'].includes(args[0].type)).map(client=>this.clientInfo(client)))).filter(Boolean);
+    if(method==='client.navigate'){
+      const client=this.manager.clients.get(args[0]),frame=this.frames()[client?.frame],url=new URL(args[1],worker.scriptURL);
+      if(!this.eligible(record,client)||client.reserved||client.controller!==worker||!frame||frame.document_context!==client.id)throw new TypeError('Client is not controlled by this worker');
+      if(!/^https?:$/.test(url.protocol))throw new TypeError('Unsupported client navigation URL');
+      if(!this.navigateWindow)throw new DOMException('Client navigation is unavailable','NotSupportedError');
+      const navigation=await this.navigateWindow(frame,url.href);
+      this.manager.valid(record);
+      if(navigation?.no_navigation||navigation?.download||navigation?.failed)throw new TypeError('Client navigation did not create a document');
+      const nextFrame=this.frames()[frame.id],next=this.manager.clients.get(nextFrame?.document_context);
+      if(!navigation?.document_context||nextFrame?.document_context!==navigation.document_context)throw new TypeError('Client navigation was superseded');
+      if(!this.eligible(record,next))return null;
+      return await this.clientInfo(next)||null;
+    }
     if(method==='client.postMessage'){
       const client=this.manager.clients.get(args[0]);if(!this.eligible(record,client))return;
       let queued=this.mail.get(client.id);if(!queued)this.mail.set(client.id,queued=[]);

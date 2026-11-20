@@ -7,6 +7,12 @@ import {trustworthy_url} from '../../trustworthy.mjs';
 import {listen_runtime,on_document_unload} from '../runtime_events.mjs';
 
 let current,port,context;
+const nativeDocument=globalThis.document,hasFocus=globalThis.Document?.prototype.hasFocus;
+const visibility=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'visibilityState')?.get;
+rpc.rpc_handlers.service_worker_window=token=>{
+  if(loader.beacon_context&&token!==loader.beacon_context)throw new DOMException('Document was replaced','AbortError');
+  return {visibilityState:visibility?Reflect.apply(visibility,nativeDocument,[]):'visible',focused:!!(hasFocus&&Reflect.apply(hasFocus,nativeDocument,[]))};
+};
 export const service_worker_api=()=>current;
 export const service_worker_snapshot=()=>current?.snapshot();
 export function configure_service_workers(options){

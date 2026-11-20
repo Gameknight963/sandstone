@@ -25,7 +25,24 @@ export const fetch_router=new ServiceWorkerFetch({manager,client:context=>{
   return client?.frame===frame.id?client:null;
 }});
 export const clients=new ServiceWorkerClients({manager,frames:()=>iframes});
-export const broker=new ServiceWorkerBroker({manager,frames:()=>iframes});
+export const broker=new ServiceWorkerBroker({manager,frames:()=>iframes,
+  inspectWindow:async(frame,token)=>{
+    const root=iframes[frame.root_id],target=frame.id===root?.id?root.rpc_target:root?.rpc_target.extra_frame_targets.get(frame.id);
+    if(!target)throw new DOMException('Client is disconnected','InvalidStateError');
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(new DOMException('Client state timed out','TimeoutError')),5000);
+    try{return await rpc.call_procedure(target,'service_worker_window',[token],{signal:controller.signal});}finally{clearTimeout(timer);}
+  },
+  navigateWindow:async(frame,url)=>{
+    const next=new URL(url),current=frame.url;
+    if(url.includes('#')&&next.origin===current.origin&&next.username===current.username&&next.password===current.password&&next.pathname===current.pathname&&next.search===current.search){
+      const root=iframes[frame.root_id],target=frame.id===root?.id?root.rpc_target:root?.rpc_target.extra_frame_targets.get(frame.id),token=frame.document_context;
+      if(!target)throw new TypeError('Client is disconnected');
+      await rpc.call_procedure(target,'navigate_fragment',[url]);
+      if(iframes[frame.id]===frame&&frame.document_context===token)return {document_context:token};
+      return;
+    }
+    return frame.navigate_to(url,null,{initiated:true,result_document:true,activation:{transient:false,sticky:false}});
+  }});
 export const navigations=new ServiceWorkerNavigations({manager,frames:()=>iframes,route:(...args)=>fetch_router.fetch(...args)});
 network.set_service_worker_fetch((url,options,context,network)=>context?.navigation?navigations.fetch(url,options,context,network):fetch_router.fetch(url,options,context,network),
   (frame,options)=>{clients.disconnect(frame);navigations.disconnect(frame,options);broker.disconnect(frame);},(frame,signal)=>clients.bind(frame,signal),

@@ -1,7 +1,7 @@
 import {snapshot_message} from './messages.mjs';
 
-export function create_worker_clients({command,encode=value=>value}){
-  const records=new WeakMap(),cache=new Map(),token={};
+export function create_worker_clients({command,base,encode=value=>value}){
+  const records=new WeakMap(),token={};
   const state=value=>{const info=records.get(value);if(!info)throw new TypeError('Illegal Client receiver');return info;};
   class Client{
     constructor(secret,info){if(secret!==token)throw new TypeError('Illegal constructor');records.set(this,{...info});}
@@ -15,11 +15,17 @@ export function create_worker_clients({command,encode=value=>value}){
   class WindowClient extends Client{
     get visibilityState(){return state(this).visibilityState;}
     get focused(){return state(this).focused;}
+    async navigate(url){
+      const info=state(this);if(info.type!=='window')throw new TypeError('Illegal WindowClient receiver');
+      if(!arguments.length)throw new TypeError('A navigation URL is required');
+      const next=new URL(`${url}`,base);
+      if(next.protocol==='about:'&&next.pathname==='blank')throw new TypeError('Cannot navigate to about:blank');
+      return source(await command('client.navigate',[info.id,next.href]));
+    }
     get [Symbol.toStringTag](){return 'WindowClient';}
   }
   function source(info){
-    if(!info)return null;let value=cache.get(info.id);
-    if(!value){value=new (info.type==='window'?WindowClient:Client)(token,info);cache.set(info.id,value);}else Object.assign(records.get(value),info);return value;
+    return info?new (info.type==='window'?WindowClient:Client)(token,info):null;
   }
   const clients=Object.create(null);
   Object.defineProperties(clients,{

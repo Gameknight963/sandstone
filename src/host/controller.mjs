@@ -276,6 +276,7 @@ export class ProxyFrame {
     this.iframe.style.backgroundColor = "unset";
     this.is_navigating = false;
     this.on_load();
+    if(navigation.result_document&&navigation_id===this.navigation_id&&this.document_context===beacon_context)return {document_context:beacon_context,failed:!!error};
   }
 }
 
@@ -373,6 +374,7 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
       if (!port) throw new DOMException("Parent frame is disconnected", "InvalidStateError");
       const result=await rpc.call_procedure(port, "child_navigate", [child_id, child.url.href, form_data, {...navigation,from_child:true}]);
       if(result?.download||result?.no_navigation){child.url=previous_url;child.pending_navigation=null;return {...result,cookies:site_data.documentCookies(previous_url.href,{crossSite:frame_cross_site(child,iframes)})};}
+      return result;
     },
     on_url_change() {
       const port=parent_id===root.id?root.rpc_target.target:root.rpc_target.extra_frame_targets.get(parent_id);

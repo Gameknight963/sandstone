@@ -345,6 +345,7 @@ export function rewrite_iframe(iframe_element) {
       }
 
       if(current()){try{iframe_element.dispatchEvent(new Event("load"));}finally{release_load();}}
+      if(navigation.result_document&&current())return {document_context:state.beacon_context,failed:!!error};
     });
     commit=installation.catch(()=>{});
     return installation.catch(error=>{if(current()){release_load();throw error;}});

@@ -7,7 +7,7 @@ import {create_worker_clients} from './worker_clients.mjs';
 // The owner supplies this private transport. Pages never receive the control
 // port: authored postMessage traffic is delivered as ExtendableMessageEvent.
 export function create_service_worker_runtime({profile,target=globalThis,send,scripts=()=>[],Request:RequestClass=globalThis.Request,requestMetadata=request_metadata,responseMetadata=response_metadata,encode=value=>value}){
-  const peers=create_worker_clients({command,encode});
+  const peers=create_worker_clients({command,base:profile.scriptURL,encode});
   const events=create_service_worker_events({requestMetadata,responseMetadata,sourceValid:peers.valid});
   const jobs=new Map(),readers=new Map(),commands=new Map(),queued=[];
   const collect=id=>{const job=jobs.get(id);if(job?.complete&&(!job.fetch||job.handled&&!readers.has(id)))jobs.delete(id);};
