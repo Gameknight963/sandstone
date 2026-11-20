@@ -15,6 +15,7 @@ import {verifyImageLoads} from './image-loads.playwright.mjs';
 import {verifyFrameFocus} from './frame-focus.playwright.mjs';
 import {verifyIframeFocusPolicy} from './iframe-focus-policy.playwright.mjs';
 import {verifyAutofocus,verifyAutofocusWithoutScripts} from './autofocus.playwright.mjs';
+import {verifyFragmentNavigation} from './fragment-navigation.playwright.mjs';
 import {verifyBodyHandlers} from './body-handlers.playwright.mjs';
 import {verifyMediaMuted} from './media-muted.playwright.mjs';
 import {verifyMediaPlayback,verifyMediaSources} from './media-playback.playwright.mjs';
@@ -411,6 +412,7 @@ try {
     result.passed.push(...await timed(verifyStructuredClone(page), 'Structured clone fixture'));
     result.passed.push(...await timed(verifyKeyIdentity(page), 'Key identity fixture'));
     result.passed.push(...await timed(verifyHistory(page), "History fixture"));
+    for(let batch=0;batch<2;batch++)result.passed.push(...await timed(verifyFragmentNavigation(page,{batch,batches:2}), 'Fragment navigation fixture '+(batch+1)));
     result.passed.push(...await timed(verifyHistoryInterface(page), 'History interface fixture'));
     result.passed.push(...await timed(verifyStorageWrites(page), 'Concurrent storage fixture'));
     result.passed.push(...await timed(verifyStorageSynchronous(page), 'Synchronous shared storage fixture'));
