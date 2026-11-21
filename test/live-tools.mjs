@@ -9,9 +9,11 @@ import {jsonSites,interactJson} from './live-json.mjs';
 import {workbenchSites,interactWorkbench} from './live-workbench.mjs';
 import {playgroundSites,interactPlayground} from './live-playgrounds.mjs';
 import {authFormSites,interactAuthForm} from './live-auth-forms.mjs';
+import {mediaSites,interactMedia} from './live-media.mjs';
 
 export const tool_sites=[
   ...authFormSites,
+  ...mediaSites,
   ...documentSites,
   ...gameSites,
   ...search_sites,
@@ -27,6 +29,7 @@ export const tool_sites=[
 
 export async function interact_tool(page,proxy,site,{surface,read,wait}){
   if(authFormSites.some(form=>form.id===site.id))return interactAuthForm(page,proxy,{surface,read,wait});
+  if(mediaSites.some(media=>media.id===site.id))return interactMedia(page,proxy,site,{surface,read,wait});
   if(documentSites.some(tool=>tool.id===site.id))return interactDocumentTool(page,proxy,site,{surface,read,wait});
   if(gameSites.some(game=>game.id===site.id))return interactGame(page,proxy,site,{surface,read,wait});
   if(search_sites.some(search=>search.id===site.id))return interactSearchPortal(page,proxy,{surface,read,wait});
