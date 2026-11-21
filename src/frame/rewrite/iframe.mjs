@@ -59,6 +59,7 @@ if(globalThis.document)listen_runtime(document,'load',capture_runtime_load,true)
 on_shadow_root(root=>listen_runtime(root,'load',capture_runtime_load,true));
 const inline_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'srcdoc');
 const source_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'src');
+const loading_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'loading');
 const sandbox_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'sandbox');
 const allow_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'allow');
 const policy_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'featurePolicy');
@@ -450,7 +451,10 @@ export function rewrite_iframe(iframe_element) {
     const local=/^(?:blob|data):/.test(target_url),blob=target_url.startsWith('blob:');
     runtime_sandbox=true;render_sandbox();
     const inherited_base_url=document_result?document_result.inherited_base_url:inline?ctx.document.baseURI:undefined;
-    if(inline&&!finish_load)finish_load=delay_script_load();
+    // Network frames delay their parent's load just like srcdoc. Lazy frames
+    // remain nonblocking when scripting enables the browser's lazy-load rules.
+    const lazy=loader.site_settings.allow_js!==false&&loading_descriptor?.get?.call(iframe_element)==='lazy';
+    if(!lazy&&!finish_load)finish_load=delay_script_load();
     const revision=++generation;
     active_request?.abort();
     const controller=active_request=new AbortController();

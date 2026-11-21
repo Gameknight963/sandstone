@@ -15,6 +15,7 @@ import {verifyImageLoads} from './image-loads.playwright.mjs';
 import {verifyFrameFocus} from './frame-focus.playwright.mjs';
 import {verifyIframeFocusPolicy} from './iframe-focus-policy.playwright.mjs';
 import {verifyAutofocus,verifyAutofocusWithoutScripts} from './autofocus.playwright.mjs';
+import {verifyIframeLoadLifetime} from './iframe-load-lifetime.playwright.mjs';
 import {verifyFragmentNavigation} from './fragment-navigation.playwright.mjs';
 import {verifyIframeFragments} from './iframe-fragments.playwright.mjs';
 import {verifyIframeLocationEncoding} from './iframe-location-encoding.playwright.mjs';
@@ -574,6 +575,7 @@ try {
     try{result.passed.push(...await timed(verifyIframeFocusPolicy(page,messages=>messages.forEach(message=>expectedDiagnostics.add(message))), 'Iframe focus permissions fixture'));}
     finally{expectedDiagnostics.clear();}
     result.passed.push(...await timed(verifyBodyHandlers(page), 'Body window handler fixture'));
+    result.passed.push(...await timed(verifyIframeLoadLifetime(page), 'Iframe load lifetime fixture'));
     for(let batch=0;batch<4;batch++){
       try{result.passed.push(...await timed(verifyAutofocus(page,{batch,batches:4,expectDiagnostics:messages=>messages.forEach(message=>expectedDiagnostics.add(message))}), 'HTML autofocus fixture '+(batch+1)));}
       finally{expectedDiagnostics.clear();}
