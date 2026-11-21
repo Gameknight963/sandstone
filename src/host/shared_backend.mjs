@@ -6,6 +6,7 @@ import {CookiePolicyBridge} from './cookie_policy_bridge.mjs';
 import {PolicyProviders} from './policy_providers.mjs';
 import {create_bootstrap_nonce} from '../bootstrap.mjs';
 import {set_role} from '../rpc.mjs';
+import {owner_prefix,publish_backend} from './worker_discovery.mjs';
 
 // This bundle runs only in a trusted host-origin worker. Authored JavaScript
 // belongs in a separate opaque runtime, connected through WorkerServiceHost.
@@ -13,7 +14,23 @@ set_role('host');
 const hosts=new Map(),providers=new PolicyProviders();
 const cookie_policy=new CookiePolicyBridge((message,options)=>providers.request(message,options));
 const identity=create_bootstrap_nonce();
-let websocket,ready;
+let websocket,ready,publication,publishedKey,ending=false;
+const owners=new Map();
+
+function shutdown(){
+  if(ending)return;ending=true;publication?.close();
+  for(const watch of owners.values())watch.abort();owners.clear();
+  for(const id of [...hosts.keys()])close(id);providers.close();globalThis.close();
+}
+
+function add_owner(lease){
+  if(typeof lease!=='string'||!lease.startsWith(owner_prefix))throw new TypeError('A private UI owner lease is required');
+  if(owners.has(lease))return;
+  const watch=new AbortController();owners.set(lease,watch);
+  navigator.locks.request(lease,{signal:watch.signal},()=>{
+    owners.delete(lease);if(!owners.size&&publishedKey)shutdown();
+  }).catch(()=>{if(!watch.signal.aborted){owners.delete(lease);if(!owners.size&&publishedKey)shutdown();}});
+}
 
 function initialize(input,binary){
   const url=new URL(input);
@@ -44,7 +61,19 @@ globalThis.onconnect=event=>{
         value={identity,persistent:indexed_db.persistent};
       }else{
         if(!initialized)throw new DOMException('Worker backend connection is not initialized','InvalidStateError');
-        if(message.op==='policy'){
+        if(message.op==='publish'){
+          if(publishedKey)throw new DOMException('Worker backend is already published','InvalidStateError');
+          if(typeof message.key!=='string'||!/^sandstone\.shared-backend\.v1:[a-f0-9]{64}$/.test(message.key))throw new TypeError('A worker backend discovery key is required');
+          add_owner(message.lease);publishedKey=message.key;
+          publication=await publish_backend(message.key,{url:location.href,name:globalThis.name,identity});
+          if(ending){publication?.close();return;}
+          value=!!publication;
+        }else if(message.op==='owner'){
+          if(!publication)throw new DOMException('Worker backend is not published','InvalidStateError');
+          add_owner(message.lease);value=true;
+        }else if(message.op==='shutdown'){
+          port.postMessage({id:message.id,ok:true,value:true});shutdown();return;
+        }else if(message.op==='policy'){
           providers.add(event.ports[0],{lease:message.lease,authority:message.authority});value=true;
         }else if(message.op==='open'){
           const host=new WorkerServiceHost({...message.context,cookie_policy},event.ports[0]);
