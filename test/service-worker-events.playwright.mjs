@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -127,7 +128,7 @@ export async function verifyServiceWorkerEvents(browser){
     else{response.setHeader('Content-Type','text/html');response.end('<!doctype html>Native service worker event control');}
   });
   server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));});
-  server.listen(0,'127.0.0.1');await once(server,'listening');
+  await listen_browser_server(server);
   const context=await browser.newContext();
   try{
     const page=await context.newPage();await page.goto('http://127.0.0.1:'+server.address().port+'/scope/client');

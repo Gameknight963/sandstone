@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -29,7 +30,7 @@ const setup=`(async()=>{
     channel.port1.onmessage=event=>{clearTimeout(timer);channel.port1.close();resolve(event.data);};windowRegistration.active.postMessage(data,[channel.port2]);
   });return true;
 })()`;
-async function listen(server){server.listen(0,'127.0.0.1');await once(server,'listening');return 'http://127.0.0.1:'+server.address().port;}
+async function listen(server){await listen_browser_server(server);return 'http://127.0.0.1:'+server.address().port;}
 
 export async function verifyServiceWorkerWindowClients(page){
   const nativeHolds=[];

@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 
@@ -30,7 +31,7 @@ export async function verifyWorkerBundles(page){
     response.writeHead(path.endsWith('/missing.js')?404:200,{'Content-Type':path.endsWith('/index')?'text/html':'application/javascript'});
     response.end(path.endsWith('/main.js')?main('./runtime-redirect.js'):sources[path]||'');
   });
-  server.listen(0,'127.0.0.1');await once(server,'listening');
+  await listen_browser_server(server);
   const origin='http://127.0.0.1:'+server.address().port,start=origin+'/worker-bundles/index';
   const nativeContext=await page.context().browser().newContext(),native=await nativeContext.newPage();
   const run=async proxy=>JSON.parse(await(proxy?page.evaluate(source=>main_frame.eval_js(source),`new Promise((resolve,reject)=>{

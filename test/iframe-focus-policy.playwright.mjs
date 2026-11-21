@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -31,7 +32,7 @@ export async function verifyIframeFocusPolicy(page,expectDiagnostics=()=>{}){
   let parent,cross;
   const serve=(request,response)=>{const url=new URL(request.url,'http://local');if(url.pathname==='/redirect'){response.writeHead(302,{location:cross+'/child'});response.end();return;}response.writeHead(200,{'content-type':'text/html','cache-control':'no-store'});response.end(url.pathname==='/parent'?parent:child);};
   const servers=[createServer(serve),createServer(serve)];
-  await Promise.all(servers.map(async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');}));
+  await Promise.all(servers.map(async server=>{await listen_browser_server(server);}));
   const origin='http://127.0.0.1:'+servers[0].address().port;cross='http://127.0.0.1:'+servers[1].address().port;
   const data=documents(origin,cross),cases=data.cases;parent=data.parent;
   const native=await page.context().newPage(),errors=[],direct=[],onError=error=>errors.push(error.message);

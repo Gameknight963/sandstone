@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -26,7 +27,7 @@ export async function verifySynchronousFiles(page){
     else if(request.url==='/worker.js'){response.setHeader('content-type','text/javascript');response.end(worker);}
     else{response.setHeader('content-type','text/html');response.end('<!doctype html><body>Files');}
   });
-  server.listen(0,'127.0.0.1');await once(server,'listening');const origin='http://127.0.0.1:'+server.address().port;
+  await listen_browser_server(server);const origin='http://127.0.0.1:'+server.address().port;
   const nativeContext=await page.context().browser().newContext(),native=await nativeContext.newPage(),fixture=await page.context().newPage(),errors=[],direct=[];
   fixture.on('pageerror',error=>errors.push(error.message));fixture.on('console',message=>{if(message.type()==='error'&&message.text()!=='Permissions policy violation: unload is not allowed in this document.')errors.push(message.text());});
   try{

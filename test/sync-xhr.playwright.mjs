@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';import {createServer} from 'node:http';import {once} from 'node:events';import {readFile} from 'node:fs/promises';
 
 const worker=`onmessage=()=>{const results=[],form=new FormData();form.append('name','value');form.append('file',new Blob(['hello'],{type:'text/plain'}),'hello.txt');const cases=[['/text','',0,null],['/bytes','arraybuffer',0,null],['/json','json',0,null],['/echo','json',0,new URLSearchParams([['value','a b']])],['/echo','json',0,new Uint8Array([0,1,2,3]).subarray(1,3)],['/form','json',0,form],['/timeout','',20,null],['/text','',0,null],['/error','',0,null]];
@@ -17,7 +18,7 @@ export async function verifySyncXHR(page){
     if(path==='/json'){response.writeHead(200,{'content-type':'application/json','content-length':'12'});response.end('{"value":42}');return;}
     if(path==='/echo'||path==='/form'){const chunks=[];for await(const chunk of request)chunks.push(chunk);const body=Buffer.concat(chunks);let value={bytes:[...body],contentType:request.headers['content-type']||''};if(path==='/form'){const form=await new Request('http://localhost/form',{method:'POST',headers:request.headers,body,duplex:'half'}).formData();value={name:form.get('name'),file:{name:form.get('file').name,body:await form.get('file').text()}};}const result=JSON.stringify(value);response.writeHead(200,{'content-type':'application/json','content-length':String(Buffer.byteLength(result))});response.end(result);return;}
     response.setHeader('content-type','text/html');response.end('<body>Native synchronous XHR');
-  });server.listen(0,'127.0.0.1');await once(server,'listening');const origin='http://127.0.0.1:'+server.address().port;
+  });await listen_browser_server(server);const origin='http://127.0.0.1:'+server.address().port;
   const native=await page.context().newPage(),fixture=await page.context().newPage(),fallback=await page.context().newPage(),direct=[],errors=[];
   fixture.on('pageerror',error=>errors.push(error.message));
   try{

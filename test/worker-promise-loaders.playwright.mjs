@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';import {createServer} from 'node:http';import {once} from 'node:events';
 const loader=`if(!self.define){const modules={};const require=(url,base)=>(url=new URL(url.endsWith('.js')?url:url+'.js',base).href,modules[url]||new Promise(done=>{if('document' in self){throw new Error('Unexpected document transport')}else self.moduleURL=url,importScripts(url),done()}).then(()=>{if(!modules[url])throw new Error('Module did not register');return modules[url]}));self.define=(dependencies,factory)=>{const id=self.moduleURL||location.href;if(modules[id])return;const exports={},local=url=>require(url,id);modules[id]=Promise.resolve().then(()=>Promise.all(dependencies.map(name=>name==='exports'?exports:name==='require'?local:local(name)))).then(values=>(factory(...values),exports));};}
 define(['require','./startup'],(require,startup)=>{onmessage=async event=>{const {id,paths,bytes}=event.data;try{const values=await Promise.all(paths.map(require));postMessage({id,startup:startup.value,values:values.map(value=>value.value),bytes:bytes?[...new Uint8Array(bytes)]:[]});}catch(error){postMessage({id,error:error.name});}};postMessage({ready:true});});`;
@@ -13,7 +14,7 @@ async function exercise(){
   }finally{worker.terminate();}
 }
 export async function verifyPromiseWorkerLoaders(page){
-  const server=createServer((request,response)=>{const path=new URL(request.url,'http://local').pathname;if(path==='/one.js'){response.writeHead(302,{location:'/delivered/one.js'});response.end();return;}setTimeout(()=>{response.writeHead(files[path]||path==='/page'?200:404,{'content-type':path.endsWith('.js')?'text/javascript':'text/html','cache-control':'no-store'});response.end(files[path]||'<body>Promise worker loader');},20);});server.listen(0,'127.0.0.1');await once(server,'listening');
+  const server=createServer((request,response)=>{const path=new URL(request.url,'http://local').pathname;if(path==='/one.js'){response.writeHead(302,{location:'/delivered/one.js'});response.end();return;}setTimeout(()=>{response.writeHead(files[path]||path==='/page'?200:404,{'content-type':path.endsWith('.js')?'text/javascript':'text/html','cache-control':'no-store'});response.end(files[path]||'<body>Promise worker loader');},20);});await listen_browser_server(server);
   const origin='http://127.0.0.1:'+server.address().port,native=await page.context().newPage(),fixture=await page.context().newPage(),errors=[],direct=[],artifact=page.url();
   fixture.on('pageerror',error=>errors.push(error.message));fixture.on('request',request=>{if(/^https?:/.test(request.url())&&request.url()!==artifact)direct.push(request.url());});
   try{

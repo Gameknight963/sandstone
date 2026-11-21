@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -17,7 +18,7 @@ export async function verifyWorkerLoaders(page){
     if(path==='/assets/lazy.js'){response.writeHead(302,{location:'/delivered/runtime.js'});response.end();return;}
     response.writeHead(files[path]||path==='/page'?200:404,{'content-type':path.endsWith('.js')?'text/javascript':'text/html','cache-control':'no-store'});response.end(files[path]||'<body>Worker loader fixture');
   });
-  server.listen(0,'127.0.0.1');await once(server,'listening');const origin='http://127.0.0.1:'+server.address().port;
+  await listen_browser_server(server);const origin='http://127.0.0.1:'+server.address().port;
   const native=await page.context().newPage(),fixture=await page.context().newPage(),direct=[],errors=[];
   const artifact=page.url();fixture.on('request',request=>{if(/^https?:/.test(request.url())&&request.url()!==artifact)direct.push(request.url());});fixture.on('pageerror',error=>errors.push(error.message));
   const read=(target,proxy,source)=>proxy?target.evaluate(source=>main_frame.eval_js(source),source):target.evaluate(source=>globalThis.eval(source),source);

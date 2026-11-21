@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -68,7 +69,7 @@ export async function verifySQLiteFiles(page,{storageDenied=false,vfs='opfs-sahp
     response.setHeader('content-type',file?.type||'text/html');
     response.end(file?.body||(request.url==='/host'?html:'<!doctype html><body>SQLite file fixture'));
   });
-  server.listen(0,'127.0.0.1');await once(server,'listening');
+  await listen_browser_server(server);
   const host='http://127.0.0.1:'+server.address().port+'/host';
   const nativeContext=await page.context().browser().newContext(),native=await nativeContext.newPage(),fixture=await page.context().newPage();
   const errors=[],direct=[];

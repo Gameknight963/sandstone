@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -40,7 +41,7 @@ export async function verifyWorkerRuntimeImports(page){
     if(path.endsWith('.js')){response.writeHead(200,{'content-type':path==='/wrong.js'?'text/plain':'text/javascript','cache-control':'no-store'});response.end(path==='/worker.js'?worker:script(path,path==='/change.js'?++version:0));return;}
     response.setHeader('content-type','text/html');response.end('<body>Runtime imports');
   });
-  server.listen(0,'127.0.0.1');await once(server,'listening');const origin='http://127.0.0.1:'+server.address().port;
+  await listen_browser_server(server);const origin='http://127.0.0.1:'+server.address().port;
   const native=await page.context().newPage(),fixture=await page.context().newPage(),fallback=await page.context().newPage(),direct=[];
   try{
     await native.goto(origin+'/page');const expected=JSON.parse(await run(native,false));

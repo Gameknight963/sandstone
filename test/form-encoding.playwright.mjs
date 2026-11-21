@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -29,7 +30,7 @@ export async function verifyFormEncoding(page,{batch=0,batches=1}={}){
       response.end(request.url==='/form'?html:'<!doctype html>Received');
     });
   });
-  server.listen(0,'127.0.0.1');await once(server,'listening');
+  await listen_browser_server(server);
   const origin='http://127.0.0.1:'+server.address().port,native=await page.context().newPage(),direct=[];
   const block=request=>{direct.push(request.request().url());return request.abort();};await page.route(/^https?:/,block);
   const cases=[];

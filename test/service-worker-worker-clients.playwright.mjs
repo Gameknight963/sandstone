@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -27,7 +28,7 @@ export async function verifyServiceWorkerWorkerClients(page){
     response.setHeader('access-control-allow-origin','*');
     response.setHeader('content-type',path.endsWith('.js')?'text/javascript':path==='/value'?'application/json':'text/html');
     response.end(path==='/sw.js'?service:path.endsWith('.js')?worker:path==='/value'?'{"controlled":false}':'<!doctype html><body>Worker clients');
-  });server.listen(0,'127.0.0.1');await once(server,'listening');
+  });await listen_browser_server(server);
   const native=await page.context().newPage(),fixture=await page.context().newPage(),origin='https://worker-client.test',errors=[],direct=[];
   fixture.on('pageerror',error=>errors.push(error.message));fixture.on('request',request=>{if(/^https?:/.test(request.url()))direct.push(request.url());});
   try{

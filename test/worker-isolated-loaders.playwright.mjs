@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -11,7 +12,7 @@ export async function verifyIsolatedWorkerLoaders(page){
   const server=createServer((request,response)=>{
     response.writeHead(200,{'content-type':'text/html','cross-origin-opener-policy':'same-origin','cross-origin-embedder-policy':'require-corp'});response.end(html);
   });
-  server.listen(0,'127.0.0.1');await once(server,'listening');const fixture=await page.context().newPage();
+  await listen_browser_server(server);const fixture=await page.context().newPage();
   try{
     await fixture.goto('http://127.0.0.1:'+server.address().port+'/host');
     assert.equal(await fixture.evaluate(()=>crossOriginIsolated),true);

@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -16,7 +17,7 @@ export async function verifyNativeWorkerLifecycle(browser){
         if(event.data==='skip'){const promise=skipWaiting();event.waitUntil(promise);promise.then(()=>event.ports[0].postMessage('resolved'));event.ports[0].postMessage('requested');}
       };`:'<!doctype html>Native lifecycle control');
   });
-  server.listen(0,'127.0.0.1');await once(server,'listening');const passed=[];
+  await listen_browser_server(server);const passed=[];
   try{
     for(const mode of ['event','body']){
       const context=await browser.newContext();

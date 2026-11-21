@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -22,7 +23,7 @@ export async function verifyServiceWorkerRedirects(page){
     if(url.pathname==='/end')received.set(url.searchParams.get('case'),request.headers);
     response.writeHead(200,{'content-type':'text/plain','access-control-allow-origin':request.headers.origin||origin,'access-control-allow-credentials':'true'});response.end('done');
   });
-  server.listen(0,'0.0.0.0');await once(server,'listening');
+  await listen_browser_server(server,'0.0.0.0');
   origin='http://127.0.0.1:'+server.address().port;cross='http://localhost:'+server.address().port;
   source=`onactivate=event=>event.waitUntil(clients.claim());
     onfetch=event=>{const url=new URL(event.request.url);

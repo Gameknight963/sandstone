@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import {create_relay_server} from '../example/http.mjs';
 import {once} from 'node:events';
 import {readFile} from 'node:fs/promises';
@@ -169,12 +170,12 @@ server.on('upgrade',(request,socket,head)=>{
   else if (request.url === '/ws-refused') socket.end('HTTP/1.1 403 Forbidden\r\nSet-Cookie: refused=visible; Path=/\r\nContent-Length: 0\r\n\r\n');
   else wisp.routeRequest(request,socket,head);
 });
-server.listen(0,'127.0.0.1');await once(server,'listening');
+await listen_browser_server(server);
 const metadataServer=create_relay_server((request,response)=>{
   if(!metadata.handle(request,response,new URL(request.url,'http://localhost'))){response.writeHead(404);response.end();}
 });
 metadataServer.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));});
-metadataServer.listen(0,'127.0.0.1');await once(metadataServer,'listening');
+await listen_browser_server(metadataServer);
 const origin=`http://127.0.0.1:${server.address().port}`;
 const metadataOrigin='http://127.0.0.1:'+metadataServer.address().port;
 metadata.configure(origin,metadataOrigin);

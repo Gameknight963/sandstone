@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -56,7 +57,7 @@ async function controlled(cross){
 function normalize(value){return JSON.parse(JSON.stringify(value).replaceAll(/https?%3A%2F%2F[^&"]+/g,'ENCODED_ORIGIN'));}
 export async function verifyResponseTypes(page){
   const server=createServer((request,response)=>{const data=resource('http://'+request.headers.host+request.url);response.sendDate=false;response.writeHead(data.status,data.statusText,data.headers);response.end(data.body);});
-  server.listen(0,'127.0.0.1');await once(server,'listening');const origin='http://127.0.0.1:'+server.address().port,cross=origin.replace('127.0.0.1','localhost');
+  await listen_browser_server(server);const origin='http://127.0.0.1:'+server.address().port,cross=origin.replace('127.0.0.1','localhost');
   const nativeContext=await page.context().browser().newContext(),native=await nativeContext.newPage(),fixture=await page.context().newPage(),errors=[],direct=[];
   const read=(fn,argument)=>fixture.evaluate(({fn,argument})=>main_frame.eval_js('(async()=>JSON.stringify(await ('+fn+')('+JSON.stringify(argument)+')))()'),{fn:fn.toString(),argument}).then(JSON.parse);
   fixture.on('pageerror',error=>errors.push(error.message));

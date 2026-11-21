@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -36,7 +37,7 @@ export async function verifyRedirectNavigation(page){
     const data=resource('http://'+request.headers.host+request.url,request.method);
     response.writeHead(data.status,data.headers);response.end(data.body);
   });
-  server.listen(0,'127.0.0.1');await once(server,'listening');const origin='http://127.0.0.1:'+server.address().port;
+  await listen_browser_server(server);const origin='http://127.0.0.1:'+server.address().port;
   const context=await page.context().browser().newContext(),native=await context.newPage(),fixture=await page.context().newPage(),errors=[],direct=[];
   fixture.on('pageerror',error=>errors.push(error.message));
   try{

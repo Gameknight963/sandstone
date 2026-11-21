@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -9,7 +10,7 @@ export async function verifyLocalIframes(page){
     response.setHeader('content-type',request.url==='/echo'?'text/plain':'text/html');
     response.end(request.url==='/echo'?'relayed':html);
   });
-  server.listen(0,'127.0.0.1');await once(server,'listening');
+  await listen_browser_server(server);
   const origin='http://127.0.0.1:'+server.address().port;
   const nativeContext=await page.context().browser().newContext();
   const databaseSource=`async function databaseValue(write){

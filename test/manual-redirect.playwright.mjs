@@ -1,3 +1,4 @@
+import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
@@ -37,7 +38,7 @@ const api=`(async()=>{
 
 export async function verifyManualRedirects(page){
   const server=createServer((request,response)=>{const value=resource('http://'+request.headers.host+request.url);response.writeHead(value.status,value.headers);response.end(value.body);});
-  server.listen(0,'127.0.0.1');await once(server,'listening');const origin='http://127.0.0.1:'+server.address().port;
+  await listen_browser_server(server);const origin='http://127.0.0.1:'+server.address().port;
   const context=await page.context().browser().newContext(),native=await context.newPage(),fixture=await page.context().newPage(),errors=[],direct=[];
   fixture.on('pageerror',error=>errors.push(error.message));
   const read=expression=>fixture.evaluate(source=>main_frame.eval_js('(async()=>JSON.stringify(await ('+source+')))()'),expression).then(JSON.parse);
