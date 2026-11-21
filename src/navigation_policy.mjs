@@ -2,6 +2,7 @@ export function sandbox_tokens(value){return new Set((value||'').toLowerCase().s
 export function navigation_sandbox(parent={},value=null){
   const tokens=sandbox_tokens(value),sandboxed=value!==null;
   return {
+    origin:!!parent.origin||sandboxed&&!tokens.has('allow-same-origin'),
     navigation:!!parent.navigation||sandboxed,
     topWithActivation:!!parent.topWithActivation||sandboxed&&!tokens.has('allow-top-navigation')&&!tokens.has('allow-top-navigation-by-user-activation'),
     topWithoutActivation:!!parent.topWithoutActivation||sandboxed&&!tokens.has('allow-top-navigation'),

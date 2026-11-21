@@ -332,14 +332,15 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
   if(blob&&new URL(url).protocol!=='blob:')throw new TypeError('Invalid Blob frame URL');
   const inherited_origin=parent.origin||parent.url.origin;
   if(options.worker)worker_script_url(url,inherited_origin);
-  const opaque=options.opaque||parent_broadcast.startsWith('opaque:')||new URL(url).protocol==='data:';
+  const restrictions=navigation_sandbox(parent.navigation_sandbox,options.sandbox??null);
+  const opaque=options.opaque||restrictions.origin||new URL(url).protocol==='data:';
   const effective_url=()=>parent.request_url||parent.url.href;
   const creator_url=blank&&options.creator_url!==undefined?new URL(options.creator_url).href:effective_url();
   if(blank&&new URL(creator_url).origin!==inherited_origin&&!(new URL(creator_url).protocol==='blob:'&&creator_url===(parent.cookie_url||parent.url.href)))throw new TypeError('Invalid blank creator URL');
   const child = {
     id: child_id, parent_id, root_id: root.id, url: new URL(url),worker:!!options.worker,
     parent_context:parent.document_context,
-    navigation_sandbox:navigation_sandbox(parent.navigation_sandbox,options.sandbox??null),
+    navigation_sandbox:restrictions,
     window_name:saved?.window_name??options.window_name??'',
     origin: opaque?'null':inherited||options.worker?inherited_origin:new URL(url).origin,
     broadcast_origin:options.worker ? new URL(url).protocol==='data:'?opaque_broadcast:parent_broadcast : opaque?opaque_broadcast:inherited?parent_broadcast:new URL(url).origin,

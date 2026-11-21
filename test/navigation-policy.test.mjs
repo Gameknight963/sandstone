@@ -39,3 +39,12 @@ test('Sandboxed sibling navigation is denied while descendants remain navigable'
   assert.equal(can_navigate(frames.parent,frames.other,frames),false);
   assert.equal(can_navigate(frames.parent,frames.child,frames),true);
 });
+
+test('Origin sandbox restrictions inherit and cannot be removed by a descendant allow-same-origin token',()=>{
+  assert.equal(navigation_sandbox().origin,false);
+  assert.equal(navigation_sandbox(undefined,'').origin,true);
+  assert.equal(navigation_sandbox(undefined,'ALLOW-SCRIPTS ALLOW-SAME-ORIGIN').origin,false);
+  const restricted=navigation_sandbox(undefined,'allow-scripts');
+  assert.equal(navigation_sandbox(restricted,'allow-scripts allow-same-origin').origin,true);
+  assert.equal(navigation_sandbox(restricted,null).origin,true);
+});
