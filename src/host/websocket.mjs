@@ -87,7 +87,9 @@ export function retire_websocket(socket){
 // WebSocket handshakes use HTTP cookie rules, including HttpOnly cookies. The
 // source is the virtual page/worker origin, never the local HTML file's origin.
 export function websocket_options(store, input, {url, top_url = url, userAgent, cross_site=false,broadcast_origin}) {
+  store.refresh?.();
   const cookieGeneration=store.cookieGeneration;
+  const cookieEpochs=store.cookieEpochSnapshot?.();
   const target = new URL(input);
   if (!['ws:', 'wss:'].includes(target.protocol)) throw new TypeError('Invalid WebSocket URL');
   target.protocol = target.protocol === 'wss:' ? 'https:' : 'http:';
@@ -100,7 +102,7 @@ export function websocket_options(store, input, {url, top_url = url, userAgent, 
   return {
     headers,
     onHeader(name, value) {
-      if (name === 'set-cookie') store.setCookie(target.href, value,true,{crossSite:sameSiteContext==='none',...(cookieGeneration===undefined?{}:{cookieGeneration})});
+      if (name === 'set-cookie') store.setCookie(target.href, value,true,{crossSite:sameSiteContext==='none',...(cookieGeneration===undefined?{}:{cookieGeneration}),...(cookieEpochs===undefined?{}:{cookieEpochs})});
     }
   };
 }

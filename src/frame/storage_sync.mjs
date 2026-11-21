@@ -27,8 +27,11 @@ function storage_available(document){
   return active===document||!!document.unload_event?.isTrusted&&event_phase.call(document.unload_event)!==0&&cookie_document_active(document.native);
 }
 
-rpc.rpc_handlers.storage_reset=(token,kind,entries,revision)=>{
-  if(active?.token===token)active[kind]?.replica.reset(entries,revision);
+rpc.rpc_handlers.storage_reset=(token,kind,entries,revision,event)=>{
+  const document=active,store=document?.[kind];
+  if(document?.token!==token||!store)return;
+  store.replica.reset(entries,revision);
+  if(event)dispatch_storage_event(document,store,event);
 };
 
 rpc.rpc_handlers.storage_update=(token,kind,change,ack,event,revision)=>{
@@ -38,6 +41,9 @@ rpc.rpc_handlers.storage_update=(token,kind,change,ack,event,revision)=>{
   if(!store)return;
   store.replica.update(change,ack,revision);
   if(!event)return;
+  dispatch_storage_event(document,store,event);
+};
+function dispatch_storage_event(document,store,event){
   setTimeout(()=>{
     if(active!==document)return;
     const notification=new StorageEvent('storage',{...event,storageArea:store.storage}),window=document.window();
@@ -48,7 +54,7 @@ rpc.rpc_handlers.storage_update=(token,kind,change,ack,event,revision)=>{
     });
     dispatch.call(globalThis,notification);
   },0);
-};
+}
 
 export function create_document_storage(options,url,window){
   const id=loader.frame_id,token=loader.beacon_context;

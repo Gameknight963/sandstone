@@ -22,16 +22,17 @@ function notify(id,client,procedure,args){
   if(!port){clients.delete(id);return;}
   try{rpc.notify(port,procedure,args);}catch{clients.delete(id);}
 }
-site_data.localListeners.add((origin,entries)=>{
+site_data.localListeners.add((origin,entries,event)=>{
   if(committingLocal)return;
   const version=revision('local',{origin},true);
-  for(const [id,client] of clients)if(client.origin===origin)notify(id,client,'storage_reset',[client.token,'local',entries,version]);
+  for(const [id,client] of clients)if(client.origin===origin)notify(id,client,'storage_reset',[client.token,'local',entries,version,event]);
 });
 export function disconnect_storage(id,token){if(token===undefined||clients.get(id)?.token===token)clients.delete(id);}
 rpc.rpc_handlers.storage_disconnect=(id,token)=>{if(typeof token==='string')disconnect_storage(id,token);};
 rpc.rpc_handlers.storage_ready=(id,token)=>{
   const frame=iframes[id],context=beacons.contexts.get(token);
   if(!frame||!context||context.frame!==id||context.retired)throw new DOMException('Storage document is unavailable','InvalidStateError');
+  site_data.refresh();
   const origin=frame.origin||frame.url.origin;
   if(origin==='null'||frame.broadcast_origin?.startsWith('opaque:'))return {opaque:true};
   context.storage={origin,root:frame.root_id,session:frame.session_storage,url:frame.url.href};
@@ -56,12 +57,13 @@ function mutate(id,_entries,change,kind){
 }
 function commit(id,source,change,kind){
   if(kind==='local'&&source.cleared_local)return;
+  if(kind==='local')site_data.refresh();
   const {origin}=source;
   const previous=kind==='local'?site_data.local[origin]:source.session[origin];
   const next=apply_storage_change(previous,change);
   if(kind==='local'){
     committingLocal=true;
-    try{site_data.setLocal(origin,next);}finally{committingLocal=false;}
+    try{site_data.changeLocal(origin,change);}finally{committingLocal=false;}
   }else source.session[origin]=next;
   const before=new Map(previous||[]),key=change.type==='clear'?null:change.key;
   const oldValue=key===null?null:before.get(key)??null;

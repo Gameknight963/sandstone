@@ -23,6 +23,7 @@ import {verifyManualRedirects} from './manual-redirect.playwright.mjs';
 import {verifyResponseTypes} from './response-types.playwright.mjs';
 import {verifyResponseRedirect} from './response-redirect.playwright.mjs';
 import {verifySiteFileClearing} from './site-data-files.playwright.mjs';
+import {verifyHostSiteData} from './site-data-hosts.playwright.mjs';
 import {verifyActiveSiteClearing} from './site-data-active.playwright.mjs';
 import {verifyPendingCookieClear} from './pending-cookie-clear.playwright.mjs';
 import {verifyBodyHandlers} from './body-handlers.playwright.mjs';
@@ -365,6 +366,7 @@ try {
     const requests = [];
     page.on("request", request => requests.push(request.url()));
     const result = await timed(verify(page, target), "Browser compatibility fixture");
+    if(!storageDenied)result.passed.push(...await timed(verifyHostSiteData(browser,target),'Independent host site-data fixture'));
     result.passed.push(...await timed(verifyXMLRuntimeBootstrap(page),'XML runtime bootstrap fixture'));
     result.passed.push(...await timed(verifyXMLRuntimeProtocol(page),'XML runtime MIME protocol fixture'));
     result.passed.push(...await timed(verifyXMLRuntimeProtocol(page,{in_place:true}),'In-place runtime MIME protocol fixture'));
