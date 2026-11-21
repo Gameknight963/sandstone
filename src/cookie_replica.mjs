@@ -1,5 +1,5 @@
 import {Cookie,CookieJar} from 'tough-cookie';
-import {storage_cookie} from './cookie.mjs';
+import {storage_cookie,cookie_snapshot,set_cookie} from './cookie.mjs';
 
 // Keep script writes optimistic until their host replies. A delayed fetch or a
 // second frame's older snapshot must not erase a newer document.cookie write.
@@ -11,7 +11,7 @@ export class CookieReplica{
   reset(snapshot,ack){
     let changed=false;
     if(snapshot&&(snapshot.sandstone_revision===undefined||snapshot.sandstone_revision>this.revision)){
-      this.confirmed=snapshot;this.revision=snapshot.sandstone_revision??this.revision;
+      this.confirmed=cookie_snapshot(snapshot);this.revision=snapshot.sandstone_revision??this.revision;
       changed=true;
     }
     if(ack!==undefined){const count=this.pending.length;this.pending=this.pending.filter(write=>write.id!==ack);changed||=count!==this.pending.length;}
@@ -19,15 +19,12 @@ export class CookieReplica{
   }
   refresh(){
     this.jar=CookieJar.deserializeSync(this.confirmed);
-    for(const write of this.pending)this.jar.setCookieSync(Cookie.fromJSON(write.cookie),write.url,{http:false,ignoreError:true});
+    for(const write of this.pending)set_cookie(this.jar,Cookie.fromJSON(write.cookie),write.url,{http:false,ignoreError:true,now:new Date(write.cookie.lastAccessed||write.cookie.creation||Date.now())});
   }
   write(text,url,policy){
     const parsed=storage_cookie(text,policy);if(!parsed)return;
-    const cookie=this.jar.setCookieSync(parsed,url,{http:false,ignoreError:true});if(!cookie)return;
+    const cookie=set_cookie(this.jar,parsed,url,{http:false,ignoreError:true});if(!cookie)return;
     const saved=cookie.toJSON();
-    if(typeof cookie.maxAge==='number'){
-      saved.expires=new Date(cookie.maxAge<=0?0:Date.now()+cookie.maxAge*1000).toISOString();delete saved.maxAge;
-    }
     const write={id:++this.sequence,cookie:saved,url};this.pending.push(write);
     Promise.resolve(this.submit(text,url)).then(snapshot=>this.reset(snapshot,write.id),()=>{
       this.reset(undefined,write.id);
