@@ -1,5 +1,6 @@
 import {window_runtime_context,window_runtime_value,window_runtime_accessor} from './runtime_context.mjs';
-import {ctx} from './context.mjs';
+import {ctx,convert_url} from './context.mjs';
+import {character_encoding} from './loader.mjs';
 import {create_obj_proxy} from './global_functions.mjs';
 import {register_message_peer,window_post_message} from './window_messages.mjs';
 import {window_open_value,set_window_open} from './intercept/open.mjs';
@@ -91,7 +92,7 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
       return url;
     };
     const navigate=(value,mode,fragment=false)=>{
-      const url=new URL(`${value}`,ctx.document.baseURI);
+      const url=new URL(convert_url(`${value}`,ctx.document.baseURI,character_encoding));
       const context=window_runtime_context(target);
       // Location changes between same-origin Windows are synchronous. Use the
       // child's private history controller so author overrides cannot replace it.
