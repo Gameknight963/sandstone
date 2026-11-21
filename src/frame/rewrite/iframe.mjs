@@ -522,7 +522,7 @@ export function rewrite_iframe(iframe_element) {
         const share_origin=shares_origin(final_url);
         const mime=error||share_origin?'text/html':content_type;
         const runtime_source=mime==='text/html'?bootstrap_html(loader.frame_html,bootstrap_nonce,2):bootstrap_xml(loader.runtime_src,mime,bootstrap_nonce,2);
-        const runtime_url=use_inline?'about:srcdoc#'+crypto.randomUUID():share_origin?'about:blank?'+crypto.randomUUID():runtime_seed(bootstrap_nonce);
+        const runtime_url=use_inline?'about:srcdoc#'+crypto.randomUUID():share_origin?'about:blank?'+crypto.randomUUID():runtime_seed(bootstrap_nonce,{in_place:true,mime});
         const runtime_html=use_inline?runtime_source.replace(/(<head[^>]*>)/i,'$1<script>history.replaceState(null,"",'+JSON.stringify(runtime_url)+');document.currentScript.remove();<\/script>'):undefined;
         await new Promise((resolve) => {
           const cleanup=()=>{if(native_runtime_load===loaded)native_runtime_load=undefined;controller.signal.removeEventListener('abort',aborted);};
@@ -555,7 +555,7 @@ export function rewrite_iframe(iframe_element) {
         try{
           await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:runtime_url,nonce:bootstrap_nonce});
           if(!use_inline&&!share_origin){
-            const prepared=await rpc.load_frame_runtime(iframe_element,runtime_source,bootstrap_nonce,{signal:controller.signal,mime});
+            const prepared=await rpc.load_frame_runtime(iframe_element,runtime_source,bootstrap_nonce,{signal:controller.signal,mime,in_place_url:runtime_url});
             if(!current())return;
             rpc.commit_frame_runtime(iframe_element,prepared,bootstrap_nonce);
             await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:prepared,nonce:bootstrap_nonce});

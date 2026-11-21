@@ -29,3 +29,19 @@ test('Runtime seeds preserve supported XML MIME types and reject other types bef
     deliver({mime});assert.equal(created.length,1);assert.equal(created[0].type,mime);assert.equal(await created[0].text(),'<xml/>');
   }
 });
+
+test('In-place seeds authenticate preparation and commit without navigating or executing early',()=>{
+  const url=runtime_seed('inline-secret',{in_place:true}),markup=decodeURIComponent(url.slice(url.indexOf(',')+1));
+  const calls=[],replies=[],parent={postMessage(message){replies.push(message);}},boundary=new Error('Reached native parser');let receive;
+  const realm=createContext({parent,location:{href:url,replace(){assert.fail('In-place installation navigated');}},DOMParser:class{parseFromString(source,mime){calls.push({source,mime});throw boundary;}},addEventListener(type,listener){receive=listener;},removeEventListener(type,listener){assert.equal(listener,receive);calls.push('remove');}});
+  new Script(markup.match(/<script[^>]*>([\s\S]*)<\/script>/)[1]).runInContext(realm);
+  const deliver=(data,{trusted=true,source=parent}={})=>receive({data,isTrusted:trusted,source,ports:[],stopImmediatePropagation(){}});
+  const prepare={sandstone_bootstrap:1,type:'runtime',id:'prepare',nonce:'inline-secret',html:'<script>runtime</script>',mime:'text/html'};
+  for(const mime of ['image/svg+xml','','text/html;charset=utf-8'])deliver({...prepare,mime});
+  deliver({...prepare,nonce:'wrong'});deliver(prepare,{trusted:false});deliver(prepare,{source:{}});assert.equal(replies.length,0);
+  deliver(prepare);assert.equal(replies.length,1);assert.equal(replies[0].url,url);assert.deepEqual(calls,[]);
+  deliver({...prepare,html:'replacement'});assert.equal(replies.length,1);
+  const commit={sandstone_bootstrap:1,type:'commit_runtime',nonce:'inline-secret',url};
+  deliver({...commit,url:'blob:wrong'});deliver({...commit,nonce:'wrong'});deliver(commit,{trusted:false});assert.deepEqual(calls,[]);
+  assert.throws(()=>deliver(commit),error=>error===boundary);assert.deepEqual(calls,['remove',{source:prepare.html,mime:'text/html'}]);
+});

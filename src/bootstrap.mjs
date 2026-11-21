@@ -51,8 +51,39 @@ const seed_source=String.raw`function(nonce,types){
     };
     addEventListener('message',receive,true);
   }`;
-export function runtime_seed(nonce){
+// Child runtimes keep the seed's document and navigation-time sandbox flags.
+// No second navigation can pick up permissions changed during installation.
+const in_place_seed_source=String.raw`function(nonce,mime){
+    let prepared;
+    const receive=event=>{
+      const message=event.data;
+      if(!event.isTrusted||event.source!==parent||message?.sandstone_bootstrap!==1)return;
+      if(!['ping','runtime','commit_runtime'].includes(message.type))return;
+      event.stopImmediatePropagation();
+      for(const port of event.ports||[])port.close();
+      if(message.type==='ping'){
+        if(message.url===undefined||message.url===location.href)event.source.postMessage({sandstone_bootstrap:1,type:'pong',id:message.id,url:location.href,nonce},'*');
+      }else if(message.type==='runtime'&&!prepared&&message.nonce===nonce&&typeof message.html==='string'&&(message.mime===undefined?'text/html':message.mime)===mime){
+        prepared={html:message.html,url:location.href};
+        event.source.postMessage({sandstone_bootstrap:1,type:'runtime_url',id:message.id,nonce,url:prepared.url},'*');
+      }else if(message.type==='commit_runtime'&&message.nonce===nonce&&prepared&&message.url===prepared.url){
+        removeEventListener('message',receive,true);
+        // document.open() would cancel a newer, pending navigation. Populate
+        // this document without changing its navigation or parser lifecycle.
+        const parsed=new DOMParser().parseFromString(prepared.html,mime==='text/html'?'text/html':'application/xml');
+        document.replaceChild(document.importNode(parsed.documentElement,true),document.documentElement);
+        const old=document.querySelector('script'),script=document.createElementNS(old.namespaceURI,'script');
+        for(const attribute of old.attributes)script.setAttributeNS(attribute.namespaceURI,attribute.name,attribute.value);
+        script.textContent=old.textContent;old.replaceWith(script);
+      }
+    };
+    addEventListener('message',receive,true);
+  }`;
+export function runtime_seed(nonce,{in_place=false,mime='text/html'}={}){
   // This runs in a new realm. Keep it as source text so bundling cannot rename
   // its globals into references to the parent runtime's private bindings.
-  return 'data:text/html;charset=utf-8,'+seed_encoder.encode('<!doctype html><script data-sandstone-seed="'+nonce+'">('+seed_source+')('+JSON.stringify(nonce)+','+JSON.stringify(runtime_types)+');<\/script>');
+  mime=runtime_content_type(mime);
+  const source=in_place?'('+in_place_seed_source+')('+JSON.stringify(nonce)+','+JSON.stringify(mime)+');':'('+seed_source+')('+JSON.stringify(nonce)+','+JSON.stringify(runtime_types)+');';
+  const markup=mime==='text/html'?'<!doctype html><script data-sandstone-seed="'+nonce+'">'+source+'<\/script>':bootstrap_xml(source,mime,nonce);
+  return 'data:'+mime+';charset=utf-8,'+seed_encoder.encode(markup);
 }

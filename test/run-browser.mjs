@@ -59,6 +59,7 @@ import {verifyWorkerBundles} from './worker-bundles.playwright.mjs';
 import {verifyLocalIframes} from './local-iframes.playwright.mjs';
 import {verifyXMLRuntimeBootstrap} from './xml-runtime-bootstrap.playwright.mjs';
 import {verifyXMLRuntimeProtocol} from './xml-runtime-protocol.playwright.mjs';
+import {verifySeedNavigation} from './runtime-seed-navigation.playwright.mjs';
 import {verifyXMLDocuments} from './xml-documents.playwright.mjs';
 import {verifyXMLStylesheets} from './xml-stylesheets.playwright.mjs';
 import {verifyXMLParserScripts} from './xml-parser-scripts.playwright.mjs';
@@ -361,6 +362,8 @@ try {
     const result = await timed(verify(page, target), "Browser compatibility fixture");
     result.passed.push(...await timed(verifyXMLRuntimeBootstrap(page),'XML runtime bootstrap fixture'));
     result.passed.push(...await timed(verifyXMLRuntimeProtocol(page),'XML runtime MIME protocol fixture'));
+    result.passed.push(...await timed(verifyXMLRuntimeProtocol(page,{in_place:true}),'In-place runtime MIME protocol fixture'));
+    result.passed.push(...await timed(verifySeedNavigation(page),'In-place seed navigation fixture'));
     result.passed.push(...await timed(verifyXMLDocuments(page),'XML document parser fixture'));
     result.passed.push(...await timed(verifyXMLStylesheets(page),'XML stylesheet instruction fixture'));
     result.passed.push(...await timed(verifyXMLParserScripts(page),'XML parser script fixture'));

@@ -152,3 +152,16 @@ test('Runtime preparation forwards XML MIME types and rejects unsupported types 
   events.emit({sandstone_bootstrap:1,type:'runtime_url',id:request.id,nonce:'xml-secret',url:'blob:xml'},target);
   assert.equal(await pending,'blob:xml');assert.equal(events.listeners(),0);
 });
+
+test('In-place runtime preparation requires the exact seed URL and removes aborted waiters',async t=>{
+  const events=window_events(t),messages=[],target={postMessage:message=>messages.push(message)};
+  for(const url of ['https://remote.test/','blob:runtime','data:text/xml;charset=utf-8,seed'])assert.throws(()=>rpc.load_frame_runtime({contentWindow:target},'runtime','nonce',{in_place_url:url}),TypeError);
+  assert.equal(events.listeners(),0);assert.equal(messages.length,0);
+  const seed='data:text/html;charset=utf-8,seed';let resolved=false;
+  const waiting=rpc.load_frame_runtime({contentWindow:target},'runtime','nonce',{in_place_url:seed}).then(url=>{resolved=true;return url;});
+  const reply={sandstone_bootstrap:1,type:'runtime_url',id:messages[0].id,nonce:'nonce',url:seed};
+  events.emit({...reply,url:'blob:runtime'},target);events.emit({...reply,url:seed+'other'},target);events.emit({...reply,nonce:'wrong'},target);events.emit(reply,{});
+  await Promise.resolve();assert.equal(resolved,false);events.emit(reply,target);assert.equal(await waiting,seed);assert.equal(events.listeners(),0);
+  const controller=new AbortController(),aborted=rpc.load_frame_runtime({contentWindow:target},'runtime','nonce',{in_place_url:seed,signal:controller.signal});
+  controller.abort();await assert.rejects(aborted,{name:'AbortError'});assert.equal(events.listeners(),0);
+});

@@ -230,14 +230,15 @@ export function set_host(frame, msg_port, {nonce}={}) {
   post_bootstrap_message(msg_target,msg,[msg_port],!window_frame);
 }
 
-export function load_frame_runtime(frame,html,nonce,{signal,mime='text/html'}={}){
+export function load_frame_runtime(frame,html,nonce,{signal,mime='text/html',in_place_url}={}){
   mime=runtime_content_type(mime);
+  if(in_place_url!==undefined&&(typeof in_place_url!=='string'||!in_place_url.startsWith('data:'+mime+';charset=utf-8,')))throw new TypeError('An in-place runtime requires its seed URL');
   const id='runtime:'+Math.random()+':'+Math.random();
   return new Promise((resolve,reject)=>{
     const cleanup=()=>{bootstrap_waiters.delete(receive);release_bootstrap();signal?.removeEventListener('abort',abort);};
     const abort=()=>{cleanup();reject(signal.reason||new DOMException('The operation was aborted','AbortError'));};
     const receive=(message,source)=>{
-      if(message.type!=='runtime_url'||message.id!==id||message.nonce!==nonce||unwrap_global_target(source)!==unwrap_global_target(frame.contentWindow)||typeof message.url!=='string'||!message.url.startsWith('blob:'))return;
+      if(message.type!=='runtime_url'||message.id!==id||message.nonce!==nonce||unwrap_global_target(source)!==unwrap_global_target(frame.contentWindow)||typeof message.url!=='string'||(in_place_url===undefined?!message.url.startsWith('blob:'):message.url!==in_place_url))return;
       cleanup();resolve(message.url);
     };
     if(signal?.aborted){abort();return;}
