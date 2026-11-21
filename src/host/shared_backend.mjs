@@ -8,6 +8,7 @@ import {create_bootstrap_nonce} from '../bootstrap.mjs';
 import {set_role} from '../rpc.mjs';
 import {owner_prefix,publish_backend} from './worker_discovery.mjs';
 import {crypto_service} from './crypto.mjs';
+import {PortRelay} from './port_relay.mjs';
 
 // This bundle runs only in a trusted host-origin worker. Authored JavaScript
 // belongs in a separate opaque runtime, connected through WorkerServiceHost.
@@ -47,7 +48,7 @@ function initialize(input,binary){
 
 function close(id){
   const entry=hosts.get(id);if(!entry)return false;
-  hosts.delete(id);entry.control?.close();entry.host.close();return true;
+  hosts.delete(id);for(const bridge of entry.bridges.values())bridge.close();entry.control?.close();entry.host.close();return true;
 }
 
 globalThis.onconnect=event=>{
@@ -82,7 +83,16 @@ globalThis.onconnect=event=>{
           providers.add(event.ports[0],{lease:message.lease,authority:message.authority});value=true;
         }else if(message.op==='open'){
           const host=new WorkerServiceHost({...message.context,cookie_policy},event.ports[0]);
-          opened=host.id;hosts.set(host.id,{host});value={id:host.id,profile:host.profile};
+          opened=host.id;hosts.set(host.id,{host,bridges:new Map()});value={id:host.id,profile:host.profile};
+        }else if(message.op==='bridge'){
+          const entry=hosts.get(message.worker);if(!entry)throw new DOMException('Unknown worker service','InvalidStateError');
+          if(event.ports.length!==2)throw new TypeError('Two worker communication ports are required');
+          const id=create_bootstrap_nonce(),bridge=new PortRelay(event.ports[0],event.ports[1],{onError:(error,direction)=>{
+            try{port.postMessage({type:'bridge-error',worker:message.worker,bridge:id,direction,error:{name:String(error.name||'Error'),message:String(error.message||error)}});}catch{}
+          }});entry.bridges.set(id,bridge);value=id;
+        }else if(message.op==='unbridge'){
+          const bridges=hosts.get(message.worker)?.bridges,bridge=bridges?.get(message.bridge);
+          value=!!bridge;if(bridge){bridges.delete(message.bridge);bridge.close();}
         }else if(message.op==='control'){
           const entry=hosts.get(message.worker),control=event.ports[0];
           if(!entry)throw new DOMException('Unknown worker service','InvalidStateError');

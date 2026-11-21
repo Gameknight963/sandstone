@@ -24,7 +24,7 @@ export async function connect(url,{name,websocket,binary,signal}={}){
   signal?.throwIfAborted();
   if(!['http:','https:'].includes(globalThis.location?.protocol)||!NativeSharedWorker)throw new DOMException('Shared worker backends require a hosted page','NotSupportedError');
   if(typeof name!=='string'||!name)throw new TypeError('A private worker backend name is required');
-  const worker=new NativeSharedWorker(url,{name}),pending=new Map();let sequence=0,closed=false,resolveClosed;
+  const worker=new NativeSharedWorker(url,{name}),pending=new Map(),events=new EventTarget();let sequence=0,closed=false,resolveClosed;
   const ended=new Promise(resolve=>{resolveClosed=resolve;});
   const close=(error=unavailable())=>{
     if(closed)return;closed=true;
@@ -35,7 +35,9 @@ export async function connect(url,{name,websocket,binary,signal}={}){
   const abort=()=>close(signal.reason);
   const failed=event=>close(new Error(event.message||'Worker backend failed'));
   const receive=event=>{
-    const reply=event.data,call=pending.get(reply?.id);if(!call)return;
+    const reply=event.data;
+    if(reply?.type==='bridge-error'){events.dispatchEvent(new MessageEvent('bridge-error',{data:reply}));return;}
+    const call=pending.get(reply?.id);if(!call)return;
     pending.delete(reply.id);
     if(reply.ok===true)call.resolve(reply.value);
     else{const error=new Error(reply.error?.message||'Worker backend request failed');error.name=reply.error?.name||'Error';call.reject(error);}
@@ -50,7 +52,7 @@ export async function connect(url,{name,websocket,binary,signal}={}){
   signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   try{
     const profile=await request('initialize',{websocket,binary});
-    return {url,name,...profile,request,close,closed:ended,get isClosed(){return closed;}};
+    return {url,name,...profile,request,close,events,closed:ended,get isClosed(){return closed;}};
   }catch(error){close(error);throw error;}
 }
 
