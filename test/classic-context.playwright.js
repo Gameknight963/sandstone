@@ -73,5 +73,10 @@ async page=>{
     if(await page.evaluate(()=>main_frame.eval_js('classicLateMessages'))!==0)throw new Error('Terminated worker resumed after a held script response');
     if(requests!==nativeRequests)throw new Error('A classic script made a direct HTTP request');
     return ['Classic scripts retain distinct import policies and credentials across repeated URLs and document changes','Classic worker imports retain worker request metadata and imported script module bases','Worker prefetch respects opaque origins, redirect boundaries and cancellation before startup'];
-  }finally{try{await context.close();}finally{for(const server of [first,second])server.closeAllConnections();await Promise.all([first,second].map(server=>new Promise(resolve=>server.close(resolve))))}}
+  }finally{
+    // Session cookies now survive host reloads, just as they do natively.
+    // Remove this fixture's cookie before the next fresh native comparison.
+    await page.evaluate(origin=>sandstone.controller.site_data.setCookie(origin+'/','classic_ctx=; Max-Age=0; Path=/'),a).catch(()=>{});
+    try{await context.close();}finally{for(const server of [first,second])server.closeAllConnections();await Promise.all([first,second].map(server=>new Promise(resolve=>server.close(resolve))))}
+  }
 }

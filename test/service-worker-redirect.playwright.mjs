@@ -83,6 +83,7 @@ export async function verifyServiceWorkerRedirects(page){
     return ['Synthetic, mixed and HTTP redirects match native Chromium cookies, credentials, Origin, Referer and Fetch Metadata','Network fallback retains its own native redirect budget after worker-generated redirects'];
   }finally{
     await fixture.evaluate(async()=>{
+      if(globalThis.redirectRecord)sandstone.controller.site_data.setCookie(redirectRecord.origin+'/','redirect-session=; Max-Age=0; Path=/');
       if(globalThis.redirectRecord)await sandstone.service_workers.clear_registrations(new URL(redirectRecord.origin).hostname);
       if(globalThis.redirectClient)sandstone.service_workers.manager.removeClient(redirectClient.id);
     }).catch(()=>{});
