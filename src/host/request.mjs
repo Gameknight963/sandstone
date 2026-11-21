@@ -17,6 +17,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
   const captured=data.captureCookieContext&&init.credentials!=='omit'?await data.captureCookieContext(context,init.signal):context;
   const cookieGeneration=captured.cookieGeneration??data.cookieGeneration;
   const cookieEpochs=captured.cookieEpochs??data.cookieEpochSnapshot?.();
+  const cookieAuthority=captured.cookieAuthority;
   let url = new URL(input);
   const source = new URL(context.url || url);
   const top = new URL(context.top_url || source);
@@ -63,7 +64,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
     if (referrer) headers.set('referer',referrer);
     const synthetic=worker?await worker(url.href,{...options,mode,redirect:'manual',referrer,referrerPolicy:policy}):undefined;
     if (allowed&&!synthetic) {
-      const cookieOptions={sameSiteContext,allowUnsafe:context.navigation&&!context.nested&&!safe_method};
+      const cookieOptions={sameSiteContext,allowUnsafe:context.navigation&&!context.nested&&!safe_method,...(cookieAuthority===undefined?{}:{cookieAuthority})};
       const cookies = data.cookieHeader?await data.cookieHeader(url.href,cookieOptions,init.signal):cookie_header(data.cookies,url.href,cookieOptions);
       if (cookies) headers.set("cookie", cookies);
     }
@@ -80,7 +81,7 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
       }
       try{
         for (const value of new Set(setCookies)) {
-          const pending=data.setCookie(url.href, value,true,{crossSite:sameSiteContext==='none',topLevel:context.navigation&&!context.nested,...(cookieGeneration===undefined?{}:{cookieGeneration}),...(cookieEpochs===undefined?{}:{cookieEpochs})},init.signal);
+          const pending=data.setCookie(url.href, value,true,{crossSite:sameSiteContext==='none',topLevel:context.navigation&&!context.nested,...(cookieGeneration===undefined?{}:{cookieGeneration}),...(cookieEpochs===undefined?{}:{cookieEpochs}),...(cookieAuthority===undefined?{}:{cookieAuthority})},init.signal);
           if(pending?.then)await pending;
         }
       }catch(error){await response.body?.cancel().catch(()=>{});throw error;}

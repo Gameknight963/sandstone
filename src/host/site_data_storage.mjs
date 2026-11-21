@@ -81,10 +81,14 @@ export class SiteDataStorage {
     const indexed=this.read(['indexed']);
     return {local,cookies,epochs,cookieOrders,indexed:Array.isArray(indexed)?indexed:[]};
   }
-  setCookie(cookie){
+  cookieVersion(cookie){
+    const epoch=this.cookieEpoch(cookie.domain),record=this.read(['cookie',cookie.domain,cookie.path||'/',cookie.key||'',epoch]);
+    return {epoch,version:record?.version||'legacy:'+JSON.stringify(record),order:record?.order};
+  }
+  setCookie(cookie,version=this.epoch()){
     const epoch=this.cookieEpoch(cookie.domain),parts=['cookie',cookie.domain,cookie.path||'/',cookie.key||'',epoch];
     const previous=this.read(parts),order=previous?.value?.creation===cookie.creation&&previous.order||this.order();
-    this.write(parts,{epoch,value:durable(cookie)?cookie:null,order});return {epoch,order};
+    this.write(parts,{epoch,value:durable(cookie)?cookie:null,order,version});return {epoch,order};
   }
   changeLocal(origin,change){
     if(change.type==='clear'){this.clearLocal(origin,change.url);return;}

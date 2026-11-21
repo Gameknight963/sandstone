@@ -7,12 +7,20 @@ export function cookie_policy_handler(store){
   return async message=>{
     if(message.op==='capture'){
       const {cookieGeneration,cookieEpochs}=snapshot_request_context(store,message.context);
+      const cookieAuthority=store.cookiePolicyAuthority();
+      if(message.context?.cookieAuthority&&message.context.cookieAuthority!==cookieAuthority)throw new DOMException('Cookie authority changed','InvalidStateError');
       await store.ready;
-      return {cookieGeneration,cookieEpochs};
+      // Persistent clear epochs are shared between hosts. Their local numeric
+      // generation counters must not be compared after a provider handoff.
+      return {cookieGeneration:store.persistence?undefined:cookieGeneration,cookieEpochs,cookieAuthority};
     }
     await store.ready;
     store.refresh?.();
-    if(message.op==='header')return cookie_header(store.cookies,message.url,message.options);
+    if(message.op==='header'){
+      if(message.options?.cookieAuthority&&message.options.cookieAuthority!==store.cookiePolicyAuthority())throw new DOMException('Cookie authority changed','InvalidStateError');
+      return cookie_header(store.cookies,message.url,message.options);
+    }
+    if(message.op==='prepare')return store.prepareCookie(message.url,message.value,true,message.options);
     if(message.op==='set'){store.setCookie(message.url,message.value,true,message.options);return;}
     throw new TypeError('Unknown cookie policy operation');
   };
@@ -32,10 +40,21 @@ function call(request,message,signal){
 }
 
 export class CookiePolicyBridge {
-  constructor(request){if(typeof request!=='function')throw new TypeError('A trusted cookie policy channel is required');this.request=request;}
+  constructor(request){if(typeof request!=='function')throw new TypeError('A trusted cookie policy channel is required');this.request=request;this.writes=Promise.resolve();}
   captureCookieContext(context,signal){
-    return call(this.request,{op:'capture',context:{cookieGeneration:context.cookieGeneration,cookieEpochs:context.cookieEpochs}},signal);
+    return call(this.request,{op:'capture',context:{cookieGeneration:context.cookieGeneration,cookieEpochs:context.cookieEpochs,cookieAuthority:context.cookieAuthority}},signal);
   }
   cookieHeader(url,options,signal){return call(this.request,{op:'header',url,options},signal);}
-  setCookie(url,value,http,options,signal){return call(this.request,{op:'set',url,value,options},signal);}
+  setCookie(url,value,http,options,signal){
+    signal?.throwIfAborted();
+    const pending=this.writes.then(()=>this.writeCookie(url,value,options,signal));
+    this.writes=pending.catch(()=>{});
+    return call(()=>pending,undefined,signal);
+  }
+  async writeCookie(url,value,options,signal){
+    const cookieWrite=await call(this.request,{op:'prepare',url,value,options},signal);
+    if(cookieWrite===null)return;
+    if(!cookieWrite||typeof cookieWrite!=='object')throw new TypeError('Invalid cookie write token');
+    return call(this.request,{op:'set',url,value,options:{...options,cookieWrite}},signal);
+  }
 }

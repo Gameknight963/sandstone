@@ -22,7 +22,7 @@ test('Asynchronous worker cookie policy sends HttpOnly cookies and commits redir
   },bridge,origin+'/start',{credentials:'include'},{url:origin+'/worker.js'});
   assert.equal(await response.text(),'body');assert.equal(requests[0].headers.cookie,'session=secret');assert.equal(requests[1].headers.cookie,'session=secret; redirected=yes');
   assert.equal(store.cookies.getCookieStringSync(origin),'session=secret; redirected=yes');
-  assert.deepEqual(calls.map(value=>value.op),['capture','header','set','header']);
+  assert.deepEqual(calls.map(value=>value.op),['capture','header','prepare','set','header']);
 });
 
 test('A worker cookie provider preserves one clear barrier across redirects and late HTTP responses',async()=>{
@@ -57,7 +57,7 @@ test('Aborting while a cookie provider is stalled promptly rejects without start
 
 test('A failed response cookie commit cancels the HTTP body and prevents the next redirect',async()=>{
   let cancelled=false,count=0;
-  const bridge=new CookiePolicyBridge(message=>{if(message.op==='set')throw new Error('Provider closed');return message.op==='capture'?{}:'';});
+  const bridge=new CookiePolicyBridge(message=>{if(message.op==='set')throw new Error('Provider closed');return message.op==='capture'?{}:message.op==='prepare'?{id:'token'}:'';});
   await assert.rejects(fetch_with_cookies(()=>{count++;return new Response(new ReadableStream({cancel(){cancelled=true;}}),{status:302,headers:{location:'/next','set-cookie':'session=secret'}});},bridge,origin,{}, {url:origin}),/Provider closed/);
   assert.equal(count,1);assert.equal(cancelled,true);
 });

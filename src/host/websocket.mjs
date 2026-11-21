@@ -115,8 +115,8 @@ export function websocket_options(store, input, context) {
 // over the trusted UI channel, including writes from failed HTTP handshakes.
 export async function websocket_policy_options(store,input,context,signal){
   const {target,sameSiteContext,headers}=websocket_context(input,context);
-  const {cookieGeneration,cookieEpochs}=await store.captureCookieContext(context,signal);
-  const cookie=await store.cookieHeader(target.href,{sameSiteContext},signal);
+  const {cookieGeneration,cookieEpochs,cookieAuthority}=await store.captureCookieContext(context,signal);
+  const cookie=await store.cookieHeader(target.href,{sameSiteContext,cookieAuthority},signal);
   if(cookie)headers.Cookie=cookie;
   let writes=Promise.resolve();
   return {headers,
@@ -124,7 +124,12 @@ export async function websocket_policy_options(store,input,context,signal){
       if(name!=='set-cookie')return;
       // Headers already accepted from the transport still commit if its client
       // closes while policy work is pending. The captured clear barrier remains.
-      writes=writes.then(()=>store.setCookie(target.href,value,true,{crossSite:sameSiteContext==='none',cookieGeneration,cookieEpochs}));
+      let pending;
+      try{pending=store.setCookie(target.href,value,true,{crossSite:sameSiteContext==='none',cookieGeneration,cookieEpochs,cookieAuthority});}
+      catch(error){pending=Promise.reject(error);}
+      // Reserve the shared policy queue at header arrival, before another
+      // HTTP response or socket can overtake this connection's next cookie.
+      writes=Promise.all([writes,pending]).then(()=>{});
       writes.catch(()=>{});
     },
     cookiesReady:()=>writes

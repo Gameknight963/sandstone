@@ -36,7 +36,12 @@ test('Clearing site data during a WebSocket handshake rejects delayed writes and
 
 test('WebSocket open, messages and closure wait for handshake cookie writes in native event order',async()=>{
   const held=deferred(),created=deferred(),events=[],writes=[];let native;
-  const store={captureCookieContext:async()=>({cookieGeneration:7}),cookieHeader:async()=>'',setCookie:async(url,value)=>{writes.push(value);await held.promise;}};
+  const store=new CookiePolicyBridge(async message=>{
+    if(message.op==='capture')return {cookieGeneration:7};
+    if(message.op==='header')return '';
+    if(message.op==='prepare')return {id:'prepared'};
+    writes.push(message.value);await held.promise;
+  });
   class Transport{
     constructor(url,protocols,options){native=this;this.options=options;this.connected=true;this.protocol='selected';created.resolve();}
     abort(){this.connected=false;}

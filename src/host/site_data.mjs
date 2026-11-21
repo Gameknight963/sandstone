@@ -4,6 +4,7 @@ import {storage_cookie} from '../cookie.mjs';
 import {apply_storage_change} from '../storage_changes.mjs';
 import {SiteDataStorage,cookie_storage_key,compare_storage_order} from './site_data_storage.mjs';
 import {CookieSession} from './cookie_session.mjs';
+import {create_bootstrap_nonce} from '../bootstrap.mjs';
 
 const storage_key = "sandstone_site_data_v1";
 const session_key='sandstone_session_cookies_v1';
@@ -31,6 +32,7 @@ export class SiteDataStore {
     this.local = Object.create(null);
     this.cookies = new CookieJar();
     this.cookieGeneration=0;this.cookieCleared=new Map();
+    this.cookieVersions=new Map();this.cookieVersionSequence=0;
     this.indexed = [];
     this.cacheStorage=[];
     this.serviceWorkers=[];
@@ -198,22 +200,75 @@ export class SiteDataStore {
     for(const listener of this.localListeners)listener(origin,this.local[origin]);
   }
 
+  cookiePolicyAuthority(){return this.persistence?'persistent':(this.cookieActor??=create_bootstrap_nonce());}
+
+  cookiePolicyAllows(domain,policy){
+    if(policy.cookieAuthority&&policy.cookieAuthority!==this.cookiePolicyAuthority())return false;
+    if(this.persistence&&policy.cookieEpochs&&(Object.hasOwn(policy.cookieEpochs,domain)?policy.cookieEpochs[domain]:'')!==this.persistence.cookieEpoch(domain))return false;
+    return policy.cookieGeneration===undefined||(this.cookieCleared.get(domain)||0)<=policy.cookieGeneration;
+  }
+
+  cookieVersion(cookie){
+    return this.persistence?this.persistence.cookieVersion(cookie):{epoch:String(this.cookieCleared.get(cookie.domain)||0),version:this.cookieVersions.get(cookie_storage_key(cookie))||''};
+  }
+
+  // Prepare without changing the jar. A retry carries the same version and
+  // timestamp, so it cannot replay a committed write over a newer cookie.
+  prepareCookie(url,value,http=true,policy={}){
+    try{
+      // A peer's atomic cookie record can arrive before its revision event.
+      // Bind both the payload and version to that same current storage view.
+      if(this.persistence)this.storageRevision=undefined;
+      this.refresh();value=String(value);url=new URL(url).href;
+      const parsed=storage_cookie(value,policy);if(!parsed)return null;
+      const domain=canonicalDomain(parsed.domain||new URL(url).hostname);
+      if(!this.cookiePolicyAllows(domain,policy))return null;
+      const time=Date.now(),cookie=this.cookies.cloneSync().setCookieSync(parsed,url,{http,ignoreError:true,now:new Date(time)});
+      if(!cookie)return null;
+      const {epoch,version}=this.cookieVersion(cookie);
+      return {id:create_bootstrap_nonce(),authority:this.cookiePolicyAuthority(),key:cookie_storage_key(cookie),epoch,previous:version,time,cookie:cookie.toJSON(),url,value,http:!!http};
+    }catch{return null;}
+  }
+
   setCookie(url, value, http = true, policy = {}) {
     try {
+      if(policy.cookieWrite&&this.persistence)this.storageRevision=undefined;
       this.refresh();
+      value=String(value);
       const parsed=storage_cookie(value,policy);
       if(!parsed)return undefined;
       // An old response must not restore deleted cookies or erase replacements
       // written after an explicit clear. Other cookie domains remain writable.
       const domain=canonicalDomain(parsed.domain||new URL(url).hostname);
-      if(this.persistence&&policy.cookieEpochs&&(Object.hasOwn(policy.cookieEpochs,domain)?policy.cookieEpochs[domain]:'')!==this.persistence.cookieEpoch(domain))return undefined;
-      if(policy.cookieGeneration!==undefined&&(this.cookieCleared.get(domain)||0)>policy.cookieGeneration)return undefined;
-      const cookie = this.cookies.setCookieSync(parsed, url, {http, ignoreError: true});
+      if(!this.cookiePolicyAllows(domain,policy))return undefined;
+      const write=policy.cookieWrite;
+      if(write){
+        if(typeof write.id!=='string'||!write.id||write.value!==value||write.url!==new URL(url).href||write.http!==!!http)return undefined;
+        const candidate=this.cookies.cloneSync().setCookieSync(parsed,url,{http,ignoreError:true,now:new Date(write.time)});
+        if(!candidate||write.key!==cookie_storage_key(candidate)||write.authority!==this.cookiePolicyAuthority())return undefined;
+        const current=this.cookieVersion(candidate);
+        if(current.epoch!==write.epoch)return undefined;
+        if(current.version===write.id){
+          // A session payload may have died with its first provider after its
+          // private storage tombstone committed but before its broadcast.
+          if(this.persistence&&!durable(write.cookie)&&!this.sessionCookies.has(write.key)&&cookie_storage_key(write.cookie)===write.key){
+            const data=this.cookies.serializeSync();data.cookies=data.cookies.filter(cookie=>cookie_storage_key(cookie)!==write.key);data.cookies.push(write.cookie);
+            this.cookies=CookieJar.deserializeSync(data);
+            this.sessionCookies.set(write.key,{cookie:write.cookie,epoch:current.epoch,order:current.order});
+            this.storageRevision=undefined;this.refresh();
+            this.persist();for(const listener of this.cookieListeners)listener(candidate.domain);
+          }
+          return undefined;
+        }
+        if(current.version!==write.previous)return undefined;
+      }
+      const cookie = this.cookies.setCookieSync(parsed, url, {http, ignoreError: true,...(write?{now:new Date(write.time)}:{})});
       if(cookie&&this.persistence){
-        const data=cookie.toJSON(),id=cookie_storage_key(data),saved=this.storageWrite(storage=>storage.setCookie(data));
+        const data=cookie.toJSON(),id=cookie_storage_key(data),saved=this.storageWrite(storage=>storage.setCookie(data,write?.id));
         if(durable(data))this.sessionCookies.delete(id);
         else this.sessionCookies.set(id,{cookie:data,epoch:saved?.epoch,order:saved?.order});
       }
+      if(cookie&&!this.persistence)this.cookieVersions.set(cookie_storage_key(cookie),write?.id||String(++this.cookieVersionSequence));
       this.persist();
       if(cookie)for(const listener of this.cookieListeners)listener(cookie.domain);
       return cookie;
@@ -323,6 +378,7 @@ export class SiteDataStore {
       data.cookies = data.cookies.filter(cookie => cookie.domain !== hostname);
       this.cookies = CookieJar.deserializeSync(data);
       for(const [id,entry] of this.sessionCookies)if(entry.cookie.domain===hostname)this.sessionCookies.delete(id);
+      for(const id of this.cookieVersions.keys())if(JSON.parse(id)[0]===hostname)this.cookieVersions.delete(id);
       for(const listener of this.cookieListeners)listener(hostname);
     }
     this.persist();
