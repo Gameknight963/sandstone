@@ -1,7 +1,7 @@
 import {define_event_handlers} from './event_handlers.mjs';
 
-// Transport operations remain on the host. In particular, Blob conversion must
-// stay in the send queue so a later text message cannot overtake it.
+// Admit sends and closes synchronously to the host. Its queue can drain native
+// Blob bytes even after this document is retired.
 export function create_websocket_class({base, connect, events, send, close}) {
   class WebSocket extends EventTarget {
     #id;
@@ -10,7 +10,6 @@ export function create_websocket_class({base, connect, events, send, close}) {
     #protocol = '';
     #binaryType = 'blob';
     #buffered = 0;
-    #queue = Promise.resolve();
     #closedDuringConnect = false;
 
     constructor(url, protocols = []) {
@@ -89,11 +88,8 @@ export function create_websocket_class({base, connect, events, send, close}) {
       } else { data = String(data); bytes = new TextEncoder().encode(data).length; }
       this.#buffered += bytes;
       if (this.#state !== 1) return;
-      this.#queue = this.#queue.then(async () => {
-        if (data instanceof Blob) data = new Uint8Array(await data.arrayBuffer());
-        await send(this.#id, data);
-        this.#buffered -= bytes;
-      }).catch(() => this.#fail());
+      try{Promise.resolve(send(this.#id,data)).then(()=>{this.#buffered-=bytes;},()=>this.#fail());}
+      catch{queueMicrotask(()=>this.#fail());}
     }
 
     close(code=undefined, reason = '') {
@@ -116,7 +112,8 @@ export function create_websocket_class({base, connect, events, send, close}) {
       this.#closedDuringConnect = connecting;
       this.#state = 2;
       if (this.#id !== undefined) {
-        this.#queue = this.#queue.then(() => close(this.#id,code,reason,connecting)).then(() => {if(connecting)this.#finish(true);}, () => this.#finish(true));
+        try{Promise.resolve(close(this.#id,code,reason,connecting)).then(()=>{if(connecting)this.#finish(true);},()=>this.#finish(true));}
+        catch{queueMicrotask(()=>this.#finish(true));}
       }
     }
   }

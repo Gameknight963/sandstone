@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {chromium} from 'playwright-core';
 import {server as wisp} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
 import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
-import {is_websocket_close_path,websocket_close_connection,websocket_close_script,websocket_close_records,websocket_lifetime_script} from './websocket-close-fixture.mjs';
+import {is_websocket_close_path,websocket_close_connection,websocket_close_script,websocket_close_records,websocket_lifetime_script,websocket_departure_script} from './websocket-close-fixture.mjs';
 import {font_fixture, font_script, constructor_font_script} from './font-fixture.mjs';
 import {keepalive_fixture,keepalive_quota_script,keepalive_finish_script,keepalive_unload_script,keepalive_abort_script,keepalive_worker_script} from './keepalive-fixture.mjs';
 import {cache_fixture,cache_script} from './cache-fixture.mjs';
@@ -484,6 +484,14 @@ try{
   await nativePage.evaluate(()=>lifetimeWorker.terminate());
   const nativeWebsocketLifetimes=await websocket_close_records(websocketCloses,'lifetime-native',3);
   assert.deepEqual(nativeWebsocketLifetimes.map(record=>record.code),[1001,1001,1001]);
+  const nativeWebsocketDepartures=[];
+  for(const buffered of [false,true]){
+    const owner='departure-native-'+buffered,url=origin+'/ws-departure-after?buffered='+buffered;
+    await nativePage.evaluate(source=>eval(source),websocket_lifetime_script(origin,owner,'root'));
+    await nativePage.evaluate(source=>eval(source),websocket_departure_script(url,buffered));await nativePage.waitForURL(url);
+    const record=(await websocket_close_records(websocketCloses,owner,1))[0];assert.equal(record.code,4004);assert.equal(record.reason,'author \u20ac');
+    nativeWebsocketDepartures.push(record);
+  }
   await nativeContext.close();
   for(const storageDenied of [false,true]){
   const client='proxy-'+storageDenied,workerClient='worker-'+storageDenied;
@@ -727,6 +735,13 @@ try{
   await page.evaluate(source=>main_frame.eval_js(source),websocket_lifetime_script(origin,lifetimeOwner,'worker'));
   await page.evaluate(()=>main_frame.eval_js('lifetimeWorker.terminate();true'));
   assert.deepEqual(await websocket_close_records(websocketCloses,lifetimeOwner,3),nativeWebsocketLifetimes);
+  for(const buffered of [false,true]){
+    const owner='departure-proxy-'+storageDenied+'-'+buffered,url=origin+'/ws-departure-after?buffered='+buffered;
+    await page.evaluate(source=>main_frame.eval_js(source),websocket_lifetime_script(origin,owner,'root'));
+    await page.evaluate(source=>{main_frame.eval_js(source).catch(()=>{});},websocket_departure_script(url,buffered));
+    await page.waitForFunction(url=>main_frame.url?.href===url&&!main_frame.is_navigating,url);
+    assert.deepEqual((await websocket_close_records(websocketCloses,owner,1))[0],nativeWebsocketDepartures[buffered?1:0]);
+  }
   const pendingSocket=once(server,'ws-pending',{signal:AbortSignal.timeout(5000)});
   await page.evaluate(origin=>main_frame.eval_js(`window.pendingSocket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-pending')}); true`),origin);
   const [heldSocket]=await pendingSocket;

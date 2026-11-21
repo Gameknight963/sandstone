@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {create_websocket_class} from '../src/frame/websocket.mjs';
-import {relay_websocket_class, websocket_options,retire_websocket} from '../src/host/websocket.mjs';
+import {relay_websocket_class, websocket_options,retire_websocket,WebSocketOutbound} from '../src/host/websocket.mjs';
 import {SiteDataStore} from '../src/host/site_data.mjs';
 
 globalThis.CloseEvent ||= class CloseEvent extends Event {
@@ -11,12 +11,13 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 function fixture(extra = {}) {
   let wake;
   const sent = [], closed = [];
+  const transport={connected:true,send:data=>sent.push(data),
+    close(code,reason){closed.push(this.id);this.connected=false;queueMicrotask(()=>wake([['close',{code:code??1005,reason:reason||'',wasClean:true}]]));},
+    abort(){closed.push(this.id);this.connected=false;},cleanup(){this.abort();}};
+  const outbound=new WebSocketOutbound(transport,{readBlob:extra.readBlob});
   const WS = create_websocket_class({base: () => 'https://site.test/base/',
     connect: async () => 1, events: () => new Promise(resolve => { wake = resolve; }),
-    send: async (id, data) => sent.push(data), close: async (id,code,reason,abort) => {
-      closed.push(id);
-      if(!abort)queueMicrotask(()=>wake([['close',{code:code??1005,reason:reason||'',wasClean:true}]]));
-    }, ...extra});
+    send:(id,data)=>outbound.send(data),close:(id,code,reason,abort)=>{transport.id=id;return abort?outbound.abort():outbound.close(code,reason);},...extra});
   return {WS, sent, closed, emit: batch => wake(batch)};
 }
 
@@ -30,15 +31,15 @@ test('WebSocket validates URLs and protocol tokens before connecting', () => {
 });
 
 test('WebSocket queues Blobs and snapshots binary views in send order', async () => {
-  const {WS, emit, sent, closed} = fixture();
+  let release;
+  const {WS, emit, sent, closed} = fixture({readBlob:()=>new Promise(resolve=>{release=resolve;})});
   const socket = new WS('../socket');
   assert.equal(socket.url, 'wss://site.test/socket');
   assert.throws(() => socket.send('early'), {name: 'InvalidStateError'});
   await tick(); emit([['open', {protocol: 'selected'}]]); await tick();
   assert.equal(socket.protocol, 'selected');
-  let release;
   const blob = new Blob(['first']);
-  blob.arrayBuffer = () => new Promise(resolve => { release = resolve; });
+  blob.arrayBuffer = () => {throw new Error('Do not call authored Blob methods');};
   socket.send(blob); socket.send('second');
   const bytes = new Uint8Array([0, 2, 3, 0]);
   socket.send(new DataView(bytes.buffer, 1, 2)); bytes.fill(9);
@@ -137,6 +138,33 @@ test('Retiring a socket requests going-away only after connection and preserves 
   retire_websocket({connected:true,close:(...args)=>calls.push(['close',...args]),abort:()=>calls.push(['abort'])});
   retire_websocket({connected:false,close:()=>calls.push(['unexpected close']),abort:()=>calls.push(['abort'])});
   assert.deepEqual(calls,[['close',1001,''],['abort']]);
+});
+
+test('Accepted sends drain on the host after retirement without replacing an authored close',async()=>{
+  const operations=[];let release;
+  const outbound=new WebSocketOutbound({connected:true,send:data=>operations.push([...data]),close:(...args)=>operations.push(args),cleanup:code=>operations.push(['error',code]),abort:()=>operations.push(['abort'])},{readBlob:()=>new Promise(resolve=>{release=resolve;})});
+  const sent=outbound.send(new Blob(['retained']));await tick();
+  const closing=outbound.close(4004,'author');outbound.retire();assert.deepEqual(operations,[]);
+  release(Uint8Array.of(1,2,3).buffer);await sent;await closing;
+  assert.deepEqual(operations,[[1,2,3],[4004,'author']]);
+});
+
+test('Socket sends and closes enter the host synchronously and never read authored Blob methods',async()=>{
+  const calls=[],{WS,emit}=fixture({send:(id,data)=>{calls.push(['send',data]);},close:(id,code,reason)=>{calls.push(['close',code,reason]);}});
+  const socket=new WS('/socket');await tick();emit([['open',{}]]);await tick();
+  const body=new Blob(['native']);body.arrayBuffer=()=>{throw new Error('authored arrayBuffer');};
+  socket.send(body);socket.close(4004,'author');
+  assert.deepEqual(calls,[['send',body],['close',4004,'author']]);
+  emit([['close',{code:4004,reason:'author',wasClean:true}]]);await tick();
+  const sent=[],outbound=new WebSocketOutbound({connected:true,send:data=>sent.push([...data]),cleanup(){},abort(){},close(){}});
+  await outbound.send(body);assert.deepEqual(sent,[[110,97,116,105,118,101]]);
+});
+
+test('A stalled retired socket body releases its send and transport after the drain deadline',async()=>{
+  const operations=[];
+  const outbound=new WebSocketOutbound({connected:true,send:()=>operations.push('send'),close:()=>operations.push('close'),cleanup:code=>operations.push(code),abort:()=>operations.push('abort')},{readBlob:()=>new Promise(()=>{}),timeout:5});
+  const sent=outbound.send(new Blob(['stalled']));const rejected=assert.rejects(sent,{name:'AbortError'});
+  await outbound.retire();await rejected;assert.deepEqual(operations,[28]);
 });
 
 test('WebSocket cookies use HTTP schemes, path, Secure, SameSite and HttpOnly rules', () => {

@@ -66,3 +66,14 @@ async function lifetime_start(origin,owner,kind){
   });
 }
 export const websocket_lifetime_script=(origin,owner,kind)=>'('+lifetime_start.toString()+')('+JSON.stringify(origin)+','+JSON.stringify(owner)+','+JSON.stringify(kind)+')';
+
+function depart(url,buffered){
+  if(buffered){
+    const body=new Blob(['departure \u20ac']);
+    body.arrayBuffer=()=>{throw new Error('WebSocket must read native Blob bytes');};
+    lifetimeSocket.send(body);
+  }
+  lifetimeSocket.close(4004,'author \u20ac');
+  location.href=url;
+}
+export const websocket_departure_script=(url,buffered)=>'('+depart.toString()+')('+JSON.stringify(url)+','+JSON.stringify(buffered)+')';

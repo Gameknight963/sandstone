@@ -5,7 +5,7 @@ import { site_data } from "./site_data.mjs";
 import { fetch_with_cookies,snapshot_request_context } from "./request.mjs";
 import { requests, request_key, cancel_requests } from "./streams.mjs";
 import { streaming_http_session } from "./http_session.mjs";
-import { relay_websocket_class, websocket_options,retire_websocket } from "./websocket.mjs";
+import { relay_websocket_class, websocket_options,WebSocketOutbound } from "./websocket.mjs";
 import { BeaconQueue } from './beacon.mjs';
 import {KeepaliveRequests} from './keepalive.mjs';
 import {http_cache} from './http_cache.mjs';
@@ -180,6 +180,7 @@ rpc_handlers["ws_new"] = function (frame_id, url, protocols) {
   if (!ws_connections[frame_id]) ws_connections[frame_id] = {};
   ws_connections[frame_id][ws_id] = {
     ws: ws,
+    outbound:new WebSocketOutbound(ws),
     events: ws_events,
     callback: null
   };
@@ -188,6 +189,7 @@ rpc_handlers["ws_new"] = function (frame_id, url, protocols) {
   //set up event listeners to forward to the frame
   for (let event_name of ["open", "message", "close", "error"]) {
     ws["on" + event_name] = (data) => {
+      if(ws_info.retired)return;
       if (event_name === 'open') data = {protocol: ws.protocol || '', cookies: site_data.documentCookies(source,{crossSite:frame_cross_site(frame,iframes)})};
       if (event_name === 'error') data = {cookies: site_data.documentCookies(source,{crossSite:frame_cross_site(frame,iframes)})};
       if (event_name === 'close' || event_name === 'error') ws_info.ended = true;
@@ -223,7 +225,7 @@ rpc_handlers["ws_event"] = function (frame_id, ws_id) {
 rpc_handlers["ws_send"] = function (frame_id, ws_id, data) {
   let ws_info = get_ws(frame_id, ws_id);
   if (!ws_info) return;
-  ws_info.ws.send(data);
+  return ws_info.outbound.send(data);
 }
 
 rpc_handlers["ws_close"] = function (frame_id, ws_id, code, reason='', abort=false) {
@@ -231,9 +233,9 @@ rpc_handlers["ws_close"] = function (frame_id, ws_id, code, reason='', abort=fal
   if (!ws_info) return;
   if(abort){
     delete ws_connections[frame_id][ws_id];
-    ws_info.ws.abort();
+    ws_info.outbound.abort();
     ws_info.callback?.();
-  }else ws_info.ws.close(code,reason);
+  }else return ws_info.outbound.close(code,reason);
 }
 
 //when navigating to a new page we need to close unused connections
@@ -254,7 +256,8 @@ export function clean_ws_connections(id_to_clean,options={}) {
     
     for (let [ws_id, ws_info] of Object.entries(frame_websockets)) {
       delete ws_connections[frame_id][ws_id];
-      retire_websocket(ws_info.ws);
+      ws_info.retired=true;ws_info.events=[];
+      ws_info.outbound.retire();
       ws_info.callback?.();
     }
     
