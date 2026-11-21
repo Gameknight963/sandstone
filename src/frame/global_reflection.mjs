@@ -4,23 +4,35 @@
 const apply=Reflect.apply,ownKeys=Reflect.ownKeys,has=Reflect.has,get=Reflect.get;
 const describe=Reflect.getOwnPropertyDescriptor;
 const create=Object.create,objectDefine=Object.defineProperty;
-const mapGet=WeakMap.prototype.get,setAdd=Set.prototype.add,setValues=Set.prototype.values;
+const mapGet=WeakMap.prototype.get,setAdd=Set.prototype.add,setDelete=Set.prototype.delete,setValues=Set.prototype.values;
+const deref=typeof WeakRef==='function'&&WeakRef.prototype.deref;
 const views=new WeakMap();
 // Same-origin frames can borrow each other's Object/Reflect methods and Window
 // getters. Share alias lookup with an accessible parent before page code runs.
+function reflection_group(){
+  const registries=new Set();
+  return {
+    // Construct weak references in the group's owning realm. A reference with
+    // a discarded child's prototype would itself keep that child's realm alive.
+    register(registry){apply(setAdd,registries,[deref?new WeakRef(registry):registry]);},
+    lookup(value){
+      for(const reference of apply(setValues,registries,[])){
+        const registry=deref?apply(deref,reference,[]):reference;
+        if(!registry){apply(setDelete,registries,[reference]);continue;}
+        const view=apply(mapGet,registry,[value]);if(view)return view;
+      }
+    }
+  };
+}
 let group;
 try{
   const parent=globalThis.parent;
   if(parent&&parent!==globalThis){parent.document;group=parent.sandstone_frame?.context.get_global_reflection_group?.();}
-  if(group)apply(setAdd,group,[views]);
 }catch{group=undefined;}
-if(!group)group=new Set([views]);
+if(!group)group=reflection_group();
+group.register(views);
 export const get_global_reflection_group=()=>group;
-const lookup=value=>{
-  for(const registry of apply(setValues,group,[])){
-    try{const view=apply(mapGet,registry,[value]);if(view)return view;}catch{}
-  }
-};
+const lookup=value=>apply(mapGet,views,[value])||group.lookup(value);
 export const global_accessor_view=value=>lookup(value)?.accessor;
 const key=value=>ownKeys({[value]:null})[0];
 function descriptor(value){
