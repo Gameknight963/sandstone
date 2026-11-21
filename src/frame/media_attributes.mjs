@@ -1,6 +1,6 @@
 // Keep native Attr and NamedNodeMap objects while the renderer sees local URLs.
 import {internal_attribute_mutation} from './intercept/mutation_observer.mjs';
-import './media_reactions.mjs';
+import {before_attribute_reaction} from './media_reactions.mjs';
 const E=globalThis.Element?.prototype,A=globalThis.Attr?.prototype,N=globalThis.Node?.prototype;
 const states=new WeakMap(),maps=new WeakMap();
 const methods=Object.fromEntries(['getAttribute','getAttributeNS','getAttributeNode','getAttributeNodeNS','hasAttribute','hasAttributeNS','setAttribute','setAttributeNS','removeAttribute','removeAttributeNS','toggleAttribute','setAttributeNode','setAttributeNodeNS','removeAttributeNode'].map(key=>[key,E?.[key]]));
@@ -60,6 +60,23 @@ export function render_internal_media_attribute(element,key,source){
     if(source===null)methods.removeAttributeNS.call(element,null,key);
     else methods.setAttributeNS.call(element,null,key,source);
   });
+}
+// Use navigation-time permissions for the synchronous native navigation call.
+// Restore the same Attr before any authored reaction, including a reaction to
+// the source attribute written by operation. Its value and identity stay live.
+export function with_internal_media_attribute(element,key,source,operation){
+  const original=attr(element,null,key),previous=original&&value.get.call(original);let restored=false;
+  if(previous===source)return operation();
+  const restore=()=>{
+    if(restored)return;restored=true;
+    internal_attribute_mutation(element,key,()=>{
+      if(original){value.set.call(original,previous);if(owner.call(original)!==element)methods.setAttributeNode.call(element,original);}
+      else methods.removeAttributeNS.call(element,null,key);
+    });
+  };
+  const release=before_attribute_reaction(element,restore);
+  try{render_internal_media_attribute(element,key,source);return operation();}
+  finally{restore();release();}
 }
 function refresh(state,key){
   const source=methods.getAttributeNS.call(state.mirror,null,key);

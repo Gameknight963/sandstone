@@ -68,6 +68,7 @@ import {verifyWindowOpen} from './window-open.playwright.mjs';
 import {verifyAncestorWindowOpen} from './window-open-ancestors.playwright.mjs';
 import {verifyAncestorLocation} from './ancestor-location.playwright.mjs';
 import {verifyFrameOriginInheritance} from './frame-origin-inheritance.playwright.mjs';
+import {verifyIframeSandboxSnapshot,verifyBlankSandboxSnapshot} from './iframe-sandbox-snapshot.playwright.mjs';
 import {verifyAncestorOrigins} from './ancestor-origins.playwright.mjs';
 import {verifyJavascriptLinks} from './javascript-links.playwright.mjs';
 import {verifyDocumentReuse} from './document-reuse.playwright.mjs';
@@ -495,6 +496,9 @@ try {
     result.passed.push(...await timed(verifyAncestorWindowOpen(page), 'Ancestor window.open fixture'));
     result.passed.push(...await timed(verifyAncestorLocation(page), 'Ancestor Location fixture'));
     result.passed.push(...await timed(verifyFrameOriginInheritance(page), 'Frame origin inheritance fixture'));
+    for(let batch=0;batch<2;batch++)result.passed.push(...await timed(verifyIframeSandboxSnapshot(page,{batch,batches:2}), 'Iframe sandbox snapshot fixture '+(batch+1)));
+    result.passed.push(...await timed(verifyIframeSandboxSnapshot(page,{custom:true}), 'Customized iframe sandbox snapshot fixture'));
+    result.passed.push(...await timed(verifyBlankSandboxSnapshot(page), 'Reinserted blank sandbox snapshot fixture'));
     result.passed.push(...await timed(verifyAncestorOrigins(page), 'Ancestor origin collection fixture'));
     result.passed.push(...await timed(verifyFrameDOM(page), 'Same-origin frame DOM fixture'));
     result.passed.push(...await timed(verifyFrameTraversal(page), 'Same-origin frame traversal fixture'));

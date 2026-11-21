@@ -12,7 +12,7 @@ import {child_message_parent} from '../window_messages.mjs';
 import {track_iframe,reconcile_iframes} from '../iframe_lifecycle.mjs';
 import {sandbox_tokens,navigation_sandbox as navigation_flags} from '../../navigation_policy.mjs';
 import {resource_attribute} from '../resource_attributes.mjs';
-import {register_media_attributes,render_media_attribute,render_internal_media_attribute,media_attribute_mirror,raw_media_attribute} from '../media_attributes.mjs';
+import {register_media_attributes,render_media_attribute,render_internal_media_attribute,with_internal_media_attribute,media_attribute_mirror,raw_media_attribute} from '../media_attributes.mjs';
 import {iframe_focus_policy} from '../iframe_focus_policy.mjs';
 import {delay_script_load} from '../script_lifetime.mjs';
 import {bootstrap_html,bootstrap_xml,create_bootstrap_nonce,runtime_seed} from '../../bootstrap.mjs';
@@ -28,6 +28,7 @@ import {navigate_target} from '../navigation_targets.mjs';
 import {javascript_document_shell} from '../document_shell.mjs';
 import {window_runtime_context} from '../runtime_context.mjs';
 import {runtime_message,stop_runtime_message,unlisten_runtime} from '../runtime_events.mjs';
+import {internal_attribute_mutation} from '../intercept/mutation_observer.mjs';
 
 const relayed_source=value=>util.url_is_http(value)||/^(?:blob|data):/i.test(String(value));
 
@@ -98,6 +99,7 @@ export function rewrite_iframe(iframe_element) {
   let iframe_src = iframe_element.src;
   let authored_src = iframe_element.getAttribute('src');
   const authored=new Map(['src','srcdoc','sandbox','allow'].map(key=>[key,iframe_element.getAttribute(key)]));
+  let document_sandbox=authored.get('sandbox');
   const javascript_source=(value=authored_src)=>{try{const url=convert_url(value,ctx.document.baseURI,loader.character_encoding);if(url.startsWith('javascript:'))return url;}catch{}};
   let javascript_revision=0,pending_javascript=javascript_source()?{url:javascript_source(),initial:true}:null,blank_initialization;
   const javascript_tasks=new Set();
@@ -126,8 +128,8 @@ export function rewrite_iframe(iframe_element) {
     if(authored_src&&authored.get('srcdoc')===null)try{source=new URL(authored_src,ctx.document.baseURI).href;}catch{source='about:invalid';}
     render_internal_media_attribute(iframe_element,'allow',iframe_focus_policy(authored.get('allow'),{
       parent:ctx.origin,document:policy_url,source,
-      sandboxed:loader.sandboxed_context||authored.get('sandbox')!==null,
-      opaque:ctx.origin==='null'||authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'),defaultAll
+      sandboxed:loader.sandboxed_context||document_sandbox!==null,
+      opaque:ctx.origin==='null'||document_sandbox!==null&&!sandbox_tokens(document_sandbox).has('allow-same-origin'),defaultAll
     }));
   };
   let runtime_sandbox=authored.get('srcdoc')!==null||!!blank_url();
@@ -137,9 +139,10 @@ export function rewrite_iframe(iframe_element) {
     if(event.isTrusted&&(runtime_sandbox||iframe_url||native_runtime_load)){event.stopImmediatePropagation();native_runtime_load?.(event);}
   });
   const release_load=()=>{finish_load?.();finish_load=undefined;};
-  const render_sandbox=()=>{
+  const render_sandbox=(internal=true)=>{
     const value=authored.get('sandbox');
-    render_media_attribute(iframe_element,'sandbox',value===null?'':runtime_sandbox?value+' allow-scripts':value);
+    const render=()=>render_media_attribute(iframe_element,'sandbox',value===null?'':runtime_sandbox?value+' allow-scripts':value);
+    return internal?internal_attribute_mutation(iframe_element,'sandbox',render):render();
   };
   const update_inline=(key,value)=>{
     if(key==='src')return set_src(value);
@@ -149,7 +152,7 @@ export function rewrite_iframe(iframe_element) {
     if(key==='sandbox'){
       const pending=!!initial_javascript;
       if(pending&&!iframe_element.isConnected)clear_initial_javascript();
-      render_sandbox();render_focus();
+      render_sandbox(false);render_focus();
       if(!iframe_element.isConnected&&javascript_source()){
         if(!prepare_initial_javascript()&&pending)render_media_attribute(iframe_element,'src','');
       }
@@ -229,17 +232,17 @@ export function rewrite_iframe(iframe_element) {
       // The child is usable now. Leave the host end unstarted until registration
       // succeeds so early requests queue behind their document's capability.
       runtime.rpc.connect_frame_host(channel.port2,nonce);
-      const creator_url=loader.cookie_url||loader.url,policy=document_referrer_policy(),sandbox=authored.get('sandbox');
+      const creator_url=loader.cookie_url||loader.url,policy=document_referrer_policy(),sandbox=document_sandbox;
       let local=[],session=[];try{local=storage_entries(ctx.localStorage);session=storage_entries(ctx.sessionStorage);}catch{}
       const options=blank_options={url,frame_id,beacon_context:token,document_origin:ctx.origin,cookie_url:creator_url,
-        automatic_features:loader.automatic_features&&(authored.get('sandbox')===null||sandbox_tokens(authored.get('sandbox')).has('allow-scripts')),
-        sandboxed_context:loader.sandboxed_context||authored.get('sandbox')!==null,
+        automatic_features:loader.automatic_features&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts')),
+        sandboxed_context:loader.sandboxed_context||sandbox!==null,
         navigation_sandbox:navigation_flags(loader.navigation_sandbox,sandbox),
         service_worker_state:service_worker_snapshot(),
         inherited_base_url:ctx.document.baseURI,document_referrer:javascript_source()?'':loader.url.startsWith('blob:')?loader.url:request_referrer(creator_url,creator_url,policy),referrer_policy:policy,
         message_origin:ctx.origin,message_parent:child_message_parent(message_token),is_iframe:true,window_name:window_name,
         crypto_available:loader.crypto_available,local_storage:local,session_storage:session,cookies:cookie_snapshot(),
-        cookie_cross_site:loader.cookie_cross_site,settings:{allow_js:loader.site_settings.allow_js!==false&&(authored.get('sandbox')===null||sandbox_tokens(authored.get('sandbox')).has('allow-scripts'))},
+        cookie_cross_site:loader.cookie_cross_site,settings:{allow_js:loader.site_settings.allow_js!==false&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts'))},
         default_settings:loader.default_settings,version:loader.version};
       const ready=runtime.loader.initialize_blank(options,completion=>{if(document_current()&&(!javascript_source()||completion?.written))iframe_element.dispatchEvent(new Event('load'));},value=>{
           if(!document_current())return;
@@ -381,7 +384,7 @@ export function rewrite_iframe(iframe_element) {
         if(!live())return;
         if(registered){await unregister(frame_id,{keep_history:true});registered=false;}
         if(!live())return;
-        await register(loader.frame_id,frame_id,iframe_url,{blank:true,creator_url:blank_options.cookie_url,beacon_context:token,sandbox:authored.get('sandbox'),window_name:target.name,history_mode:'replace',document_result:true});
+        await register(loader.frame_id,frame_id,iframe_url,{blank:true,creator_url:blank_options.cookie_url,beacon_context:token,sandbox:document_sandbox,window_name:target.name,history_mode:'replace',document_result:true});
         registered=true;rpc.attach_host(channel.port1,frame_id);
       })();
       commit=installation.catch(error=>{channel.port1.close();channel.port2.close();if(live()&&error?.name!=='AbortError')console.error(error);});
@@ -442,6 +445,7 @@ export function rewrite_iframe(iframe_element) {
     // Location and named-target navigations do not pass through the src
     // setter. They must also supersede programs waiting on the old context.
     if(!document_result)supersede_javascript();
+    const sandbox=document_result?document_sandbox:authored.get('sandbox');
     const blank_result=!!document_result&&/^about:blank(?:#|$)/.test(target_url);
     const local=/^(?:blob|data):/.test(target_url),blob=target_url.startsWith('blob:');
     runtime_sandbox=true;render_sandbox();
@@ -458,7 +462,7 @@ export function rewrite_iframe(iframe_element) {
     let final_url = target_url;
     let error; //possible network error
     let html,character_encoding='UTF-8',content_type='text/html';
-    const shares_origin=url=>authored.get('srcdoc')===null&&!url.startsWith('data:')&&(blank_result||blob||new URL(url).origin===ctx.origin)&&!(authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'));
+    const shares_origin=url=>authored.get('srcdoc')===null&&!url.startsWith('data:')&&(blank_result||blob||new URL(url).origin===ctx.origin)&&!(sandbox!==null&&!sandbox_tokens(sandbox).has('allow-same-origin'));
     let referrer_policy, document_referrer,request_metadata_token;
     if(document_result){html=document_result.html;referrer_policy=document_result.referrer_policy;document_referrer=document_result.document_referrer;}
     else if(inline){html=authored.get('srcdoc');referrer_policy=document_referrer_policy();document_referrer=loader.document_referrer;}
@@ -469,7 +473,7 @@ export function rewrite_iframe(iframe_element) {
         sandstone_navigation_source:navigation.source_context,
         sandstone_navigation_activation:!!navigation.activation?.transient,
         sandstone_navigation_target:frame_id,
-        sandstone_navigation_opaque:!!(authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'))||ctx.origin==='null',
+        sandstone_navigation_opaque:!!(sandbox!==null&&!sandbox_tokens(sandbox).has('allow-same-origin'))||ctx.origin==='null',
         cache:navigation.history_mode === 'reload' ? 'no-cache' : 'default',
         referrerPolicy:navigation.referrerPolicy || iframe_element.referrerPolicy || document_referrer_policy(),
         ...(form_data ? {
@@ -517,6 +521,7 @@ export function rewrite_iframe(iframe_element) {
 
         //load the frame runtime
         const bootstrap_nonce=create_bootstrap_nonce();
+        document_sandbox=sandbox;
         policy_url=/^about:(?:blank|srcdoc)(?:[?#]|$)/.test(final_url)?ctx.location.href:final_url;render_focus();
         const use_inline=authored.get('srcdoc')!==null;
         const share_origin=shares_origin(final_url);
@@ -545,9 +550,11 @@ export function rewrite_iframe(iframe_element) {
           };
           native_runtime_load=loaded;
           controller.signal.addEventListener('abort',aborted,{once:true});
-          if(use_inline){physical_inline=runtime_html;render_media_attribute(iframe_element,'srcdoc',runtime_html);}
-          else if(authored_src!==null)render_media_attribute(iframe_element,'src',runtime_url);
-          else native_frame_window(iframe_element).location.href=runtime_url;
+          with_internal_media_attribute(iframe_element,'sandbox',sandbox===null?null:sandbox+' allow-scripts',()=>{
+            if(use_inline){physical_inline=runtime_html;render_media_attribute(iframe_element,'srcdoc',runtime_html);}
+            else if(authored_src!==null)render_media_attribute(iframe_element,'src',runtime_url);
+            else native_frame_window(iframe_element).location.href=runtime_url;
+          });
         });
         if(!current())return;
         // A load event may belong to the previous document or the blank reset.
@@ -584,7 +591,7 @@ export function rewrite_iframe(iframe_element) {
         const send_page=options=>rpc.call_procedure(rpc_target,'html',[options],{signal:controller.signal});
 
         iframe_url=final_url;
-        const sandbox=iframe_element.getAttribute('sandbox'),opaque=sandbox!==null&&!sandbox_tokens(sandbox).has('allow-same-origin');
+        const opaque=sandbox!==null&&!sandbox_tokens(sandbox).has('allow-same-origin');
         const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,sandbox,window_name:initial_name,srcdoc:inline,blank:blank_result,creator_url:blank_result?document_result.creator_url:undefined,blob,request_metadata_token,document_result:!!document_result});
         registered = true;
         window_name=state.window_name;opaque_origin=state.message_origin==='null';
@@ -707,6 +714,7 @@ export function rewrite_iframe(iframe_element) {
       if(remote)render_media_attribute(iframe_element,'src','');
     },
     connect(){
+      document_sandbox=authored.get('sandbox');
       initial_name=window_name=iframe_element.name;opaque_origin=false;
       if(!lifecycle_ready)return;
       if(authored.get('srcdoc')!==null){fetch_src('about:srcdoc',null,{srcdoc:true}).catch(console.error);return;}
