@@ -2,21 +2,16 @@ import assert from 'node:assert/strict';
 
 export function retained_worker_main(){
   const hosts=new Map(),closed=new Map(),watchers=new Map();
-  let cookie_policy;
+  const providers=new sandstone.PolicyProviders();
+  const cookie_policy=new sandstone.CookiePolicyBridge((message,options)=>providers.request(message,options));
   onconnect=event=>{
     const port=event.ports[0];
     port.onmessage=async event=>{
       const {id,op,context}=event.data;
       try{
         if(op==='policy'){
-          const channel=event.ports[0],pending=new Map();let sequence=0;
-          channel.onmessage=event=>{
-            const call=pending.get(event.data.id);pending.delete(event.data.id);
-            if(event.data.error)call?.reject(new Error(event.data.error));else call?.resolve(event.data.value);
-          };channel.start();
-          cookie_policy=new sandstone.CookiePolicyBridge(message=>new Promise((resolve,reject)=>{
-            const id=++sequence;pending.set(id,{resolve,reject});channel.postMessage({id,message});
-          }));port.postMessage({policy:true});
+          providers.add(event.ports[0],{lease:event.data.lease,authority:event.data.authority});
+          port.postMessage({policy:true});
         }else if(op==='open'){
           await sandstone.controller.indexed_db.ready;await sandstone.libcurl.load_wasm();
           sandstone.network.set_websocket(location.origin.replace(/^http/,'ws')+'/');
@@ -105,31 +100,38 @@ function authored_worker(){
   if(useEventListener)addEventListener('connect',connect);else onconnect=connect;
 }
 
+async function install_policy_provider(page,origin,denied,type,seed=true){
+  await page.goto(origin+'/host-worker/page');
+  if(denied)await page.evaluate(()=>{Object.defineProperty(globalThis,'localStorage',{get(){throw new DOMException('Storage denied','SecurityError');}});Object.defineProperty(globalThis,'sessionStorage',{get(){throw new DOMException('Storage denied','SecurityError');}});});
+  await page.addScriptTag({url:origin+'/host-worker/bundle.js'});
+  await page.evaluate(async({denied,type,seed})=>{
+    const store=sandstone.controller.site_data,handle=sandstone.cookie_policy_handler(store);await store.ready;
+    if(seed){
+      store.setCookie(location.origin,'worker_session=secret; HttpOnly; SameSite=None; Secure; Path=/',true);
+      store.setCookie(location.origin,'blocked=strict; SameSite=Strict; Path=/',true);
+    }
+    const provider=await sandstone.create_policy_provider(async(message,options)=>{
+      if(globalThis.policyHoldHeader&&message.op==='header'){globalThis.policyHeld={header:true};await new Promise(()=>{});}
+      const value=await handle(message,options);
+      if(globalThis.policyHoldSet&&message.op==='set'){globalThis.policyHeld={cookie:message.options.cookieWrite.cookie,version:message.options.cookieWrite.id};await new Promise(()=>{});}
+      return value;
+    },{authority:()=>store.cookiePolicyAuthority()});
+    globalThis.retainedPolicyProvider=provider;
+    const backend=new SharedWorker('/host-worker/retained'+(denied?'-denied':'')+'.js',{name:'retained-services-'+denied+'-'+type});
+    globalThis.retainedBackend=backend;
+    await new Promise((resolve,reject)=>{
+      backend.onerror=event=>reject(new Error(event.message));backend.port.onmessage=event=>event.data.error?reject(new Error(JSON.stringify(event.data.error))):resolve(event.data);
+      backend.port.postMessage({op:'policy',lease:provider.lease,authority:provider.authority},[provider.port]);
+    });
+  },{denied,type,seed});
+}
+
 export async function verify_retained_worker_host(browser,origin){
   const context=await browser.newContext(),results=[];
   try{
     for(const denied of [false,true])for(const type of ['classic','module']){
-      const first=await context.newPage(),second=await context.newPage();
-      await first.goto(origin+'/host-worker/page');await second.goto(origin+'/host-worker/page');
-      if(denied)await second.evaluate(()=>{Object.defineProperty(globalThis,'localStorage',{get(){throw new DOMException('Storage denied','SecurityError');}});Object.defineProperty(globalThis,'sessionStorage',{get(){throw new DOMException('Storage denied','SecurityError');}});});
-      await second.addScriptTag({url:origin+'/host-worker/bundle.js'});
-      await second.evaluate(async({denied,type})=>{
-        const store=sandstone.controller.site_data,handle=sandstone.cookie_policy_handler(store),channel=new MessageChannel();
-        store.setCookie(location.origin,'worker_session=secret; HttpOnly; SameSite=None; Secure; Path=/',true);
-        store.setCookie(location.origin,'blocked=strict; SameSite=Strict; Path=/',true);
-        channel.port1.onmessage=async event=>{
-          const {id,message}=event.data;
-          try{channel.port1.postMessage({id,value:await handle(message)});}
-          catch(error){channel.port1.postMessage({id,error:String(error)});}
-        };
-        globalThis.retainedPolicyPort=channel.port1;
-        const backend=new SharedWorker('/host-worker/retained'+(denied?'-denied':'')+'.js',{name:'retained-services-'+denied+'-'+type});
-        globalThis.retainedBackend=backend;
-        await new Promise((resolve,reject)=>{
-          backend.onerror=event=>reject(new Error(event.message));backend.port.onmessage=event=>event.data.error?reject(new Error(JSON.stringify(event.data.error))):resolve(event.data);
-          backend.port.postMessage({op:'policy'},[channel.port2]);
-        });
-      },{denied,type});
+      const first=await context.newPage();let second=await context.newPage();
+      await first.goto(origin+'/host-worker/page');await install_policy_provider(second,origin,denied,type);
       const nativeSurface=await first.evaluate(surface=>new Promise((resolve,reject)=>{
         const source='onconnect=function(event){event.ports[0].postMessage(('+surface+')(event,this));};';
         const worker=new SharedWorker('data:text/javascript,'+encodeURIComponent(source));worker.port.onmessage=event=>resolve(event.data);worker.onerror=event=>reject(new Error(event.message));
@@ -166,6 +168,18 @@ export async function verify_retained_worker_host(browser,origin){
       await second.evaluate(({denied,name})=>{globalThis.retainedBackend=new SharedWorker('/host-worker/retained'+(denied?'-denied':'')+'.js',{name});retainedBackend.port.start();},{denied,name:profile.backendName});
       assert.deepEqual(await connect(second,'read'),{...expected,counter:2});
       await first.close();assert.deepEqual(await connect(second,'read'),{...expected,counter:3});
+      if(!denied){
+        for(const [mode,counter] of [['header',4],['set',5]]){
+          const previous=second;second=await context.newPage();await install_policy_provider(second,origin,denied,type,false);
+          await previous.evaluate(mode=>{globalThis.policyHeld=null;globalThis[mode==='header'?'policyHoldHeader':'policyHoldSet']=true;},mode);
+          const pending=connect(second,'read');
+          await previous.waitForFunction(()=>globalThis.policyHeld);
+          const held=await previous.evaluate(()=>globalThis.policyHeld);await previous.close();
+          assert.deepEqual(await pending,{...expected,counter});
+          if(mode==='set')assert.equal(await second.evaluate(cookie=>sandstone.controller.site_data.persistence.cookieVersion(cookie).version,held.cookie),held.version,'Handoff replayed a committed cookie write');
+        }
+        results.push('Opaque '+type+' worker policy calls survive provider death before a cookie read and after an unacknowledged write');
+      }
       await second.evaluate(()=>{
         const port=retainedClients.at(-1).port;
         globalThis.retainedClearResult=new Promise(resolve=>{port.onmessage=event=>resolve(event.data);});port.postMessage('hold');
