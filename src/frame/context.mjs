@@ -253,9 +253,11 @@ export function wrap_obj(wrapper, target) {
 
 export function update_ctx(options = {}) {
   let storageReady;
-  internal.location = is_worker ? new polyfill.FakeWorkerLocation() : new polyfill.FakeLocation();
-  internal.self = ctx.__proxy__;
-  internal.globalThis = ctx.__proxy__;
+  if(!options.reuse_window){
+    internal.location = is_worker ? new polyfill.FakeWorkerLocation() : new polyfill.FakeLocation();
+    internal.self = ctx.__proxy__;
+    internal.globalThis = ctx.__proxy__;
+  }
   if (is_worker) { internal.localStorage = undefined; internal.sessionStorage = undefined; }
   if (!is_worker) {
     internal.storage_unavailable=ctx.origin==='null';
@@ -265,7 +267,8 @@ export function update_ctx(options = {}) {
   }
   // Register the History view after storage selects the same-origin document
   // registry, so borrowed methods can recognize accessible peer histories.
-  internal.history = is_worker ? undefined : new polyfill.FakeHistory(options.history);
+  if(options.reuse_window)polyfill.retarget_history(internal.history);
+  else internal.history = is_worker ? undefined : new polyfill.FakeHistory(options.history);
   if(!is_worker)install_node_documents(intercept.document);
   // Native Navigation targets the physical sandbox document. Hide its feature
   // flags until it can use virtual history, so routers use their History fallback.

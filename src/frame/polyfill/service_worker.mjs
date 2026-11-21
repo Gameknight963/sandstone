@@ -5,9 +5,12 @@ import {create_service_worker_client} from '../../service_worker/client.mjs';
 import {encode_message} from './crypto.mjs';
 import {trustworthy_url} from '../../trustworthy.mjs';
 import {listen_runtime,on_document_unload} from '../runtime_events.mjs';
+import {on_document_change} from '../active_document.mjs';
 
 let current,port,context;
-const nativeDocument=globalThis.document,hasFocus=globalThis.Document?.prototype.hasFocus;
+const hasFocus=globalThis.Document?.prototype.hasFocus;
+let nativeDocument=globalThis.document;
+on_document_change((_previous,next)=>()=>{nativeDocument=next;});
 const visibility=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'visibilityState')?.get;
 rpc.rpc_handlers.service_worker_window=token=>{
   if(loader.beacon_context&&token!==loader.beacon_context)throw new DOMException('Document was replaced','AbortError');

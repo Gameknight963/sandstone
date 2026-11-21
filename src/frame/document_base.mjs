@@ -1,6 +1,12 @@
 import {resolve_base_href} from '../base_url.mjs';
+import {on_document_change} from './active_document.mjs';
 
 let fallbackSource,preloadSource,observer,first,scoped;
+const retired=new WeakMap();
+on_document_change(previous=>{
+  retired.set(previous,document_base_url());
+  return ()=>{observer?.disconnect();observer=undefined;first=undefined;scoped=undefined;};
+});
 export function with_document_base_url(url,operation){const previous=scoped;scoped=url;try{return operation();}finally{scoped=previous;}}
 const frozen=new WeakMap();
 const query=globalThis.Document?.prototype.querySelectorAll;
@@ -48,6 +54,7 @@ if(globalThis.document){
   const baseURI=Object.getOwnPropertyDescriptor(Node.prototype,'baseURI');
   Object.defineProperty(Node.prototype,'baseURI',{...baseURI,get(){
     const native=baseURI.get.call(this);
+    const stale=retired.get(this)||retired.get(owner.call(this));if(stale)return stale;
     return this===document||owner.call(this)===document?document_base_url()||native:native;
   }});
 }

@@ -1,4 +1,4 @@
-import {ctx,convert_url,run_script_safe} from '../context.mjs';
+import {ctx,convert_url} from '../context.mjs';
 import * as loader from '../loader.mjs';
 import {document_referrer_policy} from './document.mjs';
 import {download,capture_download} from '../downloads.mjs';
@@ -7,7 +7,6 @@ import {install_hyperlinks} from '../hyperlinks.mjs';
 import {install_html_urls} from '../html_urls.mjs';
 import {navigate_target,navigation_target} from '../navigation_targets.mjs';
 import {submit} from '../rewrite/form.mjs';
-import {javascript_url_source} from '../../javascript_url.mjs';
 const get_attribute=globalThis.Element?.prototype.getAttribute;
 
 function prepare_activation(element){
@@ -23,7 +22,6 @@ function activate(element) {
   let href;
   try{href=convert_url(element.getAttribute('href'),ctx.document.baseURI,loader.character_encoding);}catch{return;}
   const target=new URL(href),current=new URL(ctx.location.href);
-  if(target.protocol==='javascript:'){run_script_safe(javascript_url_source(href));return;}
   const policy=element.relList?.contains('noreferrer')?'no-referrer':element.referrerPolicy||document_referrer_policy();
   if(element.hasAttribute('download')&&(target.origin===current.origin||['data:','blob:'].includes(target.protocol))){
     // Native download-attribute requests use referrerPolicy; rel=noreferrer

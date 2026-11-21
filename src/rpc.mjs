@@ -15,6 +15,8 @@ const bootstrap_parent=globalThis.parent;
 const bootstrap_worker=typeof globalThis.importScripts==='function';
 const bootstrap_window=typeof globalThis.Window==='function';
 const bootstrap_script=globalThis.document?.currentScript;
+const bootstrap_document=globalThis.document;
+let reused_frame_host=false;
 let bootstrap_config;
 try{bootstrap_config=bootstrap_script?.hasAttribute(bootstrap_attribute)?JSON.parse(decodeURIComponent(bootstrap_script.getAttribute(bootstrap_attribute))):globalThis[bootstrap_global];}catch{}
 bootstrap_script?.removeAttribute(bootstrap_attribute);delete globalThis[bootstrap_global];
@@ -310,6 +312,16 @@ export function connect_frame_host(port,nonce){
   if(!host||!nonce||nonce!==bootstrap_nonce||bootstrap_connections>=bootstrap_channels)throw new DOMException('Invalid bootstrap connection','SecurityError');
   Reflect.apply(MessagePort.prototype.start,port,[]);bootstrap_connections++;
   if(!host.target){host.set_target(port);on_attach();}else host.add_extra_target(port);
+}
+export function connect_reused_frame_host(port,nonce){
+  if(!host?.target||!nonce||nonce!==bootstrap_nonce||reused_frame_host||globalThis.document===bootstrap_document)throw new DOMException('Invalid reused frame connection','SecurityError');
+  reused_frame_host=true;
+  // Keep receiving replies to requests accepted by the original Document.
+  // New requests must use the replacement's separately registered capability.
+  host.extra_targets.push(host.target);
+  host.target=port;
+  port.addEventListener('message',host.msg_callback);
+  Reflect.apply(MessagePort.prototype.start,port,[]);
 }
 export function set_on_attach(callback) {
   on_attach = callback;

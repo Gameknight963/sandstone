@@ -95,7 +95,7 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
     };
     const navigate=(value,mode)=>{
       const url=new URL(`${value}`,ctx.document.baseURI);
-      if(['http:','https:','blob:','data:'].includes(url.protocol)||url.protocol==='about:'&&url.pathname==='srcdoc')state.navigate(url.href,mode)?.catch(console.error);
+      if(['http:','https:','blob:','data:','javascript:'].includes(url.protocol)||url.protocol==='about:'&&url.pathname==='srcdoc')state.navigate(url.href,mode)?.catch(console.error);
       else if(mode==='replace')nativeLocation().replace(url.href);
       else nativeLocation().href=url.href;
     };

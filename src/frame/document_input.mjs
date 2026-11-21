@@ -111,9 +111,13 @@ export function run_late_script(execute){
   ignoreWrites--;return result;
 }
 export function run_document_script(element,execute){return (is_svg_script(element)?element.hasAttribute('href')||element.hasAttributeNS('http://www.w3.org/1999/xlink','href'):element.hasAttribute('src'))&&!writer?ignored(execute):execute();}
-export async function load_document_html(source,{scriptingEnabled=true}={}){
-  const current=begin({source:true,scriptingEnabled});
-  current.stream.write(source);close(current);await current.finished;
+export async function load_document_html(source,{scriptingEnabled=true,reuse_document=false,signal}={}){
+  signal?.throwIfAborted();
+  const current=begin({source:true,scriptingEnabled,reuse_document});
+  const abort=()=>current.controller.abort(signal.reason);
+  signal?.addEventListener('abort',abort,{once:true});
+  try{current.stream.write(source);close(current);await current.finished;}
+  finally{signal?.removeEventListener('abort',abort);}
 }
 export async function load_document_xml(source,{scriptingEnabled=true}={}){
   // Parse without connecting nodes. Every resource must be rewritten before
@@ -168,10 +172,12 @@ export async function load_document_xml(source,{scriptingEnabled=true}={}){
   if(!live())return;
   close(current);await current.finished;
 }
-function begin({source=false,scriptingEnabled=loader.site_settings.allow_js!==false}={}){
+function begin({source=false,scriptingEnabled=loader.site_settings.allow_js!==false,reuse_document=false}={}){
   const previous=session,targets=nodes(),saved=snapshot_runtime_events(targets);
   const previous_url=document.URL,sources=loader.document_sources();
-  dom.open.call(document);loader.document_opened(previous_url,document.URL,sources);restore_runtime_events(saved);forget_document_listeners(targets);
+  if(!reuse_document){
+    dom.open.call(document);loader.document_opened(previous_url,document.URL,sources);restore_runtime_events(saved);forget_document_listeners(targets);
+  }
   previous?.controller.abort(new DOMException('The document was replaced','AbortError'));
   const current={controller:new AbortController(),source,phase:'loading',async:[],deferred:[],finished:null};session=current;
   loader.set_ready_state('loading');
@@ -180,7 +186,7 @@ function begin({source=false,scriptingEnabled=loader.site_settings.allow_js!==fa
     // shell is replaced by intercepted nodes before authored code can run.
     while(document.firstChild)dom.remove.call(document,document.firstChild);
     const header=mode==='quirks'?'':mode==='limited-quirks'?'<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">':'<!doctype html>';
-    dom.write.call(document,header+'<html>');
+    if(!reuse_document)dom.write.call(document,header+'<html>');
     while(document.firstChild)dom.remove.call(document,document.firstChild);
   },onScript:(node,input)=>prepare_script(current,node,input)});
   return current;
@@ -196,7 +202,7 @@ function close(current){
     if(!live())return;
     const loaded=new Event('load');Object.defineProperty(loaded,'target',{value:wrap_document(document)});globalThis.dispatchEvent(loaded);
     if(live())globalThis.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:false}));
-    if(live())for(const callback of completion_observers)callback();
+    if(live())for(const callback of completion_observers)callback({written:!current.source});
   };
   if(current.stream.closed)interactive();
   if(!live()){current.finished=Promise.resolve();return;}

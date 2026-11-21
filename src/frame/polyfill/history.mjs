@@ -34,6 +34,7 @@ if(NativeHistory){
 }
 export const history_hash=(history,...args)=>views.get(history).invoke('_hash','value',args);
 export const restore_history=(history,...args)=>views.get(history).invoke('_restored','value',args);
+export const retarget_history=history=>views.get(history).invoke('_retarget','value',[]);
 
 const mutate = rpc.create_rpc_wrapper(rpc.host, "history_mutate");
 const traverse = rpc.create_rpc_wrapper(rpc.host, "history_go");
@@ -143,5 +144,6 @@ export class FakeHistory {
     if (snapshot.traversed) globalThis.dispatchEvent(new PopStateEvent("popstate", {state: this.#state}));
     if (this.#scrollRestoration === "auto") globalThis.scrollTo(...snapshot.scroll);
   }
+  _retarget(){this.#document=globalThis.document;this.#native=globalThis.history;}
   get [Symbol.toStringTag]() { return "History"; }
 }

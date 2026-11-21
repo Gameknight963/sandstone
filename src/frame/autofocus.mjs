@@ -5,8 +5,11 @@ import {listen_runtime} from './runtime_events.mjs';
 import {on_shadow_root,shadow_root} from './shadow_roots.mjs';
 import {pending_style_request} from './style_requests.mjs';
 import {cookie_document_active} from './polyfill/cookie.mjs';
+import {on_document_change} from './active_document.mjs';
 
-const document=globalThis.document,Observer=globalThis.MutationObserver,raf=globalThis.requestAnimationFrame;
+const Observer=globalThis.MutationObserver,raf=globalThis.requestAnimationFrame;
+let document=globalThis.document,observe_document;
+on_document_change((_previous,next)=>()=>{document=next;observe_document?.(next);});
 const N=globalThis.Node?.prototype,E=globalThis.Element?.prototype,D=globalThis.Document?.prototype;
 const get=(prototype,key)=>prototype&&Object.getOwnPropertyDescriptor(prototype,key)?.get;
 const owner=get(N,'ownerDocument'),children=get(N,'childNodes'),connected=get(N,'isConnected'),kind=get(N,'nodeType');
@@ -111,6 +114,7 @@ function install(){
     state.schedule();
   });
   const observe=root=>{if(seen.has(root))return;seen.add(root);observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['autofocus'],attributeOldValue:true});};
+  observe_document=next=>{observer.disconnect();observe(next);};
   observe(document);on_shadow_root(observe);
   listen_runtime(document,'focus',event=>{
     const state=controller();if(!state||!event.isTrusted)return;

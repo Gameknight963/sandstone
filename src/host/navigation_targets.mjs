@@ -4,6 +4,7 @@ import {site_data} from './site_data.mjs';
 import * as rpc from '../rpc.mjs';
 import {can_navigate} from '../navigation_policy.mjs';
 import {beacons} from './network.mjs';
+import {navigate_javascript} from './javascript_navigation.mjs';
 
 function port(frame){
   const root=iframes[frame.root_id];
@@ -54,6 +55,7 @@ rpc.rpc_handlers.navigate_target=async(id,token,name,url,form_data,navigation={}
   const targetFrame=frame||{id:destination.id,parent_id:destination.parent,root_id:root.id,origin:iframes[destination.parent]?.origin};
   if(!can_navigate(source,targetFrame,iframes,navigation.activation))return;
   const next=new URL(url),current=frame?.url;
+  if(next.protocol==='javascript:')return frame?navigate_javascript(source,frame,url):{no_navigation:true};
   let result;
   if(frame&&current&&next.origin===current.origin&&next.pathname===current.pathname&&next.search===current.search&&url.includes('#')&&!form_data){
     const target=port(frame);

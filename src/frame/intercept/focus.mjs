@@ -1,7 +1,10 @@
 import * as loader from '../loader.mjs';
 import {listen_runtime} from '../runtime_events.mjs';
+import {on_document_change} from '../active_document.mjs';
 
-const window=globalThis,document=window.document,focus=window.focus;
+const window=globalThis,focus=window.focus;
+let document=window.document;
+on_document_change((_previous,next)=>()=>{document=next;});
 const has_focus=window.Document?.prototype.hasFocus,apply=Reflect.apply;
 if(document&&focus&&has_focus)listen_runtime(window,'pointerdown',event=>{
   // A virtual top-level page is physically an iframe. Apps that cancel mouse

@@ -18,6 +18,7 @@ import {configure_service_workers} from './polyfill/service_worker.mjs';
 import {configure_autofocus} from './autofocus.mjs';
 import {configure_filesystem} from './polyfill/filesystem.mjs';
 import {create_runtime_script,append_runtime_script} from './runtime_script.mjs';
+import {refresh_document} from './active_document.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -62,6 +63,7 @@ export const child_navigators = new Map();
 export const child_names = new Map();
 export const child_urls = new Map();
 rpc.rpc_handlers["child_navigate"] = (id, url, form_data, navigation) => child_navigators.get(id)?.(url, form_data, navigation);
+rpc.rpc_handlers.child_document_result=(id,url,result)=>child_navigators.get(id)?.(url,null,{history_mode:'replace',result_document:true},result);
 rpc.rpc_handlers.child_window_name=(id,value)=>child_names.get(id)?.(value);
 rpc.rpc_handlers.child_url=(id,value,token)=>child_urls.get(id)?.(value,token);
 let opened_url;
@@ -183,8 +185,18 @@ export function initialize_blank(options,onload,onurl){
   opened_url=onurl;on_document_complete(onload);return ready;
 }
 
+export async function load_reused_document(options){
+  if(options.frame_id!==frame_id||(options.document_origin??new URL(options.url).origin)!==ctx.origin)throw new DOMException('The replacement must retain its Window origin','SecurityError');
+  if(typeof options.html!=='string'||typeof options.beacon_context!=='string'||!options.beacon_context||options.beacon_context===beacon_context)throw new TypeError('A new document context and HTML source are required');
+  if(!refresh_document())throw new DOMException('The document was not replaced','InvalidStateError');
+  pristine_blank=false;
+  await load_html({...options,reuse_window:true});
+}
+
 async function load_html(options) {
+  options.signal?.throwIfAborted();
   await prepare_html(options);
+  options.signal?.throwIfAborted();
 
   if (options.error) {
     if(document.contentType!=='text/html'){
@@ -201,7 +213,7 @@ async function load_html(options) {
   }
 
   is_loaded = true;
-  if(document.contentType==='text/html')await load_document_html(options.html,{scriptingEnabled:site_settings.allow_js});
+  if(document.contentType==='text/html')await load_document_html(options.html,{scriptingEnabled:site_settings.allow_js,reuse_document:!!options.reuse_window,signal:options.signal});
   else await load_document_xml(options.html,{scriptingEnabled:site_settings.allow_js});
   restore_history(ctx.history,options.history);
 }

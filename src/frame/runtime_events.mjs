@@ -1,4 +1,5 @@
 import {with_event_scope} from '../event_scope.mjs';
+import {on_document_change} from './active_document.mjs';
 
 const native_events={add:EventTarget.prototype.addEventListener,remove:EventTarget.prototype.removeEventListener};
 const apply=Reflect.apply;
@@ -14,6 +15,12 @@ export function post_bootstrap_message(target,message,ports=[],worker=false){
 // document.open removes native listeners. Keep only runtime registrations so
 // restoring the relay never restores the page's own discarded listeners.
 const targets=new WeakMap();
+on_document_change((previous,next)=>()=>{
+  for(const entry of [...targets.get(previous)||[]]){
+    unlisten_runtime(previous,entry.type,entry.listener,entry.options);
+    listen_runtime(next,entry.type,entry.listener,entry.options);
+  }
+});
 const capture=options=>typeof options==='object'&&options!==null?!!options.capture:!!options;
 const add=(target,...args)=>Reflect.apply(target instanceof EventTarget?native_events.add:target.addEventListener,target,args);
 const remove=(target,...args)=>Reflect.apply(target instanceof EventTarget?native_events.remove:target.removeEventListener,target,args);

@@ -17,7 +17,7 @@ export function navigation_target(element,override=null){
 export function navigate_target(url,target='',form_data=null,navigation={}){
   if(typeof target==='string'&&/[\t\n\r]/.test(target)&&target.includes('<'))target='_blank';
   const keyword=typeof target==='string'?target.toLowerCase():'';
-  if(!target||keyword==='_self'||!['_parent','_top','_blank'].includes(keyword)&&target===ctx.name){
+  if(!url.startsWith('javascript:')&&(!target||keyword==='_self'||!['_parent','_top','_blank'].includes(keyword)&&target===ctx.name)){
     const next=new URL(url),current=new URL(ctx.location.href);
     if(!form_data&&next.origin===current.origin&&next.pathname===current.pathname&&next.search===current.search&&url.includes('#')){
       history_hash(ctx.history,url);return Promise.resolve();

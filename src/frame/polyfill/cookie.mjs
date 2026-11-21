@@ -29,6 +29,7 @@ export function load_cookies(snapshot) {
 }
 rpc.rpc_handlers.cookies_update=(token,snapshot)=>{if(token===loader.beacon_context)load_cookies(snapshot);};
 export function configure_cookies(snapshot,document_alias){
+  const token=loader.beacon_context;
   configured_replica=undefined;configured_context=loader.beacon_context;configured_replica=replica();
   const origin=loader.document_origin??new URL(loader.cookie_url||loader.url).origin,group=storage_group(origin);
   if(accessors){
@@ -36,7 +37,7 @@ export function configure_cookies(snapshot,document_alias){
     accessors.register(globalThis.document,document_alias,{get:get_cookie,set:set_cookie},registry);
   }
   load_cookies(snapshot);
-  return rpc.call_procedure(rpc.host,'cookies_ready',[loader.frame_id,loader.beacon_context]).then(load_cookies);
+  return rpc.call_procedure(rpc.host,'cookies_ready',[loader.frame_id,token]).then(snapshot=>{if(token===loader.beacon_context)load_cookies(snapshot);});
 }
 export function get_cookie() {
   if(loader.document_origin==='null')throw new DOMException('Cookie origin is unavailable','SecurityError');

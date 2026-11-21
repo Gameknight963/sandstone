@@ -2,6 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { NavigationHistory, history_url } from "../src/history.mjs";
 
+test('JavaScript document replacement preserves cloned state while creating a new document in the current entry',()=>{
+  const history=new NavigationHistory();history.navigate('https://example.com/start');
+  history.mutate('push',{bytes:new Uint8Array([3,4])},'https://example.com/current');
+  history.mutate('push',{forward:true},'https://example.com/forward');history.go(-1);
+  const before=history.snapshot();
+  const after=history.navigate(before.url,{mode:'replace',preserve_state:true});
+  assert.equal(after.length,before.length);assert.equal(after.index,before.index);assert.equal(after.url,before.url);
+  assert.notEqual(after.document_id,before.document_id);assert.deepEqual(after.state,before.state);
+  before.state.bytes[0]=99;after.state.bytes[1]=99;assert.deepEqual([...history.snapshot().state.bytes],[3,4]);
+  assert.equal(history.go(1).state.forward,true);assert.equal(history.go(-1).sameDocument,false);assert.equal(history.go(-1).sameDocument,false);
+});
+
 test("Session history clones state and supports same-document traversal", () => {
   const history = new NavigationHistory();
   history.navigate("https://example.com/app");

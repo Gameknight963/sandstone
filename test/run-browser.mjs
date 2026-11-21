@@ -64,6 +64,10 @@ import {verifyXMLIframes} from './xml-iframes.playwright.mjs';
 import {verifyWindowOpen} from './window-open.playwright.mjs';
 import {verifyAncestorWindowOpen} from './window-open-ancestors.playwright.mjs';
 import {verifyJavascriptLinks} from './javascript-links.playwright.mjs';
+import {verifyDocumentReuse} from './document-reuse.playwright.mjs';
+import {verifyJavascriptNavigation} from './javascript-navigation.playwright.mjs';
+import {verifyJavascriptDocumentResults} from './javascript-document-results.playwright.mjs';
+import {verifyJavascriptNavigationRaces} from './javascript-navigation-races.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -488,6 +492,7 @@ try {
     result.passed.push(...await timed(verifyInsecureHost(page,await readFile(artifact,'utf8')), 'Insecure host fixture'));
     result.passed.push(...await timed(verifySrcdoc(page), 'Inline frame fixture'));
     result.passed.push(...await timed(verifyLocalIframes(page), 'Local HTML frame fixture'));
+    for(const mode of ['standards','quirks','limited'])result.passed.push(...await timed(verifyDocumentReuse(page,{mode}), 'Reused native Document fixture '+mode));
     result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
     result.passed.push(...await timed(verifyAncestorWindows(page), 'Ancestor windows fixture'));
     result.passed.push(...await timed(verifyBroadcast(page), 'Broadcast channel fixture'));
@@ -500,6 +505,9 @@ try {
     result.passed.push(...await timed(verifyScriptLabels(page), 'Script filename fixture'));
     result.passed.push(...await timed(verifyLinks(page), 'Link event fixture'));
     result.passed.push(...await timed(verifyJavascriptLinks(page), 'JavaScript link decoding fixture'));
+    result.passed.push(...await timed(verifyJavascriptNavigation(page), 'JavaScript destination execution fixture'));
+    for(let batch=0;batch<3;batch++)result.passed.push(...await timed(verifyJavascriptDocumentResults(page,{batch,batches:3}), 'JavaScript document result fixture '+(batch+1)));
+    result.passed.push(...await timed(verifyJavascriptNavigationRaces(page), 'JavaScript navigation cancellation fixture'));
     result.passed.push(...await timed(verifyAttributes(page), 'Event attribute fixture'));
     result.passed.push(...await timed(verifyHyperlinks(page), 'Hyperlink URL fixture'));
     result.passed.push(...await timed(verifyHTMLInsertion(page), 'HTML insertion fixture'));

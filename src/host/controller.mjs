@@ -16,6 +16,7 @@ import {RPCSourcePolicy} from './rpc_policy.mjs';
 import {bootstrap_html,bootstrap_xml,create_bootstrap_nonce,runtime_seed} from '../bootstrap.mjs';
 import {runtime_html} from '../runtime_html.mjs';
 import {xml_document_type} from '../mime.mjs';
+import {navigate_javascript} from './javascript_navigation.mjs';
 import {decode_document_response} from '../text_encoding.mjs';
 import {prepare_site_data_clear as prepare_clear} from '../site_data_clear.mjs';
 import {opened_document_urls,document_request_url} from './document_url.mjs';
@@ -49,7 +50,7 @@ function get_frame_bundle(nonce) {
 
 export class ProxyFrame {
   get origin() { return this.document_origin??this.url?.origin; }
-  get request_url(){return this.document_origin!==undefined&&this.url?.protocol==='about:'?this.cookie_url:undefined;}
+  get request_url(){return this.document_origin!==undefined&&this.url?.protocol==='about:'?this.inherited_url||this.cookie_url:undefined;}
   constructor() {
     this.url = null;
     this.is_navigating = false;
@@ -90,8 +91,9 @@ export class ProxyFrame {
     await libcurl.load_wasm();
   }
 
-  async navigate_to(url, form_data=null, navigation = {}) {
+  async navigate_to(url, form_data=null, navigation = {}, document_result) {
     if (!util.is_valid_url(url)) throw TypeError("Invalid URL");
+    if(new URL(url).protocol==='javascript:')return navigate_javascript(this,this,url);
     const navigation_id = ++this.navigation_id;
     this.runtime_wait?.abort();
     const runtime_wait=this.runtime_wait=new AbortController();
@@ -115,7 +117,10 @@ export class ProxyFrame {
     let referrer_policy = default_referrer_policy, document_referrer = '';
     let request_metadata=navigation.traversed?this.history.current?.request_metadata:undefined;
 
-    if (typeof this.special_pages[url] === "string") {
+    // The fourth argument is host-only; renderer navigation RPCs never supply
+    // replacement HTML or origin metadata through their navigation options.
+    if(document_result){html=document_result.html;referrer_policy=document_result.referrer_policy;document_referrer=document_result.document_referrer;}
+    else if (typeof this.special_pages[url] === "string") {
       html = this.special_pages[url];
     }
     else {
@@ -153,8 +158,8 @@ export class ProxyFrame {
       finally{if(navigation_id===this.navigation_id)this.is_navigating=false;}
     }
     this.url = new URL(url);
-    this.document_origin=undefined;this.cookie_url=undefined;
-    this.broadcast_origin=this.url.origin==='null'?'opaque:'+this.id+':'+navigation_id:this.url.origin;
+    this.document_origin=document_result?.document_origin;this.cookie_url=document_result?.cookie_url;this.referrer_url=document_result?.referrer_url;this.inherited_url=document_result?.creator_url;
+    this.broadcast_origin=document_result?.broadcast_origin||(this.url.origin==='null'?'opaque:'+this.id+':'+navigation_id:this.url.origin);
     this.iframe.style.backgroundColor = "#222222";
     this.history.save_scroll(navigation.scroll);
     this.on_navigate();
@@ -179,7 +184,7 @@ export class ProxyFrame {
     }
     this.referrer_policy = referrer_policy;
     this.document_referrer = document_referrer;
-    this.history.navigate(url, {mode: navigation.history_mode || "push",request_metadata});
+    this.history.navigate(url, {mode: navigation.history_mode || "push",request_metadata,preserve_state:!!document_result});
     
     let settings = this.site_settings.find((item) => {
       return item.hostname.test(this.url.hostname);
@@ -204,7 +209,7 @@ export class ProxyFrame {
     try{await rpc.set_host(this.iframe, msg_channel.port2,{nonce:bootstrap_nonce});}
     catch(error){navigation_client?.release(error);if(navigation_id!==this.navigation_id)return;throw error;}
     if(navigation_id!==this.navigation_id)return;
-    const beacon_context = network.beacons.register(this.id, {url: this.url.href, top_url: this.url.href,broadcast_origin:this.broadcast_origin,root_id:this.id},network.commit_navigation_client(this,navigation_client));
+    const beacon_context = network.beacons.register(this.id, {url: this.url.href,cookie_url:this.cookie_url,referrer_url:this.referrer_url,top_url: this.url.href,broadcast_origin:this.broadcast_origin,root_id:this.id},network.commit_navigation_client(this,navigation_client));
     this.document_context=beacon_context;
     this.rpc_policy.bind_root(msg_channel.port1,beacon_context);
     await network.bind_service_worker_client(this,runtime_wait.signal);
@@ -214,6 +219,7 @@ export class ProxyFrame {
       await this.send_page({
         url: this.url.href,
         html: html, character_encoding,
+        inherited_base_url:document_result?.inherited_base_url,document_origin:this.document_origin,cookie_url:this.cookie_url,location_origin:document_result?.location_origin,
         frame_id: this.id,
         service_worker_host:!!this.service_worker_host,
         beacon_context,
@@ -222,9 +228,9 @@ export class ProxyFrame {
         error: error,
         settings: settings,
         default_settings: this.default_settings,
-        local_storage: local_storage[this.url.origin],
-        session_storage: this.session_storage[this.url.origin],
-        cookies: site_data.documentCookies(this.url.href),
+        local_storage: local_storage[this.origin],
+        session_storage: this.session_storage[this.origin],
+        cookies: site_data.documentCookies(this.cookie_url||this.url.href),
         history: {...this.history.snapshot(), traversed: !!navigation.traversed, restored: navigation.history_mode === "reload"},
         version: version
       },{signal:runtime_wait.signal});
@@ -259,6 +265,7 @@ export class ProxyFrame {
 rpc.rpc_handlers["navigate"] = async (frame_id, url, reload=true, form_data=null, navigation={}) => {
   let frame = iframes[frame_id];
   if (!frame) return;
+  if(new URL(url).protocol==='javascript:')return navigate_javascript(frame,frame,url);
 
   if (reload) {
     return await frame.navigate_to(url, form_data, {...navigation,initiated:true});
@@ -336,7 +343,7 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
     window_name:saved?.window_name??options.window_name??'',
     origin: opaque?'null':inherited||options.worker?inherited_origin:new URL(url).origin,
     broadcast_origin:options.worker ? new URL(url).protocol==='data:'?opaque_broadcast:parent_broadcast : opaque?opaque_broadcast:inherited?parent_broadcast:new URL(url).origin,
-    cookie_url:blob?url:inherited ? blank?creator_url:parent.cookie_url||effective_url() : undefined,
+    cookie_url:options.document_result&&blank?'about:blank':blob?url:inherited ? blank?creator_url:parent.cookie_url||effective_url() : undefined,
     referrer_url:blank?'about:blank':blob||options.worker&&new URL(url).protocol==='blob:'?url:undefined,
     get request_url(){
       if(!inherited||this.url.protocol!=='about:')return;
@@ -345,7 +352,7 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
     },
     session_storage: parent.session_storage,
     history: saved?.history || new NavigationHistory(),
-    async navigate_to(url, form_data, navigation = {}) {
+    async navigate_to(url, form_data, navigation = {}, document_result) {
       const previous_url=child.url;
       navigation = {...navigation,source_url:navigation.source_context?.url||child.request_url||child.url.href};
       child.url = new URL(url, child.url);
@@ -353,7 +360,7 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
       child.pending_navigation = navigation;
       const port = parent_id === root.id ? root.rpc_target.target : root.rpc_target.extra_frame_targets.get(parent_id);
       if (!port) throw new DOMException("Parent frame is disconnected", "InvalidStateError");
-      const result=await rpc.call_procedure(port, "child_navigate", [child_id, child.url.href, form_data, {...navigation,from_child:true}]);
+      const result=document_result?await rpc.call_procedure(port,'child_document_result',[child_id,child.url.href,document_result]):await rpc.call_procedure(port, "child_navigate", [child_id, child.url.href, form_data, {...navigation,from_child:true}]);
       if(result?.download||result?.no_navigation){child.url=previous_url;child.pending_navigation=null;return {...result,cookies:site_data.documentCookies(previous_url.href,{crossSite:frame_cross_site(child,iframes)})};}
       return result;
     },
@@ -367,7 +374,7 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
   try{worker_context=network.commit_worker_client(child,options.worker_context);}catch(error){delete iframes[child_id];throw error;}
   const receipt=network.navigation_metadata.take(options.request_metadata_token,parent_id,child_id,url);
   if(!receipt?.attachment)network.cancel_navigation_client(child_id,parent_id,parent.document_context);
-  child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push",request_metadata:receipt?.metadata});
+  child.history.navigate(url, {mode: options.history_mode || saved?.navigation?.history_mode || "push",request_metadata:receipt?.metadata,preserve_state:!!options.document_result});
   child.document_context=network.beacons.register(child_id, {url:document_request_url(child),cookie_url:child.cookie_url,referrer_url:child.referrer_url,top_url:root.url.href,nested:true,cross_site:frame_cross_site(child,iframes),broadcast_origin:child.broadcast_origin,root_id:root.id},worker_context||network.commit_navigation_client(child,receipt?.attachment)||options.beacon_context);
   root.rpc_policy.document(child_id,child.document_context,parent.document_context);
   await network.bind_service_worker_client(child);

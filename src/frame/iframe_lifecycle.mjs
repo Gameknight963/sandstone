@@ -1,5 +1,6 @@
 import {native_frame_window} from './iframe_window.mjs';
 import {shadow_root} from './shadow_roots.mjs';
+import {on_document_change} from './active_document.mjs';
 
 const states=new WeakMap(),shadowRoots=new WeakMap(),observed=new WeakSet();
 const node=globalThis.Node&&Node.prototype;
@@ -8,6 +9,7 @@ const connected=node&&Object.getOwnPropertyDescriptor(node,'isConnected').get;
 const owner=node&&Object.getOwnPropertyDescriptor(node,'ownerDocument').get;
 const getRoot=node?.getRootNode;
 let observer;
+on_document_change((previous,next)=>()=>{if(observer){observer.disconnect();observe(next);}});
 function observe(root){
   if(observed.has(root))return;
   observed.add(root);observer.observe(root,{childList:true,subtree:true});

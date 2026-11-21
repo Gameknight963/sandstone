@@ -22,10 +22,10 @@ export class NavigationHistory {
   save_scroll(scroll) {
     if (this.current && Array.isArray(scroll) && scroll.length === 2) this.current.scroll = scroll.map(value => Number.isFinite(value) ? value : 0);
   }
-  navigate(url, {mode = "push", document_id, scroll = [0, 0],request_metadata} = {}) {
+  navigate(url, {mode = "push", document_id, scroll = [0, 0],request_metadata,preserve_state=false} = {}) {
     document_id ||= "document:" + ++this.sequence;
     const previous = this.current;
-    const entry = {url: new URL(url).href, state: previous && (mode === "reload" || mode === "traverse") ? structuredClone(previous.state) : null,
+    const entry = {url: new URL(url).href, state: previous && (preserve_state || mode === "reload" || mode === "traverse") ? structuredClone(previous.state) : null,
       document_id, scroll: mode === "reload" || mode === "traverse" ? previous?.scroll || scroll : scroll};
     if(request_metadata)entry.request_metadata=Object.freeze({...request_metadata});
     if (previous && (mode === "traverse" || mode === "reload")) {

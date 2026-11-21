@@ -34,6 +34,6 @@ const names=`
 `.trim().split(/\s+/);
 
 const refreshed=['Image','Audio','FontFace','StorageEvent'];
-exports.header='(function(globalThis){\nconst {'+names.join(',')+'}=globalThis;\nlet {'+refreshed.join(',')+'}=globalThis;\n';
+exports.header='(function(globalThis){\nconst {'+names.filter(name=>name!=='document').join(',')+'}=globalThis;\nlet {document,'+refreshed.join(',')+'}=globalThis;\n';
 // These constructors are intentionally adapted during bundle initialization.
 exports.footer='\n({'+refreshed.join(',')+'}=globalThis);\nglobalThis.sandstone_frame=sandstone_frame;\n})(globalThis);';

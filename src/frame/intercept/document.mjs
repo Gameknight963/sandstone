@@ -9,9 +9,10 @@ import {is_svg_resource,rewrite_svg_resource} from '../svg_resources.mjs';
 import * as ranges from './ranges.mjs';
 import {input_ready_state} from '../document_input.mjs';
 import {is_svg_script,rewrite_svg_script} from '../svg_scripts.mjs';
+import {on_document_change} from '../active_document.mjs';
 // Workers may create an authored global named document. It is never the
 // environment's document and must not supply referrer metadata to requests.
-const native_document=globalThis.document;
+let native_document=globalThis.document;
 
 configure_document_base(()=>loader.inherited_base_url||ctx.location?.href||loader.url,()=>loader.is_loaded?undefined:loader.base_url);
 
@@ -82,7 +83,7 @@ class CustomDocument {
   get cookie() {return Reflect.get(this.__target__,'cookie',this.__proxy__)}
   set cookie(value) {Reflect.set(this.__target__,'cookie',value,this.__proxy__)}
   get body() {return this.__target__.body}
-  get defaultView() {return ctx.window}
+  get defaultView() {return this.__snapshot__?null:ctx.window}
   get addEventListener(){return this.__target__.addEventListener;}
   set addEventListener(value){this.__target__.addEventListener=value;}
   get removeEventListener(){return this.__target__.removeEventListener;}
@@ -93,16 +94,16 @@ class CustomDocument {
   set createRange(value){internal.createRange=value;}
   get getSelection(){return Object.hasOwn(internal,'getSelection')?internal.getSelection:ranges.getSelection;}
   set getSelection(value){internal.getSelection=value;}
-  get location() {return ctx.location}
-  set location(value) {ctx.location.href=value}
-  get URL() {return ctx.location.href}
+  get location() {return this.__snapshot__?null:ctx.location}
+  set location(value) {if(!this.__snapshot__)ctx.location.href=value}
+  get URL() {return this.__snapshot__?.URL??ctx.location.href}
   get baseURI() {
-    return document_base_url();
+    return this.__snapshot__?.baseURI??document_base_url();
   }
-  get readyState() {return input_ready_state()||loader.ready_state}
-  get documentURI() {return ctx.location.href}
-  get referrer() {return loader.document_referrer}
-  get currentScript() {return internal.currentScript&&script_root.call(internal.currentScript) instanceof ShadowRoot?null:internal.currentScript}
+  get readyState() {return this.__snapshot__?.readyState??(input_ready_state()||loader.ready_state)}
+  get documentURI() {return this.URL}
+  get referrer() {return this.__snapshot__?.referrer??loader.document_referrer}
+  get currentScript() {return this.__snapshot__?null:internal.currentScript&&script_root.call(internal.currentScript) instanceof ShadowRoot?null:internal.currentScript}
   get activeElement() {return this.__target__.activeElement}
 
   createElement(tag_name, options) {
@@ -121,4 +122,8 @@ if(globalThis.Document)for(const [name,property] of Object.entries(Object.getOwn
     set(value){Reflect.set(this.__target__,name,value,this.__proxy__);}
   });
 }
-export const custom_document = new CustomDocument();
+export let custom_document = new CustomDocument();
+on_document_change(()=>{
+  custom_document.__snapshot__={URL:custom_document.URL,baseURI:custom_document.baseURI,readyState:custom_document.readyState,referrer:custom_document.referrer};
+  return ()=>{native_document=globalThis.document;custom_document=new CustomDocument();};
+});

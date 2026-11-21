@@ -24,11 +24,32 @@ import {navigation_activation} from '../user_activation.mjs';
 import {decode_document_response} from '../../text_encoding.mjs';
 import {native_dom} from '../dom_operations.mjs';
 import {mime_essence,xml_document_type} from '../../mime.mjs';
+import {navigate_target} from '../navigation_targets.mjs';
+import {javascript_document_shell} from '../document_shell.mjs';
+import {runtime_message,stop_runtime_message,unlisten_runtime} from '../runtime_events.mjs';
 
 const relayed_source=value=>util.url_is_http(value)||/^(?:blob|data):/i.test(String(value));
 
 const inline_frames=new WeakMap(),sandbox_lists=new WeakMap();
 const runtime_loads=new WeakMap();
+// The physical JavaScript URL can be replayed when an iframe is moved or
+// reinserted. Keep a stable dispatcher, with weak element ownership, rather
+// than leaving a consumed one-use function name in its native src attribute.
+const initial_frames=new Map(),initial_callbacks=new WeakMap();
+const initial_dispatch=globalThis.document?'__sandstone_initial_'+create_bootstrap_nonce():undefined;
+const initial_finalizer=globalThis.FinalizationRegistry&&new FinalizationRegistry(id=>initial_frames.delete(id));
+if(initial_dispatch)Object.defineProperty(globalThis,initial_dispatch,{value(target,id,phase){
+  const element=initial_frames.get(id)?.deref();
+  return element&&initial_callbacks.get(element)?.(target,phase);
+}});
+if(initial_dispatch)listen_runtime(globalThis,'message',event=>{
+  const message=runtime_message(event,'data');
+  if(!event.isTrusted||!message||message.sandstone_initial_document!==1)return;
+  const element=initial_frames.get(message.id)?.deref(),callback=element&&initial_callbacks.get(element);
+  if(!callback||callback.nonce!==message.nonce||runtime_message(event,'source')!==native_frame_window(element))return;
+  stop_runtime_message(event);for(const port of runtime_message(event,'ports')||[])port.close();
+  callback(native_frame_window(element),1);
+},true);
 // Intercept physical runtime loads before author capture listeners, including
 // listeners attached before the iframe enters the document.
 const capture_runtime_load=event=>{if(event.isTrusted)runtime_loads.get(event.target)?.(event);};
@@ -76,8 +97,12 @@ export function rewrite_iframe(iframe_element) {
   let iframe_src = iframe_element.src;
   let authored_src = iframe_element.getAttribute('src');
   const authored=new Map(['src','srcdoc','sandbox','allow'].map(key=>[key,iframe_element.getAttribute(key)]));
+  const javascript_source=(value=authored_src)=>{try{const url=convert_url(value,ctx.document.baseURI,loader.character_encoding);if(url.startsWith('javascript:'))return url;}catch{}};
+  let javascript_revision=0,pending_javascript=javascript_source()?{url:javascript_source(),initial:true}:null,blank_initialization;
+  let initial_javascript,blank_options,blank_nonce;
   const blank_url=()=>{
     if(authored.get('srcdoc')!==null)return;
+    if(javascript_source())return 'about:blank';
     if(!authored_src)return 'about:blank';
     try{const url=new URL(authored_src,ctx.document.baseURI);if(url.protocol==='about:'&&url.pathname==='blank'&&!url.search)return url.href;}catch{}
   };
@@ -98,7 +123,7 @@ export function rewrite_iframe(iframe_element) {
   let runtime_sandbox=authored.get('srcdoc')!==null||!!blank_url();
   let ensure_blank=()=>false,initializing_blank=false,blank_ready=false,blank_runtime,blank_load_pending=true;
   runtime_loads.set(iframe_element,event=>{
-    if(blank_load_pending&&blank_url()&&!initializing_blank&&ensure_blank(native_frame_window(iframe_element))&&blank_runtime?.loader.pristine_blank){blank_load_pending=false;return;}
+    if(!native_runtime_load&&blank_load_pending&&blank_url()&&!initializing_blank&&ensure_blank(native_frame_window(iframe_element))&&blank_runtime?.loader.pristine_blank){blank_load_pending=false;return;}
     if(event.isTrusted&&(runtime_sandbox||iframe_url||native_runtime_load)){event.stopImmediatePropagation();native_runtime_load?.(event);}
   });
   const release_load=()=>{finish_load?.();finish_load=undefined;};
@@ -108,9 +133,18 @@ export function rewrite_iframe(iframe_element) {
   };
   const update_inline=(key,value)=>{
     if(key==='src')return set_src(value);
+    if(key==='srcdoc')clear_initial_javascript();
     if(key==='allow')render_internal_media_attribute(iframe_element,key,authored.get(key));
     authored.set(key,value);
-    if(key==='sandbox'){render_sandbox();render_focus();return;}
+    if(key==='sandbox'){
+      const pending=!!initial_javascript;
+      if(pending&&!iframe_element.isConnected)clear_initial_javascript();
+      render_sandbox();render_focus();
+      if(!iframe_element.isConnected&&javascript_source()){
+        if(!prepare_initial_javascript()&&pending)render_media_attribute(iframe_element,'src','');
+      }
+      return;
+    }
     if(key==='allow'){render_media_attribute(iframe_element,key,value);render_focus();return;}
     // Never install authored markup in the physical document.
     render_media_attribute(iframe_element,'srcdoc',value===null?'':physical_inline);
@@ -125,6 +159,7 @@ export function rewrite_iframe(iframe_element) {
   for(const key of authored.keys())resource_attribute(iframe_element,key,()=>authored.get(key));
   render_sandbox();
   render_focus();
+  if(javascript_source())render_media_attribute(iframe_element,'src','');
   if(authored.get('srcdoc')!==null){render_media_attribute(iframe_element,'src','');render_media_attribute(iframe_element,'srcdoc','');}
   const authored_internal=iframe_element.getAttribute('__src');
   resource_attribute(iframe_element,'src',()=>authored_src);
@@ -148,7 +183,7 @@ export function rewrite_iframe(iframe_element) {
     if(!initializing_blank)reconcile_iframes(iframe_element);
     if(blank_ready){try{if(target.sandstone_frame===blank_runtime)return true;}catch{}blank_ready=false;}
     const url=blank_url();
-    if(initializing_blank||!url||!iframe_element.isConnected)return false;
+    if(initializing_blank||native_runtime_load||!url||!iframe_element.isConnected)return false;
     let doc;try{doc=target.document;if(target.sandstone_frame)return false;}catch{return false;}
     if(!doc||!doc.URL.startsWith('about:blank'))return false;
     if(iframe_url)retire();
@@ -162,26 +197,29 @@ export function rewrite_iframe(iframe_element) {
       script.setAttribute('data-sandstone-bootstrap',old.getAttribute('data-sandstone-bootstrap'));script.textContent=old.textContent;old.replaceWith(script);
       const runtime=target.sandstone_frame;
       blank_runtime=runtime;
+      blank_nonce=nonce;
       const document_current=()=>{try{return iframe_element.isConnected&&native_frame_window(iframe_element).sandstone_frame===runtime;}catch{return false;}};
       // The child is usable now. Leave the host end unstarted until registration
       // succeeds so early requests queue behind their document's capability.
       runtime.rpc.connect_frame_host(channel.port2,nonce);
       const creator_url=loader.cookie_url||loader.url,policy=document_referrer_policy();
       let local=[],session=[];try{local=storage_entries(ctx.localStorage);session=storage_entries(ctx.sessionStorage);}catch{}
-      const ready=runtime.loader.initialize_blank({url,frame_id,beacon_context:token,document_origin:ctx.origin,cookie_url:creator_url,
+      const options=blank_options={url,frame_id,beacon_context:token,document_origin:ctx.origin,cookie_url:creator_url,
         automatic_features:loader.automatic_features&&(authored.get('sandbox')===null||sandbox_tokens(authored.get('sandbox')).has('allow-scripts')),
         sandboxed_context:loader.sandboxed_context||authored.get('sandbox')!==null,
         service_worker_state:service_worker_snapshot(),
-        inherited_base_url:ctx.document.baseURI,document_referrer:loader.url.startsWith('blob:')?loader.url:request_referrer(creator_url,creator_url,policy),referrer_policy:policy,
+        inherited_base_url:ctx.document.baseURI,document_referrer:javascript_source()?'':loader.url.startsWith('blob:')?loader.url:request_referrer(creator_url,creator_url,policy),referrer_policy:policy,
         message_origin:ctx.origin,message_parent:child_message_parent(message_token),is_iframe:true,window_name:window_name,
         crypto_available:loader.crypto_available,local_storage:local,session_storage:session,cookies:cookie_snapshot(),
         cookie_cross_site:loader.cookie_cross_site,settings:{allow_js:loader.site_settings.allow_js!==false&&(authored.get('sandbox')===null||sandbox_tokens(authored.get('sandbox')).has('allow-scripts'))},
-        default_settings:loader.default_settings,version:loader.version},()=>{if(document_current())iframe_element.dispatchEvent(new Event('load'));},value=>{
+        default_settings:loader.default_settings,version:loader.version};
+      const ready=runtime.loader.initialize_blank(options,completion=>{if(document_current()&&(!javascript_source()||completion?.written))iframe_element.dispatchEvent(new Event('load'));},value=>{
           if(!document_current())return;
           if(active_request&&!active_request.signal.aborted){active_request.abort();generation++;}
           iframe_url=value;
         });
       ready.catch(error=>{if(current()&&error?.name!=='AbortError')console.error(error);});
+      blank_initialization=ready;
       blank_ready=true;
       loader.child_names.set(frame_id,value=>{window_name=value;});
       loader.child_urls.set(frame_id,(value,context)=>{if(!context||context===token)iframe_url=value;});
@@ -200,18 +238,142 @@ export function rewrite_iframe(iframe_element) {
     finally{initializing_blank=false;}
   };
 
-  let fetch_src = async (value, form_data = null, navigation = {}) => {
+  async function document_barrier(port,token,signal){
+    // A fresh native Window no longer runs the original realm's port listener.
+    // Receive only this ordered reply in the still-active parent realm.
+    const receive=event=>{if(runtime_message(event,'data')?.type==='reply')rpc.message_listener(event);};
+    listen_runtime(port,'message',receive);
+    try{return await rpc.call_procedure(port,'cookies_ready',[frame_id,token],{signal});}
+    finally{unlisten_runtime(port,'message',receive);}
+  }
+
+  function clear_initial_javascript(){
+    if(!initial_javascript)return;
+    try{if(initial_javascript.target)delete initial_javascript.target[initial_javascript.child_key];}catch{}
+    initial_callbacks.delete(iframe_element);initial_javascript=undefined;
+  }
+  function prepare_initial_javascript(){
+    const url=javascript_source(),sandbox=authored.get('sandbox'),tokens=sandbox_tokens(sandbox);
+    if(iframe_url||!url||!initial_dispatch||typeof WeakRef!=='function'||authored.get('srcdoc')!==null||ctx.origin==='null'||loader.site_settings.allow_js===false||sandbox!==null&&(!tokens.has('allow-scripts')||!tokens.has('allow-same-origin')))return false;
+    if(initial_javascript)return true;
+    const native_src='javascript:parent['+JSON.stringify(initial_dispatch)+'](this,'+JSON.stringify(frame_id)+',0)';
+    if(iframe_element.isConnected){
+      // Reconnection is observed after insertion for native move operations.
+      // Its already-queued src must be our dispatcher, in a fresh blank realm.
+      try{if(raw_media_attribute(iframe_element,'src')!==native_src||native_frame_window(iframe_element).sandstone_frame)return false;}catch{return false;}
+    }
+    if(!initial_frames.has(frame_id)){
+      initial_frames.set(frame_id,new WeakRef(iframe_element));initial_finalizer?.register(iframe_element,frame_id);
+    }
+    const revision=javascript_revision,state=initial_javascript={revision,phase:0};
+    const current=target=>initial_javascript===state&&revision===javascript_revision&&(state.generation===undefined||state.generation===generation)&&iframe_element.isConnected&&native_frame_window(iframe_element)===target;
+    initial_callbacks.set(iframe_element,(target,phase)=>{
+      if(!current(target)||phase!==state.phase)return;
+      if(phase===0){
+        if(!ensure_blank(target)){clear_initial_javascript();return;}
+        state.generation=generation;
+        pending_javascript=null;blank_load_pending=false;
+        const runtime=target.sandstone_frame;
+        state.runtime=runtime;state.document=target.document;
+        state.target=target;state.child_key='__sandstone_replacement_'+create_bootstrap_nonce();
+        initial_callbacks.get(iframe_element).nonce=state.child_key;
+        Object.defineProperty(target,state.child_key,{configurable:true,value:()=>globalThis[initial_dispatch](target,frame_id,1)});
+        const result=runtime.javascript_navigation.evaluate_javascript_url(url);
+        if(!current(target))return;
+        if(typeof result.html!=='string'){
+          const ready=Promise.all([commit,blank_initialization]);clear_initial_javascript();
+          ready.then(()=>{if(revision===javascript_revision&&iframe_element.isConnected)iframe_element.dispatchEvent(new Event('load'));}).catch(error=>{if(error?.name!=='AbortError')console.error(error);});
+          return;
+        }
+        state.result=result;state.phase=1;
+        // Only the fixed shell and this one-use private callback reach the
+        // native parser. Authored resource-bearing HTML stays in the broker.
+        const invoke='this['+JSON.stringify(state.child_key)+']';
+        const message=JSON.stringify({sandstone_initial_document:1,id:frame_id,nonce:state.child_key});
+        return javascript_document_shell(result.html).replace('<head>','<head><script>if('+invoke+')'+invoke+'();else parent.postMessage('+message+',"*");<\/script>');
+      }
+      let reused=false;
+      try{if(target.document===state.document)return;reused=target.sandstone_frame===state.runtime;}catch{}
+      if(!reused){
+        // document.open can end the initial-empty-document state during the
+        // authored program. The browser then creates a fresh Window for the
+        // string result; its shell reports readiness without requiring SOP.
+        const runtime=state.runtime,result=state.result,revision_id=generation;
+        const old_port=runtime.rpc.host.target,old_token=runtime.loader.beacon_context;
+        const url=runtime.loader.url,creator_url=blank_options.cookie_url;
+        clear_initial_javascript();
+        commit.then(async()=>{
+          await document_barrier(old_port,old_token);
+          if(revision===javascript_revision&&generation===revision_id&&iframe_element.isConnected)await fetch_src(url,null,{history_mode:'replace',result_document:true},{...result.document,html:result.html,creator_url});
+        }).catch(error=>{if(revision===javascript_revision&&iframe_element.isConnected&&error?.name!=='AbortError')console.error(error);});
+        return;
+      }
+      const runtime=state.runtime,result=state.result,old_ready=blank_initialization,old_commit=commit;
+      const old_port=runtime.rpc.host.target,old_token=runtime.loader.beacon_context;
+      const channel=new MessageChannel(),token=create_bootstrap_nonce(),generation_id=++generation;
+      active_request?.abort();
+      const controller=active_request=new AbortController();
+      clear_initial_javascript();
+      const live=()=>revision===javascript_revision&&generation===generation_id&&iframe_element.isConnected&&native_frame_window(iframe_element)===target&&target.sandstone_frame===runtime;
+      runtime.rpc.connect_reused_frame_host(channel.port2,blank_nonce);
+      iframe_url=runtime.loader.url;
+      const options={...blank_options,...result.document,url:iframe_url,html:result.html,beacon_context:token,cookie_url:'about:blank',window_name:target.name,signal:controller.signal};
+      // This updates the document view synchronously, before queued authored
+      // microtasks. Loading waits on the replacement's unstarted host channel.
+      const loaded=runtime.loader.load_reused_document(options);
+      loaded.catch(()=>{});blank_initialization=loaded;
+      loader.child_urls.set(frame_id,(value,context)=>{if(!context||context===token)iframe_url=value;});
+      const installation=(async()=>{
+        await old_commit;await old_ready;
+        if(!live())return;
+        // Order all original-document cookie/history writes before retiring it.
+        await document_barrier(old_port,old_token,controller.signal);
+        if(!live())return;
+        if(registered){await unregister(frame_id,{keep_history:true});registered=false;}
+        if(!live())return;
+        await register(loader.frame_id,frame_id,iframe_url,{blank:true,creator_url:blank_options.cookie_url,beacon_context:token,sandbox:authored.get('sandbox'),window_name:target.name,history_mode:'replace',document_result:true});
+        registered=true;rpc.attach_host(channel.port1,frame_id);
+      })();
+      commit=installation.catch(error=>{channel.port1.close();channel.port2.close();if(live()&&error?.name!=='AbortError')console.error(error);});
+      installation.then(()=>loaded).then(()=>{if(live())iframe_element.dispatchEvent(new Event('load'));}).catch(error=>{if(live()&&error?.name!=='AbortError')console.error(error);});
+    });
+    if(raw_media_attribute(iframe_element,'src')!==native_src)render_media_attribute(iframe_element,'src',native_src);
+    return true;
+  }
+
+  async function run_javascript(pending,revision){
+    if(!iframe_element.isConnected)return;
+    if(!iframe_url)ensure_blank(native_frame_window(iframe_element));
+    await commit;
+    if(revision!==javascript_revision||!iframe_element.isConnected)return;
+    if(active_request&&!active_request.signal.aborted){active_request.abort();generation++;release_load();}
+    try{await blank_initialization;}catch(error){if(error?.name!=='AbortError')throw error;}
+    if(revision!==javascript_revision||!iframe_element.isConnected)return;
+    const result=await navigate_target(pending.url,{id:frame_id});
+    if(pending.initial&&result?.executed&&revision===javascript_revision&&iframe_element.isConnected&&!result.replaced&&blank_load_pending){blank_load_pending=false;iframe_element.dispatchEvent(new Event('load'));}
+    return result;
+  }
+  function queue_javascript(){
+    if(!pending_javascript||!iframe_element.isConnected)return;
+    const pending=pending_javascript;pending_javascript=null;
+    run_javascript(pending,javascript_revision).catch(console.error);
+  }
+
+  let fetch_src = async (value, form_data = null, navigation = {}, document_result) => {
     navigation={activation:navigation_activation(),...navigation};
     if(!iframe_element.isConnected||native_dom.owner.call(iframe_element)!==document)return;
+    const javascript=javascript_source(value);
+    if(javascript)return run_javascript({url:javascript,initial:false},++javascript_revision);
     const inline=navigation.srcdoc||new URL(value,ctx.document.baseURI).href.split('#')[0]==='about:srcdoc';
     if(inline&&authored.get('srcdoc')===null)return;
-    if(!navigation.srcdoc&&active_target&&inline&&iframe_url.split('#')[0]==='about:srcdoc'&&String(value).includes('#')&&navigation.history_mode!=='reload'){
+    if(!document_result&&!navigation.srcdoc&&active_target&&inline&&iframe_url.split('#')[0]==='about:srcdoc'&&String(value).includes('#')&&navigation.history_mode!=='reload'){
       return rpc.call_procedure(active_target,'navigate_fragment',[value]);
     }
     const target_url=convert_url(value,ctx.document.baseURI,loader.character_encoding);
+    const blank_result=!!document_result&&/^about:blank(?:#|$)/.test(target_url);
     const local=/^(?:blob|data):/.test(target_url),blob=target_url.startsWith('blob:');
     runtime_sandbox=true;render_sandbox();
-    const inherited_base_url=inline?ctx.document.baseURI:undefined;
+    const inherited_base_url=document_result?document_result.inherited_base_url:inline?ctx.document.baseURI:undefined;
     if(inline&&!finish_load)finish_load=delay_script_load();
     const revision=++generation;
     active_request?.abort();
@@ -224,9 +386,10 @@ export function rewrite_iframe(iframe_element) {
     let final_url = target_url;
     let error; //possible network error
     let html,character_encoding='UTF-8',content_type='text/html';
-    const shares_origin=url=>authored.get('srcdoc')===null&&!url.startsWith('data:')&&(blob||new URL(url).origin===ctx.origin)&&!(authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'));
+    const shares_origin=url=>authored.get('srcdoc')===null&&!url.startsWith('data:')&&(blank_result||blob||new URL(url).origin===ctx.origin)&&!(authored.get('sandbox')!==null&&!sandbox_tokens(authored.get('sandbox')).has('allow-same-origin'));
     let referrer_policy, document_referrer,request_metadata_token;
-    if(inline){html=authored.get('srcdoc');referrer_policy=document_referrer_policy();document_referrer=loader.document_referrer;}
+    if(document_result){html=document_result.html;referrer_policy=document_result.referrer_policy;document_referrer=document_result.document_referrer;}
+    else if(inline){html=authored.get('srcdoc');referrer_policy=document_referrer_policy();document_referrer=loader.document_referrer;}
     else try {
       let response = await network.fetch(target_url, {
         signal:controller.signal,
@@ -347,7 +510,7 @@ export function rewrite_iframe(iframe_element) {
 
       iframe_url=final_url;
       const sandbox=iframe_element.getAttribute('sandbox'),opaque=sandbox!==null&&!sandbox_tokens(sandbox).has('allow-same-origin');
-      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,sandbox,window_name:initial_name,srcdoc:inline,blob,request_metadata_token});
+      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,sandbox,window_name:initial_name,srcdoc:inline,blank:blank_result,creator_url:blank_result?document_result.creator_url:undefined,blob,request_metadata_token,document_result:!!document_result});
       registered = true;
       window_name=state.window_name;opaque_origin=state.message_origin==='null';
       loader.child_names.set(frame_id,value=>{window_name=value;});
@@ -397,9 +560,18 @@ export function rewrite_iframe(iframe_element) {
   }
 
   set_src=value=>{
+      clear_initial_javascript();
+      javascript_revision++;pending_javascript=null;
       authored_src=value;
       authored.set('src',value);
       if(authored.get('srcdoc')!==null){render_media_attribute(iframe_element,'src','');return;}
+      const javascript=javascript_source();
+      if(javascript){
+        runtime_sandbox=true;render_sandbox();
+        if(prepare_initial_javascript())return;
+        if(!iframe_url)render_media_attribute(iframe_element,'src','');
+        pending_javascript={url:javascript,initial:false};queue_javascript();return;
+      }
       let remote=false;
       try{remote=relayed_source(value);}catch{}
       if (!remote || !value){
@@ -423,11 +595,17 @@ export function rewrite_iframe(iframe_element) {
   intercept_property(iframe_element,'src',{get:source_url,set(value){set_src(`${value}`);}});
   intercept_iframe_window(iframe_element,()=>iframe_url,(url,history_mode,form_data,navigation)=>{
     return fetch_src(url,form_data,{...navigation,history_mode});
-  },message_token,{id:frame_id,name:()=>window_name,opaque:()=>opaque_origin,prepare:ensure_blank,origin:()=>/^(?:blob:|about:(?:srcdoc|blank)(?:#|$))/.test(iframe_url)?ctx.origin:new URL(iframe_url).origin});
+  },message_token,{id:frame_id,name:()=>window_name,opaque:()=>opaque_origin,prepare:ensure_blank,origin:()=>!iframe_url||/^(?:blob:|about:(?:srcdoc|blank)(?:#|$))/.test(iframe_url)?ctx.origin:new URL(iframe_url).origin});
   let lifecycle_ready=false;
+  prepare_initial_javascript();
   track_iframe(iframe_element,{
     disconnect(){
+      clear_initial_javascript();
+      javascript_revision++;pending_javascript=null;
       retire();
+      if(javascript_source()){
+        prepare_initial_javascript();return;
+      }
       // A reinserted element must not auto-load its old physical runtime before
       // the authored URL is relayed again.
       let remote=false;
@@ -438,13 +616,19 @@ export function rewrite_iframe(iframe_element) {
       initial_name=window_name=iframe_element.name;opaque_origin=false;
       if(!lifecycle_ready)return;
       if(authored.get('srcdoc')!==null){fetch_src('about:srcdoc',null,{srcdoc:true}).catch(console.error);return;}
-      if(blank_url()){ensure_blank(native_frame_window(iframe_element));return;}
+      if(initial_javascript)return;
+      if(blank_url()){
+        ensure_blank(native_frame_window(iframe_element));
+        if(javascript_source())pending_javascript={url:javascript_source(),initial:true};
+        queue_javascript();return;
+      }
       let remote=false;try{remote=relayed_source(authored_src);}catch{}
       if(remote)fetch_src(authored_src).catch(console.error);
     }
   });
   lifecycle_ready=true;
-  if(blank_url()){if(iframe_element.isConnected)ensure_blank(native_frame_window(iframe_element));return;}
+  if(initial_javascript)return;
+  if(blank_url()){if(iframe_element.isConnected)ensure_blank(native_frame_window(iframe_element));queue_javascript();return;}
   if(authored.get('srcdoc')!==null){fetch_src('about:srcdoc',null,{srcdoc:true}).catch(console.error);return;}
   if (!iframe_src) {
     return;
