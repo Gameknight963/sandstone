@@ -22,6 +22,9 @@ function origin(id) {
   return value;
 }
 
-rpc_handlers["idb_command"] = (id, command) => indexed_db.command(id, origin(id), crypto_service.decode(command));
-rpc_handlers["idb_poll"] = async id => crypto_service.encode(await indexed_db.poll(id, origin(id)));
+rpc_handlers["idb_command"] = (id, command) => {
+  const source=origin(id),decoded=crypto_service.decode_shared(command);
+  return decoded instanceof Promise?decoded.then(value=>indexed_db.command(id,source,value)):indexed_db.command(id,source,decoded);
+};
+rpc_handlers["idb_poll"] = async id => crypto_service.encode_shared(await indexed_db.poll(id, origin(id)));
 rpc_handlers["idb_databases"] = id => indexed_db.databases(origin(id));

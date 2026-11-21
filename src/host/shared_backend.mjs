@@ -7,6 +7,7 @@ import {PolicyProviders} from './policy_providers.mjs';
 import {create_bootstrap_nonce} from '../bootstrap.mjs';
 import {set_role} from '../rpc.mjs';
 import {owner_prefix,publish_backend} from './worker_discovery.mjs';
+import {crypto_service} from './crypto.mjs';
 
 // This bundle runs only in a trusted host-origin worker. Authored JavaScript
 // belongs in a separate opaque runtime, connected through WorkerServiceHost.
@@ -73,6 +74,10 @@ globalThis.onconnect=event=>{
           add_owner(message.lease);value=true;
         }else if(message.op==='shutdown'){
           port.postMessage({id:message.id,ok:true,value:true});shutdown();return;
+        }else if(message.op==='keys-store'){
+          crypto_service.store(message.records);value=true;
+        }else if(message.op==='keys-load'){
+          value=crypto_service.load(message.handles);
         }else if(message.op==='policy'){
           providers.add(event.ports[0],{lease:message.lease,authority:message.authority});value=true;
         }else if(message.op==='open'){

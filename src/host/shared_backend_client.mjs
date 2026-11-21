@@ -3,9 +3,20 @@ import {create_bootstrap_nonce} from '../bootstrap.mjs';
 import {libcurl_binary} from './libcurl_wasm.mjs';
 import {version} from './version.mjs';
 import {owner_prefix,hold_lock,watch_backend,find_backend,backend_live,backend_gone} from './worker_discovery.mjs';
+import {crypto_service} from './crypto.mjs';
 
 const NativeSharedWorker=globalThis.SharedWorker;
 const unavailable=()=>new DOMException('Worker backend connection is closed','InvalidStateError');
+
+export async function share_crypto(connection){
+  const detach=crypto_service.setVault({
+    store:records=>connection.request('keys-store',{records}),
+    load:handles=>connection.request('keys-load',{handles})
+  });
+  connection.closed.then(detach);
+  try{await crypto_service.publish_keys();return detach;}
+  catch(error){detach();throw error;}
+}
 
 // These URLs and ports are private host capabilities. Never pass them to a
 // renderer; its remote worker receives only its restricted service port.
