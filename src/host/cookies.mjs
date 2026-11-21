@@ -23,6 +23,7 @@ rpc.rpc_handlers.cookies_ready=(id,token)=>{
 };
 site_data.cookieListeners.add(domain=>{
   for(const frame of Object.values(iframes)){
+    if(frame.cookie_policy)continue;
     const context=beacons.contexts.get(frame.document_context);
     if(!context||context.retired||context.context.broadcast_origin?.startsWith('opaque:'))continue;
     // Use the frozen document context; frame.url can already name the next

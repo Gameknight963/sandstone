@@ -3,6 +3,7 @@ export * as network from "./network.mjs";
 export * as service_workers from './service_worker.mjs';
 export {WorkerServiceHost} from './worker_host.mjs';
 export {SharedWorkerRegistry} from '../shared_worker/registry.mjs';
+export {CookiePolicyBridge,cookie_policy_handler} from './cookie_policy_bridge.mjs';
 
 import * as rpc from "../rpc.mjs";
 rpc.set_role("host");

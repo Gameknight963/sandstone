@@ -14,8 +14,9 @@ export function snapshot_request_context(data,context={}){
 // Redirects must pass through the cookie jar at every hop, including login flows.
 export async function fetch_with_cookies(transport, data, input, init = {}, context = {}, worker) {
   data.refresh?.();
-  const cookieGeneration=context.cookieGeneration??data.cookieGeneration;
-  const cookieEpochs=context.cookieEpochs??data.cookieEpochSnapshot?.();
+  const captured=data.captureCookieContext&&init.credentials!=='omit'?await data.captureCookieContext(context,init.signal):context;
+  const cookieGeneration=captured.cookieGeneration??data.cookieGeneration;
+  const cookieEpochs=captured.cookieEpochs??data.cookieEpochSnapshot?.();
   let url = new URL(input);
   const source = new URL(context.url || url);
   const top = new URL(context.top_url || source);
@@ -62,12 +63,14 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
     if (referrer) headers.set('referer',referrer);
     const synthetic=worker?await worker(url.href,{...options,mode,redirect:'manual',referrer,referrerPolicy:policy}):undefined;
     if (allowed&&!synthetic) {
-      const cookies = cookie_header(data.cookies,url.href,{sameSiteContext,allowUnsafe:context.navigation&&!context.nested&&!safe_method});
+      const cookieOptions={sameSiteContext,allowUnsafe:context.navigation&&!context.nested&&!safe_method};
+      const cookies = data.cookieHeader?await data.cookieHeader(url.href,cookieOptions,init.signal):cookie_header(data.cookies,url.href,cookieOptions);
       if (cookies) headers.set("cookie", cookies);
     }
     // Navigation redirects can enter a different worker scope at each hop.
     // Consult the worker before attaching transport cookies, and never process
     // its synthetic response as an HTTP cookie/cache response.
+    init.signal?.throwIfAborted();
     const response = synthetic||await transport(url.href, {...options, headers: Object.fromEntries(headers), redirect: "manual"});
     if (allowed&&!synthetic) {
       const raw = response.raw_headers || [...response.headers];
@@ -75,7 +78,12 @@ export async function fetch_with_cookies(transport, data, input, init = {}, cont
       for (const [key, value] of raw) {
         if (key.toLowerCase() === "set-cookie") setCookies.push(value);
       }
-      for (const value of new Set(setCookies)) data.setCookie(url.href, value,true,{crossSite:sameSiteContext==='none',topLevel:context.navigation&&!context.nested,...(cookieGeneration===undefined?{}:{cookieGeneration}),...(cookieEpochs===undefined?{}:{cookieEpochs})});
+      try{
+        for (const value of new Set(setCookies)) {
+          const pending=data.setCookie(url.href, value,true,{crossSite:sameSiteContext==='none',topLevel:context.navigation&&!context.nested,...(cookieGeneration===undefined?{}:{cookieGeneration}),...(cookieEpochs===undefined?{}:{cookieEpochs})},init.signal);
+          if(pending?.then)await pending;
+        }
+      }catch(error){await response.body?.cancel().catch(()=>{});throw error;}
     }
     const location = response.headers.get("location");
     if (!location || ![301, 302, 303, 307, 308].includes(response.status) || redirect === "manual") {

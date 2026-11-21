@@ -10,20 +10,21 @@ import * as rpc from '../rpc.mjs';
 // Only its bound port can address this context; document/navigation procedures
 // and further port attachment are unavailable to the remote worker.
 export class WorkerServiceHost {
-  constructor({url,top_url=url,cross_site=false,referrer_policy}={},port){
+  constructor({url,top_url=url,cross_site=false,referrer_policy,cookie_policy}={},port){
     const script=new URL(url),top=new URL(top_url);
     if(!['http:','https:'].includes(script.protocol)||!['http:','https:'].includes(top.protocol))throw new TypeError('HTTP worker and top-level URLs are required');
     if(!(port instanceof MessagePort))throw new TypeError('A worker MessagePort is required');
+    if(cookie_policy&&['captureCookieContext','cookieHeader','setCookie'].some(name=>typeof cookie_policy[name]!=='function'))throw new TypeError('Invalid worker cookie policy');
     const rootId='worker-owner:'+create_bootstrap_nonce(),id='worker:'+create_bootstrap_nonce();
     const rootContext=beacons.register(rootId,{url:top.href,top_url:top.href,root_id:rootId,broadcast_origin:top.origin});
-    const token=beacons.register(id,{url:script.href,top_url:top.href,root_id:rootId,broadcast_origin:script.origin,cross_site:!!cross_site,referrerPolicy:referrer_policy});
+    const token=beacons.register(id,{url:script.href,top_url:top.href,root_id:rootId,frame_id:id,broadcast_origin:script.origin,cross_site:!!cross_site,referrerPolicy:referrer_policy});
     this.id=id;this.rootId=rootId;this.port=port;
     this.profile={url:script.href,origin:script.origin,frame_id:id,beacon_context:token,referrer_policy,crypto_available:crypto_service.methods};
     const root={id:rootId,root_id:rootId,url:top,origin:top.origin,document_context:rootContext,
       // The metadata owner is not a document. In particular it must never
       // receive top-level cookies on the remote worker's port.
       rpc_target:{target:null,extra_frame_targets:new Map([[id,port]])}};
-    const frame={id,root_id:rootId,parent_id:rootId,parent_context:rootContext,worker:true,url:script,origin:script.origin,broadcast_origin:script.origin,document_context:token,retained_cross_site:!!cross_site};
+    const frame={id,root_id:rootId,parent_id:rootId,parent_context:rootContext,worker:true,url:script,origin:script.origin,broadcast_origin:script.origin,document_context:token,retained_cross_site:!!cross_site,cookie_policy};
     iframes[rootId]=root;iframes[id]=frame;
     const policy=new WorkerRPCPolicy({root:rootId,frames:()=>iframes,contexts:()=>beacons.contexts});
     const authority={};policy.bind_root(authority,rootContext);policy.attach(authority,port,id);policy.document(id,token,rootContext);

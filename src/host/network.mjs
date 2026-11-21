@@ -37,8 +37,9 @@ export function cancel_navigation_client(target,owner,document){return service_w
 export function reserved_navigation_client(id){return service_worker_navigation.reserved?.(id);}
 export let session = null;
 export const navigation_metadata=new NavigationMetadata(parent=>iframes[parent]?.document_context);
-const context_cookies=(url,context)=>site_data.documentCookies(url,{crossSite:!!context?.cross_site});
-export const beacons = new BeaconQueue({fetch: (...args) => fetch(...args), cookies: context_cookies,capture_context:context=>snapshot_request_context(site_data,context)});
+const request_cookie_store=context=>iframes[context?.frame_id]?.cookie_policy||site_data;
+const context_cookies=(url,context)=>request_cookie_store(context)===site_data?site_data.documentCookies(url,{crossSite:!!context?.cross_site}):undefined;
+export const beacons = new BeaconQueue({fetch: (...args) => fetch(...args), cookies: context_cookies,capture_context:context=>snapshot_request_context(request_cookie_store(context),context)});
 export const keepalives = new KeepaliveRequests({queue:beacons,fetch:(...args)=>fetch(...args),cookies:context_cookies});
 export const downloads=new Downloads({fetch:(...args)=>fetch(...args),contexts:beacons.contexts,cookies:context_cookies});
 rpc_handlers.download_request=(...args)=>downloads.request(...args);
@@ -50,11 +51,12 @@ rpc_handlers.fetch_keepalive_abort = (...args) => keepalives.abort(...args);
 rpc_handlers.fetch_keepalive_done = (...args) => keepalives.completed(...args);
 
 export async function fetch(url, options, context) {
-  await site_data.ready;
+  const data=request_cookie_store(context);
+  await data.ready;
   // Consumers may configure the exposed libcurl API directly after WASM loads.
   initialize_session();
-  context=snapshot_request_context(site_data,context);
-  const transport=(url,options,context,worker)=>fetch_with_cookies((url,init)=>http_cache.fetch((url,init)=>session.fetch(url,init),url,init,context),site_data,url,options,context,worker);
+  context=snapshot_request_context(data,context);
+  const transport=(url,options,context,worker)=>fetch_with_cookies((url,init)=>http_cache.fetch((url,init)=>session.fetch(url,init),url,init,context),data,url,options,context,worker);
   return service_worker_fetch?service_worker_fetch(url,options,context,transport):transport(url,options,context);
 }
 
@@ -132,7 +134,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
     has_body: !!request.reader,
     headers: [],
     items: {},
-    cookies: site_data.documentCookies(frame.cookie_url||frame.url.href,{crossSite:frame_cross_site(frame,iframes)})
+    cookies: frame.cookie_policy?undefined:site_data.documentCookies(frame.cookie_url||frame.url.href,{crossSite:frame_cross_site(frame,iframes)})
   };  
   for (let key of keys) {
     payload.items[key] = response[key];

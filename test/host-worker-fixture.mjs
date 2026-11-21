@@ -47,6 +47,7 @@ function shared_host_main(){
 }
 
 export async function host_worker_fixture(){
+  const heldCookies=new Set();
   const bundle=await readFile(new URL('../dist/sandstone.js',import.meta.url));
   const runtime=await readFile(new URL('../dist/sandstone_frame.js',import.meta.url));
   const main='importScripts("/host-worker/bundle.js");('+shared_host_main.toString()+')();';
@@ -64,9 +65,17 @@ export async function host_worker_fixture(){
     else if(path==='/host-worker/shared.js')body=main;
     else if(path==='/host-worker/shared-denied.js')body='Object.defineProperty(globalThis,"indexedDB",{get(){throw new DOMException("Storage denied","SecurityError");}});'+main;
     else if(path==='/host-worker/data'){body='relayed host data';type='text/plain';}
+    else if(path==='/host-worker/cookie-held'){heldCookies.add(response);response.on('close',()=>heldCookies.delete(response));return true;}
+    else if(path==='/host-worker/cookie-status'){response.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});response.end(JSON.stringify(heldCookies.size));return true;}
+    else if(path==='/host-worker/cookie-release'){
+      for(const held of heldCookies){held.writeHead(200,{'set-cookie':['worker_session=restored; HttpOnly; SameSite=None; Secure; Path=/','fresh=deleted; Max-Age=0; SameSite=None; Secure; Path=/'],'cache-control':'no-store'});held.end('released');}
+      heldCookies.clear();response.writeHead(204);response.end();return true;
+    }
+    else if(path==='/host-worker/cookie-start'){response.writeHead(302,{location:'/host-worker/cookie-end','set-cookie':'worker_redirect=yes; HttpOnly; SameSite=None; Secure; Path=/','cache-control':'no-store'});response.end();return true;}
+    else if(path==='/host-worker/cookie-end'){response.writeHead(200,{'content-type':'text/plain','cache-control':'no-store'});response.end(request.headers.cookie||'');return true;}
     else if(path==='/host-worker/page'){body='<!doctype html><body>Trusted shared host controls';type='text/html';}
     else{response.writeHead(404);response.end();return true;}
-    response.writeHead(200,{'content-type':type});response.end(body);return true;
+    response.writeHead(200,{'content-type':type+'; charset=utf-8'});response.end(body);return true;
   }};
 }
 
