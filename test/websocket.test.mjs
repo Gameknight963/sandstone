@@ -13,7 +13,10 @@ function fixture(extra = {}) {
   const sent = [], closed = [];
   const WS = create_websocket_class({base: () => 'https://site.test/base/',
     connect: async () => 1, events: () => new Promise(resolve => { wake = resolve; }),
-    send: async (id, data) => sent.push(data), close: async id => closed.push(id), ...extra});
+    send: async (id, data) => sent.push(data), close: async (id,code,reason,abort) => {
+      closed.push(id);
+      if(!abort)queueMicrotask(()=>wake([['close',{code:code??1005,reason:reason||'',wasClean:true}]]));
+    }, ...extra});
   return {WS, sent, closed, emit: batch => wake(batch)};
 }
 
@@ -77,6 +80,41 @@ test('Closing during connection cancels the eventual host socket exactly once', 
   socket.close(); socket.close(); resolve(17); await tick();
   assert.deepEqual(closed, [17]); assert.deepEqual(events, ['error', 'close']);
   assert.equal(socket.readyState, WS.CLOSED);
+});
+
+test('WebSocket close waits for the handshake and preserves received codes and Unicode reasons',async()=>{
+  const calls=[],{WS,emit}=fixture({close:async(...args)=>calls.push(args)}),socket=new WS('/socket');
+  await tick();emit([['open',{}]]);await tick();
+  const events=[];socket.onerror=()=>events.push('error');socket.onclose=event=>events.push({code:event.code,reason:event.reason,wasClean:event.wasClean});
+  socket.close(4002,'client \u20ac');await tick();
+  assert.equal(socket.readyState,WS.CLOSING);assert.deepEqual(calls,[[1,4002,'client \u20ac',false]]);assert.deepEqual(events,[]);
+  emit([['close',{code:4002,reason:'client \u20ac',wasClean:true}]]);await tick();
+  assert.equal(socket.readyState,WS.CLOSED);assert.deepEqual(events,[{code:4002,reason:'client \u20ac',wasClean:true}]);
+});
+
+test('Server WebSocket close metadata is forwarded without replacing it with an abnormal close',async()=>{
+  const {WS,emit}=fixture(),socket=new WS('/socket');await tick();emit([['open',{}]]);await tick();
+  const ended=new Promise(resolve=>{socket.onclose=resolve;});
+  emit([['close',{code:4001,reason:'server \u20ac',wasClean:true}]]);
+  const event=await ended;assert.equal(event.code,4001);assert.equal(event.reason,'server \u20ac');assert.equal(event.wasClean,true);
+});
+
+test('WebSocket transport EOF keeps an abnormal close without inventing an error event',async()=>{
+  const {WS,emit}=fixture(),socket=new WS('/socket');await tick();emit([['open',{}]]);await tick();
+  const events=[];socket.onerror=()=>events.push('error');socket.onclose=event=>events.push({code:event.code,wasClean:event.wasClean});
+  emit([['close',null]]);await tick();
+  assert.deepEqual(events,[{code:1006,wasClean:false}]);assert.equal(socket.readyState,WS.CLOSED);
+});
+
+test('WebSocket close converts supplied arguments before validating codes and retains native numeric errors',async()=>{
+  const {WS,emit}=fixture(),socket=new WS('/socket');await tick();emit([['open',{}]]);await tick();
+  assert.throws(()=>socket.close(undefined,'reason'),{name:'InvalidAccessError'});
+  assert.throws(()=>socket.close(0),{name:'InvalidAccessError'});
+  assert.throws(()=>socket.close(1000n),TypeError);
+  assert.throws(()=>socket.close(1000,Symbol('reason')),TypeError);
+  const sentinel=new Error('reason conversion');
+  assert.throws(()=>socket.close(1001,{toString(){throw sentinel;}}),error=>error===sentinel);
+  assert.equal(socket.readyState,WS.OPEN);socket.close(undefined);await tick();
 });
 
 test('Host adapter releases pending sessions and exposes selected handshake protocol', () => {

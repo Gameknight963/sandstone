@@ -31,12 +31,14 @@ export function relay_websocket_class(CurlWebSocket) {
       this.relay_closed = true;
       clearInterval(this.recv_loop);
       clearInterval(this.event_loop);
+      clearTimeout(this.close_timeout);
       this.recv_loop = this.event_loop = null;
       this.connected = false;
       if (this.session_ptr) closeSession.call(this);
       if (error) this.onerror(error);
-      else this.onclose();
+      else this.onclose(this.close_info);
     }
+    abort(){this.cleanup();}
   };
 }
 // WebSocket handshakes use HTTP cookie rules, including HttpOnly cookies. The

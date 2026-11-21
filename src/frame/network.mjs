@@ -177,5 +177,5 @@ export const WebSocket = create_websocket_class({
     return batch;
   },
   send: (id, data) => rpc_ws_send(loader.frame_id, id, data),
-  close: id => rpc_ws_close(loader.frame_id, id)
+  close: (id,code,reason,abort=false) => rpc_ws_close(loader.frame_id,id,code,reason,abort)
 });

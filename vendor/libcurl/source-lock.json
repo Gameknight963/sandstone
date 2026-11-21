@@ -1,6 +1,7 @@
 {
-  "version": "0.7.5+sandstone.1",
-  "archive": "libcurl.js-0.7.5-sandstone.1.tgz",
+  "version": "0.7.5+sandstone.2",
+  "archive": "libcurl.js-0.7.5-sandstone.2.tgz",
+  "patches": ["empty-headers.patch", "websocket-close.patch"],
   "emscripten": "3.1.72",
   "upstream": {
     "url": "https://github.com/ading2210/libcurl.js",

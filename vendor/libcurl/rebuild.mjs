@@ -34,7 +34,7 @@ function clone(repository,path){
 }
 const source=join(work,'source'),client=join(source,'client');
 clone(lock.upstream,source);clone(lock.wisp,join(client,'wisp_client'));
-run('git',['apply',join(directory,'empty-headers.patch')],source);
+for(const patch of lock.patches)run('git',['apply',join(directory,patch)],source);
 const manifest=JSON.parse(readFileSync(join(client,'package.json'),'utf8'));
 manifest.version=lock.version;writeFileSync(join(client,'package.json'),JSON.stringify(manifest,null,2)+'\n');
 const quote=value=>"'"+value.replaceAll("'","'\\''")+"'";

@@ -1,0 +1,135 @@
+diff --git a/client/javascript/websocket.js b/client/javascript/websocket.js
+index ef260d9..14cb15b 100644
+--- a/client/javascript/websocket.js
++++ b/client/javascript/websocket.js
+@@ -18,6 +18,10 @@ class CurlWebSocket extends CurlSession {
+     this.recv_loop = null;
+     this.http_handle = null;
+     this.recv_buffer = [];
++    this.close_buffer = [];
++    this.close_sent = false;
++    this.close_info = null;
++    this.close_timeout = null;
+ 
+     try {
+       check_proxy(this.options.proxy);
+@@ -97,12 +101,16 @@ class CurlWebSocket extends CurlSession {
+     
+     // websocket was cleanly closed by the server
+     else if (result_code === 0 && result_closed) {
+-      this.cleanup();
++      const size = _get_result_size(result_ptr);
++      this.close_buffer.push(new Uint8Array(Module.HEAPU8.subarray(data_ptr, data_ptr + size)));
++      if (!_get_result_bytes_left(result_ptr)) this.receive_close();
+     }
+ 
+     //code is not CURLE_AGAIN - an error must have occurred
+     else if (result_code !== 81) {
+-      this.cleanup(result_code);
++      // A transport EOF without a close frame is abnormal, but unlike a
++      // handshake or transport failure it does not dispatch an error event.
++      this.cleanup(result_code === 52 ? 0 : result_code);
+     }
+     
+     _free(data_ptr);
+@@ -111,6 +119,8 @@ class CurlWebSocket extends CurlSession {
+   }
+ 
+   cleanup(error=0) {
++    clearTimeout(this.close_timeout);
++    this.close_timeout = null;
+     if (!this.connected)
+       return;
+     if (this.recv_loop) 
+@@ -124,7 +134,7 @@ class CurlWebSocket extends CurlSession {
+       this.onerror(error);
+     }
+     else {
+-      this.onclose();
++      this.onclose(this.close_info);
+     }
+   }
+ 
+@@ -141,7 +151,43 @@ class CurlWebSocket extends CurlSession {
+     _free(data_ptr);
+   }
+ 
+-  close() {
++  send_close(data) {
++    if (this.close_sent) return 0;
++    const pointer = allocate_array(data);
++    let result;
++    try { result = _close_websocket(this.http_handle, pointer, data.length); }
++    finally { _free(pointer); }
++    if (result === 0) this.close_sent = true;
++    return result;
++  }
++
++  receive_close() {
++    const data = merge_arrays(this.close_buffer);
++    this.close_buffer = [];
++    let code = 1005, reason = '';
++    try {
++      if (data.length === 1 || data.length > 125) throw new Error('Invalid close payload');
++      if (data.length) {
++        code = (data[0] << 8) | data[1];
++        if (!((code >= 1000 && code <= 1014 && ![1004,1005,1006].includes(code)) || (code >= 3000 && code <= 4999))) throw new Error('Invalid close code');
++        reason = new TextDecoder('utf-8', {fatal:true}).decode(data.subarray(2));
++      }
++    } catch (_) { this.cleanup(1); return; }
++    this.close_info = {code, reason, wasClean:false};
++    const result = this.send_close(data);
++    if (result !== 0) { this.cleanup(result); return; }
++    this.close_info.wasClean = true;
+     this.cleanup();
+   }
+-}
+\ No newline at end of file
++
++  close(code, reason='') {
++    if (!this.connected) { this.cleanup(); return; }
++    if (this.close_sent) return;
++    const text = new TextEncoder().encode(reason);
++    const data = new Uint8Array(code === undefined ? 0 : text.length + 2);
++    if (code !== undefined) { data[0] = code >> 8; data[1] = code & 255; data.set(text, 2); }
++    const result = this.send_close(data);
++    if (result !== 0) { this.cleanup(result); return; }
++    this.close_timeout = setTimeout(() => this.cleanup(28), 30000);
++  }
++}
+diff --git a/client/libcurl/websocket.c b/client/libcurl/websocket.c
+index ecab1da..1bb8a49 100644
+--- a/client/libcurl/websocket.c
++++ b/client/libcurl/websocket.c
+@@ -11,7 +11,7 @@ extern CURLM* multi_handle;
+ struct WSResult* recv_from_websocket(CURL* http_handle, int buffer_size) {
+   const struct curl_ws_frame* ws_meta;
+   char* buffer = malloc(buffer_size);
+-  size_t result_len;
++  size_t result_len = 0;
+   CURLcode res = curl_ws_recv(http_handle, buffer, buffer_size, &result_len, &ws_meta);
+ 
+   struct WSResult* result = malloc(sizeof(struct WSResult));
+@@ -40,9 +40,12 @@ int send_to_websocket(CURL* http_handle, const char* data, int data_len, int is_
+   return (int) res;
+ }
+ 
+-void close_websocket(CURL* http_handle) {
+-  size_t sent;
+-  curl_ws_send(http_handle, "", 0, &sent, 0, CURLWS_CLOSE);
++int close_websocket(CURL* http_handle, const char* data, int data_len) {
++  if (data_len < 0 || data_len > 125) return CURLE_BAD_FUNCTION_ARGUMENT;
++  size_t sent = 0;
++  CURLcode res = curl_ws_send(http_handle, data, data_len, &sent, 0, CURLWS_CLOSE);
++  if (res == CURLE_OK && sent != (size_t)data_len) return CURLE_SEND_ERROR;
++  return (int)res;
+ }
+ 
+ void websocket_set_options(CURL* http_handle) {
+@@ -67,4 +70,4 @@ int get_result_bytes_left (const struct WSResult* result) {
+ }
+ int get_result_is_text (const struct WSResult* result) {
+   return result->is_text;
+-}
+\ No newline at end of file
++}

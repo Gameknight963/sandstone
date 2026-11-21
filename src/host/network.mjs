@@ -226,12 +226,14 @@ rpc_handlers["ws_send"] = function (frame_id, ws_id, data) {
   ws_info.ws.send(data);
 }
 
-rpc_handlers["ws_close"] = function (frame_id, ws_id) {
+  rpc_handlers["ws_close"] = function (frame_id, ws_id, code, reason='', abort=false) {
   let ws_info = get_ws(frame_id, ws_id);
   if (!ws_info) return;
-  delete ws_connections[frame_id][ws_id];
-  ws_info.ws.close();
-  ws_info.callback?.();
+    if(abort){
+      delete ws_connections[frame_id][ws_id];
+      ws_info.ws.abort();
+      ws_info.callback?.();
+    }else ws_info.ws.close(code,reason);
 }
 
 //when navigating to a new page we need to close unused connections
@@ -252,7 +254,7 @@ export function clean_ws_connections(id_to_clean,options={}) {
     
     for (let [ws_id, ws_info] of Object.entries(frame_websockets)) {
       delete ws_connections[frame_id][ws_id];
-      ws_info.ws.close();
+      ws_info.ws.abort();
       ws_info.callback?.();
     }
     

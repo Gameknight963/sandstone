@@ -41,7 +41,7 @@ export function create_websocket_class({base, connect, events, send, close}) {
     async #connect(protocols) {
       try {
         this.#id = await connect(this.#url, protocols);
-        if (this.#state === 2) { await close(this.#id); this.#finish(true); return; }
+        if (this.#state === 2) { await close(this.#id,undefined,'',true); this.#finish(true); return; }
         while (this.#state !== 3) {
           const batch = await events(this.#id);
           if (!batch) { this.#finish(true); break; }
@@ -58,7 +58,7 @@ export function create_websocket_class({base, connect, events, send, close}) {
             } else if (type === 'error') {
               this.#finish(true);
             } else if (type === 'close') {
-              this.#finish(false);
+              this.#finish(false,data);
             }
           }
         }
@@ -66,17 +66,16 @@ export function create_websocket_class({base, connect, events, send, close}) {
     }
 
     #fail() {
-      if (this.#id !== undefined) Promise.resolve().then(() => close(this.#id)).catch(() => {});
+      if (this.#id !== undefined) Promise.resolve().then(() => close(this.#id,undefined,'',true)).catch(() => {});
       this.#finish(true);
     }
 
-    #finish(error) {
+    #finish(error,info) {
       if (this.#state === 3) return;
       this.#state = 3;
       if (error || this.#closedDuringConnect) this.dispatchEvent(new Event('error'));
-      // libcurl does not expose the close frame's code/reason or handshake
-      // result. Report an abnormal closure rather than inventing those values.
-      this.dispatchEvent(new CloseEvent('close', {code: 1006, wasClean: false}));
+      const details=!error&&info?{code:info.code,reason:info.reason,wasClean:info.wasClean}:{code:1006,reason:'',wasClean:false};
+      this.dispatchEvent(new CloseEvent('close', details));
     }
 
     send(data) {
@@ -97,21 +96,27 @@ export function create_websocket_class({base, connect, events, send, close}) {
       }).catch(() => this.#fail());
     }
 
-    close(code, reason = '') {
-      if (code !== undefined) {
-        code = Number(code) >>> 0;
+    close(code=undefined, reason = '') {
+      const provided=code!==undefined;
+      if (provided) {
+        code = (+code) >>> 0;
         code &= 65535;
-        if (code !== 1000 && (code < 3000 || code > 4999))
+      }
+      if(typeof reason==='symbol')throw new TypeError('Cannot convert a Symbol to a string');
+      reason=String(reason);
+      const reasonBytes=new TextEncoder().encode(reason);
+      if(provided||reason!==''){
+        if (code !== 1000 && !(code >= 3000 && code <= 4999))
           throw new DOMException('Invalid close code', 'InvalidAccessError');
       }
-      if (new TextEncoder().encode(String(reason)).length > 123)
+      if (reasonBytes.length > 123)
         throw new DOMException('Close reason exceeds 123 UTF-8 bytes', 'SyntaxError');
       if (this.#state >= 2) return;
       const connecting = this.#state === 0;
       this.#closedDuringConnect = connecting;
       this.#state = 2;
       if (this.#id !== undefined) {
-        this.#queue = this.#queue.then(() => close(this.#id)).then(() => this.#finish(connecting), () => this.#finish(true));
+        this.#queue = this.#queue.then(() => close(this.#id,code,reason,connecting)).then(() => {if(connecting)this.#finish(true);}, () => this.#finish(true));
       }
     }
   }

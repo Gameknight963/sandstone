@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {chromium} from 'playwright-core';
 import {server as wisp} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
 import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
+import {is_websocket_close_path,websocket_close_connection,websocket_close_script,websocket_close_records} from './websocket-close-fixture.mjs';
 import {font_fixture, font_script, constructor_font_script} from './font-fixture.mjs';
 import {keepalive_fixture,keepalive_quota_script,keepalive_finish_script,keepalive_unload_script,keepalive_abort_script,keepalive_worker_script} from './keepalive-fixture.mjs';
 import {cache_fixture,cache_script} from './cache-fixture.mjs';
@@ -23,6 +24,7 @@ import {verifyNativeWorkerLifecycle} from './service-worker-lifecycle-native.pla
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
 const held=new Map(),requests=[],closed=[],sockets=new Set(),timers=new Set();
+const websocketCloses=[];
 const authRequests=[];
 const beaconRequests=[],heldBeacons=new Map();
 const contextRequests=[];
@@ -149,6 +151,7 @@ echoes.on('headers',(headers,request)=>{
   );
 });
 echoes.on('connection', (socket, request) => {
+  if(websocket_close_connection(socket,request,websocketCloses))return;
   if(request.url==='/ws-context')socket.send(JSON.stringify({origin:request.headers.origin,cookies:(request.headers.cookie||'').split('; ').filter(Boolean).sort()}));
   if (request.url === '/ws-close') { socket.close(4001, 'server finished'); return; }
   socket.on('message', (data, isBinary) => socket.send(data, {binary: isBinary}));
@@ -165,7 +168,7 @@ server.on('upgrade',(request,socket,head)=>{
     }
     echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
   }
-  else if (request.url === '/echo' || request.url === '/ws-close' || request.url==='/ws-context') echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
+  else if (is_websocket_close_path(request.url)||request.url === '/echo' || request.url === '/ws-close' || request.url==='/ws-context') echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
   else if (request.url === '/ws-pending') server.emit('ws-pending',socket);
   else if (request.url === '/ws-refused') socket.end('HTTP/1.1 403 Forbidden\r\nSet-Cookie: refused=visible; Path=/\r\nContent-Length: 0\r\n\r\n');
   else wisp.routeRequest(request,socket,head);
@@ -470,6 +473,9 @@ try{
   await nativeChild.evaluate(source=>eval(source),submitFormScript('child-form-native','child','POST',origin));
   await nativeChild.waitForURL(url=>url.pathname==='/request-context/echo');
   const nativeChildContext=contextValues('child-form-native');
+  const nativeWebsocketCloses=JSON.parse(await nativePage.evaluate(source=>eval(source),websocket_close_script(origin,'close-native')));
+  assert.deepEqual(nativeWebsocketCloses.rows.map(row=>row.code),[4001,1005,4002,1005,4003,1006]);
+  const nativeWebsocketCloseRecords=await websocket_close_records(websocketCloses,'close-native');
   await nativeContext.close();
   for(const storageDenied of [false,true]){
   const client='proxy-'+storageDenied,workerClient='worker-'+storageDenied;
@@ -690,10 +696,21 @@ try{
   assert.equal(lastAuth.origin,origin);assert.ok(lastAuth.cookie.includes('auth_session=token'));
   assert.ok(!lastAuth.cookie.includes('auth_wrong='));assert.ok(!lastAuth.cookie.includes('auth_expired='));
   const serverClosed=await page.evaluate(origin=>main_frame.eval_js(`new Promise(resolve=>{
-    const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-close')},['second']);
-    socket.onclose=()=>resolve(socket.readyState);
+    const socket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-close')});
+    socket.onclose=event=>resolve(JSON.stringify({state:socket.readyState,code:event.code,reason:event.reason,wasClean:event.wasClean}));
   })`),origin);
-  assert.equal(serverClosed,3);
+  assert.deepEqual(JSON.parse(serverClosed),{state:3,code:4001,reason:'server finished',wasClean:true});
+  const closeOwner='close-proxy-'+storageDenied,workerCloseOwner='close-worker-'+storageDenied;
+  const closeResults=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),websocket_close_script(origin,closeOwner)));
+  assert.deepEqual(closeResults,nativeWebsocketCloses);
+  assert.deepEqual(await websocket_close_records(websocketCloses,closeOwner),nativeWebsocketCloseRecords);
+  const workerCloseResults=JSON.parse(await page.evaluate(source=>main_frame.eval_js(`new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(new Blob(['onmessage=async()=>postMessage(await ('+${JSON.stringify(source)}+'));'],{type:'text/javascript'}));
+    const worker=new Worker(url);worker.onmessage=event=>{worker.terminate();URL.revokeObjectURL(url);resolve(event.data);};
+    worker.onerror=event=>{event.preventDefault();reject(new Error(event.message));};worker.postMessage('start');
+  })`),websocket_close_script(origin,workerCloseOwner)));
+  assert.deepEqual(workerCloseResults,nativeWebsocketCloses);
+  assert.deepEqual(await websocket_close_records(websocketCloses,workerCloseOwner),nativeWebsocketCloseRecords);
   const pendingSocket=once(server,'ws-pending',{signal:AbortSignal.timeout(5000)});
   await page.evaluate(origin=>main_frame.eval_js(`window.pendingSocket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-pending')}); true`),origin);
   const [heldSocket]=await pendingSocket;
