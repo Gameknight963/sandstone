@@ -41,6 +41,12 @@ export function relay_websocket_class(CurlWebSocket) {
     abort(){this.cleanup();}
   };
 }
+export function retire_websocket(socket){
+  // Stop exposing the socket immediately, but let an established connection
+  // finish its bounded close handshake. Pending handshakes still abort.
+  if(socket.connected)socket.close(1001,'');
+  else socket.abort();
+}
 // WebSocket handshakes use HTTP cookie rules, including HttpOnly cookies. The
 // source is the virtual page/worker origin, never the local HTML file's origin.
 export function websocket_options(store, input, {url, top_url = url, userAgent, cross_site=false,broadcast_origin}) {

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {create_websocket_class} from '../src/frame/websocket.mjs';
-import {relay_websocket_class, websocket_options} from '../src/host/websocket.mjs';
+import {relay_websocket_class, websocket_options,retire_websocket} from '../src/host/websocket.mjs';
 import {SiteDataStore} from '../src/host/site_data.mjs';
 
 globalThis.CloseEvent ||= class CloseEvent extends Event {
@@ -130,6 +130,13 @@ test('Host adapter releases pending sessions and exposes selected handshake prot
   socket.create_request('', () => {}, () => {}, () => {});
   assert.equal(socket.protocol, 'selected');
   socket.cleanup(); socket.cleanup(); assert.equal(released, 1);
+});
+
+test('Retiring a socket requests going-away only after connection and preserves pending cancellation',()=>{
+  const calls=[];
+  retire_websocket({connected:true,close:(...args)=>calls.push(['close',...args]),abort:()=>calls.push(['abort'])});
+  retire_websocket({connected:false,close:()=>calls.push(['unexpected close']),abort:()=>calls.push(['abort'])});
+  assert.deepEqual(calls,[['close',1001,''],['abort']]);
 });
 
 test('WebSocket cookies use HTTP schemes, path, Secure, SameSite and HttpOnly rules', () => {

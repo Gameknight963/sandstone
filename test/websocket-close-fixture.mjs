@@ -43,8 +43,26 @@ async function close_run(origin,owner){
   return JSON.stringify({rows,validation});
 }
 export const websocket_close_script=(origin,owner)=>'('+close_run.toString()+')('+JSON.stringify(origin)+','+JSON.stringify(owner)+')';
-export async function websocket_close_records(records,owner){
+export async function websocket_close_records(records,owner,count=6){
   const deadline=Date.now()+5000;
-  while(records.filter(record=>record.owner===owner).length<6){assert.ok(Date.now()<deadline,'Server did not finish every WebSocket close');await new Promise(resolve=>setTimeout(resolve,10));}
+  while(records.filter(record=>record.owner===owner).length<count){assert.ok(Date.now()<deadline,'Server did not finish every WebSocket close');await new Promise(resolve=>setTimeout(resolve,10));}
   return records.filter(record=>record.owner===owner).map(({owner,...record})=>record).sort((a,b)=>a.mode.localeCompare(b.mode));
 }
+
+async function lifetime_start(origin,owner,kind){
+  const url=origin.replace(/^http/,'ws')+'/ws-close-check/lifetime-'+kind+'?owner='+encodeURIComponent(owner);
+  if(kind==='root')return new Promise((resolve,reject)=>{globalThis.lifetimeSocket=new WebSocket(url);lifetimeSocket.onopen=()=>resolve(true);lifetimeSocket.onerror=()=>reject(new Error('Lifetime socket failed'));});
+  if(kind==='worker')return new Promise((resolve,reject)=>{
+    const code='const socket=new WebSocket('+JSON.stringify(url)+');socket.onopen=()=>postMessage("ready");';
+    globalThis.lifetimeWorker=new Worker(URL.createObjectURL(new Blob([code],{type:'text/javascript'})));
+    lifetimeWorker.onmessage=()=>resolve(true);lifetimeWorker.onerror=event=>{event.preventDefault();reject(new Error(event.message));};
+  });
+  return new Promise((resolve,reject)=>{
+    const child=globalThis.lifetimeFrame=document.createElement('iframe');child.src=origin+'/ws-lifetime-child';
+    const timer=setTimeout(()=>{removeEventListener('message',receive);reject(new Error('Frame lifetime socket timed out'));},5000);
+    const receive=event=>{if(event.source===child.contentWindow&&event.data==='lifetime-ready'){clearTimeout(timer);removeEventListener('message',receive);resolve(true);}};addEventListener('message',receive);
+    child.onload=()=>child.contentWindow.eval('const socket=new WebSocket('+JSON.stringify(url)+');socket.onopen=()=>parent.postMessage("lifetime-ready","*");');
+    document.body.append(child);
+  });
+}
+export const websocket_lifetime_script=(origin,owner,kind)=>'('+lifetime_start.toString()+')('+JSON.stringify(origin)+','+JSON.stringify(owner)+','+JSON.stringify(kind)+')';

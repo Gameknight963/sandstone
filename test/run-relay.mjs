@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {chromium} from 'playwright-core';
 import {server as wisp} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
 import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
-import {is_websocket_close_path,websocket_close_connection,websocket_close_script,websocket_close_records} from './websocket-close-fixture.mjs';
+import {is_websocket_close_path,websocket_close_connection,websocket_close_script,websocket_close_records,websocket_lifetime_script} from './websocket-close-fixture.mjs';
 import {font_fixture, font_script, constructor_font_script} from './font-fixture.mjs';
 import {keepalive_fixture,keepalive_quota_script,keepalive_finish_script,keepalive_unload_script,keepalive_abort_script,keepalive_worker_script} from './keepalive-fixture.mjs';
 import {cache_fixture,cache_script} from './cache-fixture.mjs';
@@ -476,6 +476,14 @@ try{
   const nativeWebsocketCloses=JSON.parse(await nativePage.evaluate(source=>eval(source),websocket_close_script(origin,'close-native')));
   assert.deepEqual(nativeWebsocketCloses.rows.map(row=>row.code),[4001,1005,4002,1005,4003,1006]);
   const nativeWebsocketCloseRecords=await websocket_close_records(websocketCloses,'close-native');
+  await nativePage.evaluate(source=>eval(source),websocket_lifetime_script(origin,'lifetime-native','root'));
+  await nativePage.goto(origin+'/ws-lifetime-after');
+  await nativePage.evaluate(source=>eval(source),websocket_lifetime_script(origin,'lifetime-native','frame'));
+  await nativePage.evaluate(()=>lifetimeFrame.remove());
+  await nativePage.evaluate(source=>eval(source),websocket_lifetime_script(origin,'lifetime-native','worker'));
+  await nativePage.evaluate(()=>lifetimeWorker.terminate());
+  const nativeWebsocketLifetimes=await websocket_close_records(websocketCloses,'lifetime-native',3);
+  assert.deepEqual(nativeWebsocketLifetimes.map(record=>record.code),[1001,1001,1001]);
   await nativeContext.close();
   for(const storageDenied of [false,true]){
   const client='proxy-'+storageDenied,workerClient='worker-'+storageDenied;
@@ -711,6 +719,14 @@ try{
   })`),websocket_close_script(origin,workerCloseOwner)));
   assert.deepEqual(workerCloseResults,nativeWebsocketCloses);
   assert.deepEqual(await websocket_close_records(websocketCloses,workerCloseOwner),nativeWebsocketCloseRecords);
+  const lifetimeOwner='lifetime-proxy-'+storageDenied;
+  await page.evaluate(source=>main_frame.eval_js(source),websocket_lifetime_script(origin,lifetimeOwner,'root'));
+  await page.evaluate(url=>main_frame.navigate_to(url),origin+'/ws-lifetime-after');
+  await page.evaluate(source=>main_frame.eval_js(source),websocket_lifetime_script(origin,lifetimeOwner,'frame'));
+  await page.evaluate(()=>main_frame.eval_js('lifetimeFrame.remove();true'));
+  await page.evaluate(source=>main_frame.eval_js(source),websocket_lifetime_script(origin,lifetimeOwner,'worker'));
+  await page.evaluate(()=>main_frame.eval_js('lifetimeWorker.terminate();true'));
+  assert.deepEqual(await websocket_close_records(websocketCloses,lifetimeOwner,3),nativeWebsocketLifetimes);
   const pendingSocket=once(server,'ws-pending',{signal:AbortSignal.timeout(5000)});
   await page.evaluate(origin=>main_frame.eval_js(`window.pendingSocket=new WebSocket(${JSON.stringify(origin.replace('http:','ws:')+'/ws-pending')}); true`),origin);
   const [heldSocket]=await pendingSocket;
