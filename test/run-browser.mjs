@@ -73,6 +73,7 @@ import {verifyAncestorOrigins} from './ancestor-origins.playwright.mjs';
 import {verifyLocationInterface,verifyBorrowedLocationSandbox,verifySiblingLocationBorrowing} from './location-interface.playwright.mjs';
 import {verifyHistoryURLs} from './history-urls.playwright.mjs';
 import {verifyWorkerLocation} from './worker-location.playwright.mjs';
+import {verifyWorkerInterface} from './worker-interface.playwright.mjs';
 import {verifyJavascriptLinks} from './javascript-links.playwright.mjs';
 import {verifyDocumentReuse} from './document-reuse.playwright.mjs';
 import {verifyJavascriptNavigation} from './javascript-navigation.playwright.mjs';
@@ -489,6 +490,7 @@ try {
     result.passed.push(...await timed(verifyHistoryInterface(page), 'History interface fixture'));
     result.passed.push(...await timed(verifyHistoryURLs(page), 'History URL validation fixture'));
     result.passed.push(...await timed(verifyWorkerLocation(page), 'Worker Location interface fixture'));
+    result.passed.push(...await timed(verifyWorkerInterface(page), 'Worker messaging interface fixture'));
     result.passed.push(...await timed(verifyStorageWrites(page), 'Concurrent storage fixture'));
     result.passed.push(...await timed(verifyStorageSynchronous(page), 'Synchronous shared storage fixture'));
     result.passed.push(...await timed(verifyStorageInterface(page), 'Storage interface fixture'));

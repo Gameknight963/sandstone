@@ -1,11 +1,16 @@
-export function define_event_handlers(prototype, types) {
+export function define_event_handlers(prototype, types, {validate,state=()=>new WeakMap()}={}) {
   for (const type of types) {
-    const slots = new WeakMap();
+    const slots = state(type);
     Object.defineProperty(prototype, 'on' + type, {
       enumerable: true, configurable: true,
-      get() { return slots.get(this)?.value || null; },
+      get() { validate?.(this);return slots.get(this)?.value || null; },
       set(value) {
-        const slot = slots.get(this) || {value: null, listener: event => slots.get(this)?.value?.call(this, event)};
+        validate?.(this);
+        if(!arguments.length)throw new TypeError('A handler value is required');
+        const slot = slots.get(this) || {value: null, listener: event => {
+          const callback=slots.get(this)?.value;
+          if(callback&&Reflect.apply(callback,this,[event])===false)event.preventDefault();
+        }};
         slots.set(this, slot);
         value = typeof value === 'function' ? value : null;
         if (!slot.value && value) EventTarget.prototype.addEventListener.call(this, type, slot.listener);

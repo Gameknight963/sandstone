@@ -20,6 +20,8 @@ import {ServiceWorkerScripts} from '../../service_worker/scripts.mjs';
 import {encode_message} from './crypto.mjs';
 import {configure_filesystem_sync} from './filesystem.mjs';
 import {configure_service_worker_scripts,service_worker_script_snapshot,remember_service_worker_script} from '../service_worker_scripts.mjs';
+import {define_event_handlers} from '../event_handlers.mjs';
+import {document_states} from '../document_identity.mjs';
 
 const NativeWorker = globalThis.Worker;
 const native_import_scripts = globalThis.importScripts?.bind(globalThis);
@@ -31,10 +33,11 @@ const NativeMessageEvent=globalThis.MessageEvent,NativeErrorEvent=globalThis.Err
 const native_timeout=globalThis.setTimeout.bind(globalThis),native_clear_timeout=globalThis.clearTimeout.bind(globalThis);
 const native_dispatch=globalThis.dispatchEvent?.bind(globalThis);
 const imported_blobs = new Map();
-const service_profile=Symbol('private service worker profile');
+const service_profiles=new WeakMap(),worker_instances=document_states('worker-instances');
 export function create_service_worker(profile){
   if(typeof profile?.source!=='string')throw new TypeError('A validated service worker script is required');
-  return new FakeWorker(profile.scriptURL,{type:profile.type||'classic',[service_profile]:profile});
+  const options={type:profile.type||'classic'};service_profiles.set(options,profile);
+  return new FakeWorker(profile.scriptURL,options);
 }
 function replace_worker_method(name,value){
   let owner=globalThis;
@@ -241,17 +244,22 @@ export function initialize_worker(options) {
   });
 }
 
-function handler(target, type) {
-  let callback;
-  Object.defineProperty(target, "on" + type, {
-    enumerable: true, configurable: true,
-    get: () => callback?.original || null,
-    set(value) {
-      if (callback) target.removeEventListener(type, callback);
-      callback = typeof value === "function" ? event => { if (value.call(target, event) === false) event.preventDefault(); } : null;
-      if (callback) { callback.original = value; target.addEventListener(type, callback); }
-    }
-  });
+function worker_string(value){
+  if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');
+  return String(value);
+}
+function worker_dictionary(input){
+  if(input==null)input={};
+  if(typeof input!=='object'&&typeof input!=='function')throw new TypeError('Worker options must be an object');
+  // Web IDL reads dictionary members in name order, including inherited ones.
+  // Extra enumerable properties are not part of the dictionary.
+  const credentialsValue=input.credentials;
+  const credentials=credentialsValue===undefined?'same-origin':worker_string(credentialsValue);
+  if(!['omit','same-origin','include'].includes(credentials))throw new TypeError('Invalid worker credentials');
+  const nameValue=input.name,name=nameValue===undefined?'':worker_string(nameValue);
+  const typeValue=input.type,type=typeValue===undefined?'classic':worker_string(typeValue);
+  if(!['classic','module'].includes(type))throw new TypeError('Invalid worker type');
+  return {credentials,name,type};
 }
 
 export class FakeWorker extends EventTarget {
@@ -271,21 +279,22 @@ export class FakeWorker extends EventTarget {
 
   constructor(url, options = {}) {
     super();
-    this.#serviceProfile=options[service_profile];
+    if(!arguments.length)throw new TypeError('Worker requires a script URL');
+    const source=worker_string(url);
+    this.#options=worker_dictionary(options);
+    this.#serviceProfile=service_profiles.get(options);
     if(this.#serviceProfile)this.#serviceScripts=new ServiceWorkerScripts(this.#serviceProfile.scripts,{restoring:!!this.#serviceProfile.restoring});
-    this.#url = convert_url(String(url), ctx.document?.baseURI || ctx.location.href);
-    this.#options = {...options, type: options.type || "classic", credentials: options.credentials || "same-origin"};
-    if (!["classic", "module"].includes(this.#options.type)) throw new TypeError("Invalid worker type");
-    if (!["omit", "same-origin", "include"].includes(this.#options.credentials)) throw new TypeError("Invalid worker credentials");
+    try{this.#url=convert_url(source,ctx.document?.baseURI||ctx.location.href);}
+    catch{throw new DOMException('Invalid worker script URL','SyntaxError');}
     const target = new URL(this.#url);
     if (/^https?:$/.test(target.protocol) && target.origin !== ctx.origin) throw new DOMException("Worker must be same-origin", "SecurityError");
     const channel = new MessageChannel();
     this.#port = channel.port1;
     this.#receiver = channel.port2;
-    for (const type of ["message", "messageerror", "error"]) handler(this, type);
-    this.#removeUnload = on_document_unload(() => this.terminate());
+    worker_instances.set(this,{post:args=>this.#post_message(args),terminate:()=>this.#terminate()});
+    this.#removeUnload = on_document_unload(() => this.#terminate());
     this.#referrerPolicy=document_referrer_policy();
-    this.#start().catch(error => { if (!this.#terminated) { this.#error(error); this.terminate(); } });
+    this.#start().catch(error => { if (!this.#terminated) { this.#error(error); this.#terminate(); } });
   }
 
   #error(error) {
@@ -394,10 +403,10 @@ export class FakeWorker extends EventTarget {
     this.#worker = new NativeWorker(this.#bootstrap, {...this.#options, type: "classic"});
     this.#worker.onmessage = event => {
       if (event.data?.sandstone_worker === this.#token) {
-        if (event.data.type === "closed") this.terminate();
+        if (event.data.type === "closed") this.#terminate();
         else if (event.data.type === "error") {
           this.#error(Object.assign(new Error(event.data.message), {name: event.data.name, stack: event.data.stack}));
-          this.terminate();
+          this.#terminate();
         }
         return;
       }
@@ -412,8 +421,17 @@ export class FakeWorker extends EventTarget {
     this.#receiver = null;
   }
 
-  postMessage(message, transfer) {
-    if (!this.#terminated) this.#port.postMessage(message, transfer);
+  postMessage(message) {
+    const worker=worker_instances.get(this);if(!worker)throw new TypeError('Illegal invocation');
+    worker.post(arguments);
+  }
+  #post_message(args) {
+    if(!this.#terminated){Reflect.apply(this.#port.postMessage,this.#port,args);return;}
+    // A closed port skips serialization, but a terminated Worker still clones
+    // and transfers. Discard a fresh channel after its native send completes.
+    const channel=new MessageChannel();
+    try{Reflect.apply(channel.port1.postMessage,channel.port1,args);}
+    finally{channel.port1.close();channel.port2.close();}
   }
 
   #unregister() {
@@ -424,6 +442,10 @@ export class FakeWorker extends EventTarget {
   }
 
   terminate() {
+    const worker=worker_instances.get(this);if(!worker)throw new TypeError('Illegal invocation');
+    worker.terminate();
+  }
+  #terminate() {
     if (this.#terminated) return;
     this.#terminated = true;
     this.#controller.abort();
@@ -436,3 +458,7 @@ export class FakeWorker extends EventTarget {
   }
   get [Symbol.toStringTag]() { return "Worker"; }
 }
+define_event_handlers(FakeWorker.prototype,['message','messageerror','error'].filter(type=>NativeWorker?.prototype&&'on'+type in NativeWorker.prototype),{
+  validate(receiver){if(!worker_instances.has(receiver))throw new TypeError('Illegal invocation');},
+  state:type=>document_states('worker-handler-'+type)
+});
