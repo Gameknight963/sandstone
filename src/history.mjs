@@ -1,9 +1,14 @@
 export function history_url(value, current, base = current) {
   const before = new URL(current);
-  const after = value === undefined || value === null || value === "" ? before : new URL(String(value), base);
-  const opaque = before.origin === "null";
-  if (before.origin !== after.origin || before.username !== after.username || before.password !== after.password ||
-      opaque && before.href.split("#")[0] !== after.href.split("#")[0]) {
+  // Argument conversion can run author code; preserve its exception rather
+  // than reporting a URL parser failure for it.
+  const input=value===undefined||value===null||value===""?null:String(value);
+  let after=before;
+  if(input!==null)try{after=new URL(input,base);}catch{throw new DOMException("Invalid history URL", "SecurityError");}
+  const http=before.protocol==='http:'||before.protocol==='https:';
+  if (before.protocol !== after.protocol || before.origin !== after.origin || before.hostname !== after.hostname || before.port !== after.port ||
+      before.username !== after.username || before.password !== after.password ||
+      !http && (before.pathname !== after.pathname || before.protocol !== 'file:' && before.search !== after.search)) {
     throw new DOMException("History URLs must be same-origin", "SecurityError");
   }
   return after.href;

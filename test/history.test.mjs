@@ -79,3 +79,24 @@ test("History state rejects cross-origin URLs, credential changes and unclonable
   assert.throws(() => history.mutate("push", () => {}, current), {name: "DataCloneError"});
   assert.equal(history.snapshot().length, 1);
 });
+
+test('History URL parse failures are SecurityErrors and leave committed entries intact',()=>{
+  const history=new NavigationHistory();history.navigate('https://example.com/start');
+  history.mutate('replace',{saved:true},'https://example.com/current');
+  const before=history.snapshot();
+  for(const kind of ['push','replace'])assert.throws(()=>history.mutate(kind,{saved:false},'http://['),{name:'SecurityError'});
+  assert.deepEqual(history.snapshot(),before);
+  const sentinel=new Error('conversion');
+  assert.throws(()=>history_url({toString(){throw sentinel;}},before.url),error=>error===sentinel);
+});
+
+test('History rewriting keeps non-HTTP document identities and permits file query changes',()=>{
+  for(const current of ['blob:https://example.com/document','blob:null/document','about:blank','about:srcdoc','data:text/html,document']){
+    assert.equal(history_url(current+'#fragment',current),current+'#fragment');
+    for(const next of [current+'?query',current+'/changed','https://example.com/changed'])assert.throws(()=>history_url(next,current),{name:'SecurityError'});
+  }
+  const file='file:///site/index.html';
+  assert.equal(history_url('?query',file),file+'?query');
+  assert.equal(history_url('#fragment',file+'?query'),file+'?query#fragment');
+  for(const next of ['other.html','file://other/site/index.html'])assert.throws(()=>history_url(next,file),{name:'SecurityError'});
+});
