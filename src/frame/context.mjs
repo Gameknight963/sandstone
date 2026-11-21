@@ -263,6 +263,7 @@ export function update_ctx(options = {}) {
   if (!is_worker) {
     internal.storage_unavailable=ctx.origin==='null';
     const stores=create_document_storage(options,()=>ctx.location.href,()=>ctx.window);
+    polyfill.share_location(internal.location);
     internal.localStorage=stores.local;internal.sessionStorage=stores.session;
     storageReady=stores.ready.then(snapshot=>{internal.storage_unavailable=!!snapshot.opaque;});
   }

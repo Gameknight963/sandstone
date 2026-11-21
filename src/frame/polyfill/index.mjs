@@ -1,4 +1,4 @@
-export { FakeLocation, FakeWorkerLocation } from "./location.mjs";
+export { FakeLocation, FakeWorkerLocation,share_location } from "./location.mjs";
 export { FakeURL } from "./url.mjs";
 export { FakeHistory,retarget_history } from "./history.mjs";
 export {Function} from './function.mjs';

@@ -4,6 +4,9 @@ import {flush_document_base} from '../document_base.mjs';
 import {history_hash} from './history.mjs';
 import {encoding_parse_url} from '../../url_encoding.mjs';
 import {origin_list} from './origin_list.mjs';
+import {create_location} from '../location_interface.mjs';
+import {cookie_document_active} from './cookie.mjs';
+export {share_location} from '../location_interface.mjs';
 
 export let internal = null;
 export function set_location(value) { flush_document_base();internal = new URL(value); loader.set_url(internal.href); }
@@ -36,10 +39,15 @@ export class FakeLocation {
       };
       Object.defineProperty(this, key, descriptor);
     }
+    let document=globalThis.document;
+    return create_location({window:()=>globalThis,frame:()=>loader.frame_id,origin:()=>ctx.origin,readable:()=>this.href,
+      active:()=>cookie_document_active(document),retarget:()=>{document=globalThis.document;},
+      get:key=>this[key],set:(key,value)=>{this[key]=value;},invoke:(name,args)=>Reflect.apply(FakeLocation.prototype[name],this,args)});
   }
   #navigate(value, mode) {
     const text=`${value}`;
-    const next = encoding_parse_url(text, ctx.document.baseURI,loader.character_encoding);
+    let next;try{next=encoding_parse_url(text,ctx.document.baseURI,loader.character_encoding);}
+    catch{throw new DOMException('Invalid navigation URL','SyntaxError');}
     const same_base = next.href.split('#')[0] === internal.href.split('#')[0];
     if (same_base && next.href.includes('#')) {
       history_hash(ctx.history,next.href, mode === "replace");

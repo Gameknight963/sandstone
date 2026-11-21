@@ -3,6 +3,7 @@ import * as loader from './loader.mjs';
 import {window_runtime_context} from './runtime_context.mjs';
 import {navigate_target} from './navigation_targets.mjs';
 import {cookie_document_active} from './polyfill/cookie.mjs';
+import {register_location,location_methods} from './location_interface.mjs';
 
 export function ancestor_location(target,depth,frame=()=>loader.frame_id,canNavigate){
   const readable=()=>{
@@ -40,28 +41,33 @@ export function ancestor_location(target,depth,frame=()=>loader.frame_id,canNavi
     },
     toString(){if(this!==location)throw new TypeError('Illegal invocation');return readable();}
   };
+  const public_methods=location_methods();
+  const set_location=(key,value)=>{
+    if(key==='href'){navigate(value,'push');return true;}
+    const url=new URL(readable()),old_hash=url.hash;
+    if(['protocol','host','hostname','port','pathname','search','hash'].includes(key)){
+      const input=`${value}`;url[key]=key==='hash'&&input===''?'#':input;
+      if(key==='hash'&&url.hash===old_hash)return true;
+      navigate(url.href,'push');return true;
+    }
+    return false;
+  };
   location=new Proxy(Object.create(Location.prototype),{
     get(_,key){
-      if(key==='replace')return methods.replace;
+      if(key==='replace')return public_methods.replace;
       const url=readable();
       if(key===Symbol.toPrimitive)return undefined;
       if(key===Symbol.toStringTag)return 'Location';
-      if(Object.hasOwn(methods,key))return methods[key];
+      if(Object.hasOwn(methods,key))return public_methods[key];
       if(key==='ancestorOrigins')return window_runtime_context(target).location.ancestorOrigins;
       if(key==='origin')return window_runtime_context(target).location.origin;
       if(['href','protocol','host','hostname','port','pathname','search','hash'].includes(key))return new URL(url)[key];
       return Reflect.get(Location.prototype,key,location);
     },
-    set(_,key,value){
-      if(key==='href'){navigate(value,'push');return true;}
-      const url=new URL(readable()),old_hash=url.hash;
-      if(['protocol','host','hostname','port','pathname','search','hash'].includes(key)){
-        const input=`${value}`;url[key]=key==='hash'&&input===''?'#':input;
-        if(key==='hash'&&url.hash===old_hash)return true;
-        navigate(url.href,'push');return true;
-      }
-      return Reflect.set(_,key,value);
-    }
+    set:(object,key,value)=>['href','protocol','host','hostname','port','pathname','search','hash'].includes(key)?set_location(key,value):Reflect.set(object,key,value)
   });
+  register_location(location,{window:()=>target,frame:()=>{try{return target.sandstone_frame.loader.frame_id;}catch{return depth===0?frame():undefined;}},origin:()=>window_runtime_context(target)?.origin??'null',readable,
+    active:()=>!target.closed,get:key=>Reflect.get(location,key),set:set_location,
+    invoke:(name,args)=>Reflect.apply(methods[name],location,args)});
   return location;
 }

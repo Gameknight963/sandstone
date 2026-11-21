@@ -70,6 +70,7 @@ import {verifyAncestorLocation} from './ancestor-location.playwright.mjs';
 import {verifyFrameOriginInheritance} from './frame-origin-inheritance.playwright.mjs';
 import {verifyIframeSandboxSnapshot,verifyBlankSandboxSnapshot} from './iframe-sandbox-snapshot.playwright.mjs';
 import {verifyAncestorOrigins} from './ancestor-origins.playwright.mjs';
+import {verifyLocationInterface,verifyBorrowedLocationSandbox,verifySiblingLocationBorrowing} from './location-interface.playwright.mjs';
 import {verifyJavascriptLinks} from './javascript-links.playwright.mjs';
 import {verifyDocumentReuse} from './document-reuse.playwright.mjs';
 import {verifyJavascriptNavigation} from './javascript-navigation.playwright.mjs';
@@ -480,6 +481,9 @@ try {
     for(let batch=0;batch<2;batch++)result.passed.push(...await timed(verifyFragmentNavigation(page,{batch,batches:2}), 'Fragment navigation fixture '+(batch+1)));
     result.passed.push(...await timed(verifyIframeFragments(page), 'Iframe fragment navigation fixture'));
     result.passed.push(...await timed(verifyIframeLocationEncoding(page), 'Iframe Location encoding fixture'));
+    result.passed.push(...await timed(verifyLocationInterface(page), 'Location interface fixture'));
+    result.passed.push(...await timed(verifyBorrowedLocationSandbox(page), 'Borrowed Location sandbox fixture'));
+    result.passed.push(...await timed(verifySiblingLocationBorrowing(page), 'Sibling Location borrowing fixture'));
     result.passed.push(...await timed(verifyHistoryInterface(page), 'History interface fixture'));
     result.passed.push(...await timed(verifyStorageWrites(page), 'Concurrent storage fixture'));
     result.passed.push(...await timed(verifyStorageSynchronous(page), 'Synchronous shared storage fixture'));

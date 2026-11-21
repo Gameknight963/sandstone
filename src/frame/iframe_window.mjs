@@ -7,6 +7,7 @@ import {window_open_value,set_window_open} from './intercept/open.mjs';
 import {sandbox_tokens} from '../navigation_policy.mjs';
 import {set_window_event_handler,register_window_event_alias} from './event_identity.mjs';
 import {origin_list} from './polyfill/origin_list.mjs';
+import {register_location,location_methods} from './location_interface.mjs';
 
 const frames=new WeakMap();
 const windows=new WeakMap();
@@ -93,7 +94,8 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
       return url;
     };
     const navigate=(value,mode,fragment=false)=>{
-      const url=new URL(convert_url(`${value}`,ctx.document.baseURI,character_encoding));
+      const text=`${value}`;let url;
+      try{url=new URL(convert_url(text,ctx.document.baseURI,character_encoding));}catch{throw new DOMException('Invalid navigation URL','SyntaxError');}
       const context=window_runtime_context(target);
       // Location changes between same-origin Windows are synchronous. Use the
       // child's private history controller so author overrides cannot replace it.
@@ -111,13 +113,24 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
       reload(){if(this!==location)throw new TypeError('Illegal invocation');state.navigate(readable(),'reload');},
       toString(){if(this!==location)throw new TypeError('Illegal invocation');return readable();}
     };
+    const public_methods=location_methods();
+    const set_location=(key,value)=>{
+      if(key==='href'){navigate(value,'push');return true;}
+      const before=readable(),url=new URL(before),old_hash=url.hash;
+      if(['protocol','host','hostname','port','pathname','search','hash'].includes(key)){
+        const input=`${value}`;url[key]=key==='hash'&&input===''?'#':input;
+        if(key==='hash'&&url.hash===old_hash)return true;
+        navigate(url.href,'push',key==='hash');return true;
+      }
+      return Reflect.set(nativeLocation(),key,value,nativeLocation());
+    };
     location=new Proxy(Object.create(Location.prototype),{
       get(_,key){
-        if(key==='replace')return methods.replace;
+        if(key==='replace')return public_methods.replace;
         const url=readable();
         if(key===Symbol.toPrimitive)return undefined;
         if(key===Symbol.toStringTag)return 'Location';
-        if(Object.hasOwn(methods,key))return methods[key];
+        if(Object.hasOwn(methods,key))return public_methods[key];
         if(key==='ancestorOrigins'){
           const context=window_runtime_context(target);if(context)return context.location.ancestorOrigins;
           return globalThis.DOMStringList?ancestorOrigins??=origin_list([ctx.origin,...ctx.location.ancestorOrigins]):undefined;
@@ -128,17 +141,11 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
         if(['href','origin','protocol','host','hostname','port','pathname','search','hash'].includes(key))return new URL(url)[key];
         return Reflect.get(nativeLocation(),key,nativeLocation());
       },
-      set(_,key,value){
-        if(key==='href'){navigate(value,'push');return true;}
-        const before=readable(),url=new URL(before),old_hash=url.hash;
-        if(['protocol','host','hostname','port','pathname','search','hash'].includes(key)){
-          const input=`${value}`;url[key]=key==='hash'&&input===''?'#':input;
-          if(key==='hash'&&url.hash===old_hash)return true;
-          navigate(url.href,'push',key==='hash');return true;
-        }
-        return Reflect.set(nativeLocation(),key,value,nativeLocation());
-      }
+      set:(_,key,value)=>set_location(key,value)
     });
+    register_location(location,{window:()=>target,frame:()=>state.id,origin:()=>state.opaque()?'null':state.origin(),readable,
+      active:()=>!target.closed,get:key=>Reflect.get(location,key),set:set_location,
+      invoke:(name,args)=>Reflect.apply(methods[name],location,args)});
     const replacements=Object.create(null);
     Object.defineProperties(replacements,{
       open:{get(){
@@ -172,6 +179,11 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
 });
 const frame_window_getter=descriptor&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentWindow').get;
 export function iframe_window(element){return frame_window_getter?.call(element);}
+export function location_window(target){
+  const known=windows.get(target);if(known)return known;
+  let element;try{element=target.frameElement;}catch{}
+  return element&&frames.has(element)?iframe_window(element):undefined;
+}
 
 // Message sources and contentWindow refer to the same WindowProxy in browsers.
 const source=globalThis.MessageEvent&&Object.getOwnPropertyDescriptor(MessageEvent.prototype,'source');
