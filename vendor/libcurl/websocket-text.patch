@@ -1,0 +1,28 @@
+diff --git a/client/javascript/websocket.js b/client/javascript/websocket.js
+index 0330ae2..07b177e 100644
+--- a/client/javascript/websocket.js
++++ b/client/javascript/websocket.js
+@@ -94,7 +94,13 @@ class CurlWebSocket extends CurlSession {
+           let is_text = _get_result_is_text(result_ptr)
+           this.recv_buffer = [];
+           if (is_text) {
+-            returned_data = new TextDecoder().decode(full_data);
++            try {
++              // WebSocket text preserves a leading BOM and must be valid UTF-8.
++              returned_data = new TextDecoder('utf-8', {fatal:true, ignoreBOM:true}).decode(full_data);
++            } catch (_) {
++              this.send_close(new Uint8Array([3, 239])); // 1007: invalid payload
++              this.cleanup(1);
++            }
+           }
+           else {
+             returned_data = full_data;
+@@ -174,7 +180,7 @@ class CurlWebSocket extends CurlSession {
+       if (data.length) {
+         code = (data[0] << 8) | data[1];
+         if (!((code >= 1000 && code <= 1014 && ![1004,1005,1006].includes(code)) || (code >= 3000 && code <= 4999))) throw new Error('Invalid close code');
+-        reason = new TextDecoder('utf-8', {fatal:true}).decode(data.subarray(2));
++        reason = new TextDecoder('utf-8', {fatal:true, ignoreBOM:true}).decode(data.subarray(2));
+       }
+     } catch (_) { this.cleanup(1); return; }
+     this.close_info = {code, reason, wasClean:false};

@@ -1,10 +1,11 @@
 {
-  "version": "0.7.5+sandstone.3",
-  "archive": "libcurl.js-0.7.5-sandstone.3.tgz",
+  "version": "0.7.5+sandstone.4",
+  "archive": "libcurl.js-0.7.5-sandstone.4.tgz",
   "patches": [
     "empty-headers.patch",
     "websocket-close.patch",
-    "websocket-messages.patch"
+    "websocket-messages.patch",
+    "websocket-text.patch"
   ],
   "emscripten": "3.1.72",
   "upstream": {

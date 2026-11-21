@@ -8,7 +8,7 @@ import {chromium} from 'playwright-core';
 import {server as wisp} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
 import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
 import {is_websocket_close_path,websocket_close_connection,websocket_close_script,websocket_close_records,websocket_lifetime_script,websocket_departure_script} from './websocket-close-fixture.mjs';
-import {is_websocket_message_path,websocket_message_connection,websocket_message_script} from './websocket-message-fixture.mjs';
+import {is_websocket_message_path,websocket_message_connection,websocket_message_script,websocket_message_close} from './websocket-message-fixture.mjs';
 import {font_fixture, font_script, constructor_font_script} from './font-fixture.mjs';
 import {keepalive_fixture,keepalive_quota_script,keepalive_finish_script,keepalive_unload_script,keepalive_abort_script,keepalive_worker_script} from './keepalive-fixture.mjs';
 import {cache_fixture,cache_script} from './cache-fixture.mjs';
@@ -26,6 +26,7 @@ import {verifyNativeWorkerLifecycle} from './service-worker-lifecycle-native.pla
 // relay binds only loopback and permits connections only to this test's port.
 const held=new Map(),requests=[],closed=[],sockets=new Set(),timers=new Set();
 const websocketCloses=[];
+const websocketMessageCloses=[];
 const authRequests=[];
 const beaconRequests=[],heldBeacons=new Map();
 const contextRequests=[];
@@ -153,7 +154,7 @@ echoes.on('headers',(headers,request)=>{
 });
 echoes.on('connection', (socket, request) => {
   if(websocket_close_connection(socket,request,websocketCloses))return;
-  if(websocket_message_connection(socket,request))return;
+  if(websocket_message_connection(socket,request,websocketMessageCloses))return;
   if(request.url==='/ws-context')socket.send(JSON.stringify({origin:request.headers.origin,cookies:(request.headers.cookie||'').split('; ').filter(Boolean).sort()}));
   if (request.url === '/ws-close') { socket.close(4001, 'server finished'); return; }
   socket.on('message', (data, isBinary) => socket.send(data, {binary: isBinary}));
@@ -476,11 +477,17 @@ try{
   await nativeChild.waitForURL(url=>url.pathname==='/request-context/echo');
   const nativeChildContext=contextValues('child-form-native');
   const nativeWebsocketMessages={};
-  for(const mode of ['receive','echo'])nativeWebsocketMessages[mode]=JSON.parse(await nativePage.evaluate(source=>eval(source),websocket_message_script(origin,mode)));
-  assert.equal(nativeWebsocketMessages.receive.messages.length,8);
+  for(const mode of ['receive','echo','invalid-text'])nativeWebsocketMessages[mode]=JSON.parse(await nativePage.evaluate(source=>eval(source),websocket_message_script(origin,mode,'text-native')));
+  assert.equal(nativeWebsocketMessages.receive.messages.length,9);
   assert.deepEqual(nativeWebsocketMessages.receive.messages[0],{text:true,length:3,first:65,last:90,sum:8519});
+  assert.equal(nativeWebsocketMessages.receive.messages[4].first,0xFEFF);
+  assert.deepEqual(nativeWebsocketMessages['invalid-text'],{messages:[],events:['open','error'],code:1006,wasClean:false});
+  const nativeMalformedClose=await websocket_message_close(websocketMessageCloses,'text-native');
+  // Chromium sends generic protocol-error 1002 with a diagnostic reason;
+  // the relay uses the invalid-payload status 1007 defined by RFC 6455.
+  assert.ok([1002,1007].includes(nativeMalformedClose.code));
   const nativeWebsocketCloses=JSON.parse(await nativePage.evaluate(source=>eval(source),websocket_close_script(origin,'close-native')));
-  assert.deepEqual(nativeWebsocketCloses.rows.map(row=>row.code),[4001,1005,4002,1005,4003,1006]);
+  assert.deepEqual(nativeWebsocketCloses.rows.map(row=>row.code),[4001,1005,4002,1005,4003,4005,4006,1006]);
   const nativeWebsocketCloseRecords=await websocket_close_records(websocketCloses,'close-native');
   await nativePage.evaluate(source=>eval(source),websocket_lifetime_script(origin,'lifetime-native','root'));
   await nativePage.goto(origin+'/ws-lifetime-after');
@@ -722,16 +729,21 @@ try{
     socket.onclose=event=>resolve(JSON.stringify({state:socket.readyState,code:event.code,reason:event.reason,wasClean:event.wasClean}));
   })`),origin);
   assert.deepEqual(JSON.parse(serverClosed),{state:3,code:4001,reason:'server finished',wasClean:true});
-  for(const mode of ['receive','echo']){
-    const source=websocket_message_script(origin,mode);
+  for(const mode of ['receive','echo','invalid-text']){
+    const owner='text-proxy-'+storageDenied,workerOwner='text-worker-'+storageDenied;
+    const source=websocket_message_script(origin,mode,owner);
     const result=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),source));
     assert.deepEqual(result,nativeWebsocketMessages[mode],'WebSocket message assembly: '+mode);
     const workerResult=JSON.parse(await page.evaluate(source=>main_frame.eval_js(`new Promise((resolve,reject)=>{
       const url=URL.createObjectURL(new Blob(['onmessage=async()=>postMessage(await ('+${JSON.stringify(source)}+'));'],{type:'text/javascript'}));
       const worker=new Worker(url);worker.onmessage=event=>{worker.terminate();URL.revokeObjectURL(url);resolve(event.data);};
       worker.onerror=event=>{event.preventDefault();reject(new Error(event.message));};worker.postMessage('start');
-    })`),source));
+    })`),websocket_message_script(origin,mode,workerOwner)));
     assert.deepEqual(workerResult,nativeWebsocketMessages[mode],'Worker WebSocket message assembly: '+mode);
+    if(mode==='invalid-text'){
+      assert.deepEqual(await websocket_message_close(websocketMessageCloses,owner),{code:1007,reason:''});
+      assert.deepEqual(await websocket_message_close(websocketMessageCloses,workerOwner),{code:1007,reason:''});
+    }
   }
   const closeOwner='close-proxy-'+storageDenied,workerCloseOwner='close-worker-'+storageDenied;
   const closeResults=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),websocket_close_script(origin,closeOwner)));

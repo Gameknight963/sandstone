@@ -26,7 +26,7 @@
     "astray": "^1.1.1",
     "fake-indexeddb": "^6.2.8",
     "html-encoding-sniffer": "7.0.0",
-    "libcurl.js": "file:vendor/libcurl/libcurl.js-0.7.5-sandstone.3.tgz",
+    "libcurl.js": "file:vendor/libcurl/libcurl.js-0.7.5-sandstone.4.tgz",
     "meriyah": "^6.0.3",
     "mime-db": "1.52.0",
     "parse5": "8.1.1",

@@ -8,6 +8,8 @@ websocket-close.patch preserves close codes and UTF-8 reasons, echoes server
 close frames, and waits for a peer's close reply after a client requests closing.
 websocket-messages.patch reassembles fragmented text/binary messages, excludes
 control payloads from message events and uses frame metadata at receive boundaries.
+websocket-text.patch preserves leading Unicode BOMs in text and close reasons,
+and rejects malformed UTF-8 messages with an invalid-payload close frame.
 The Emscripten 3.1.72 build also needs its socket URL and bundled-WASM startup
 rewrites to accept that compiler's output. The curl CA blob is passed by
 pointer, as required by CURLOPT_CAINFO_BLOB. The build machine's default CA

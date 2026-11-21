@@ -8,6 +8,7 @@ export function websocket_close_connection(socket,request,records){
   socket.on('message',(data,binary)=>{messages.push({text:data.toString(),binary});if(mode==='abrupt')socket.terminate();});
   socket.on('close',(code,reason)=>records.push({owner,mode,code,reason:reason.toString(),messages}));
   if(mode==='server')socket.close(4001,'server \u20ac');
+  else if(mode==='server-bom')socket.close(4005,'\uFEFFserver');
   else if(mode==='empty')socket.close();
   else if(mode==='split'){
     const payload=Buffer.concat([Buffer.from([4003>>8,4003&255]),Buffer.from('split \u20ac')]);
@@ -23,7 +24,7 @@ export function websocket_close_connection(socket,request,records){
 
 async function close_run(origin,owner){
   const rows=[];let last;
-  for(const mode of ['server','empty','client','client-empty','split','abrupt']){
+  for(const mode of ['server','empty','client','client-empty','split','server-bom','client-bom','abrupt']){
     rows.push({mode,...await new Promise((resolve,reject)=>{
       const socket=last=new WebSocket(origin.replace(/^http/,'ws')+'/ws-close-check/'+mode+'?owner='+encodeURIComponent(owner)),events=[];
       const timer=setTimeout(()=>{socket.close(1000);reject(new Error('WebSocket close timed out: '+mode));},10000);
@@ -31,6 +32,7 @@ async function close_run(origin,owner){
         events.push('open');
         if(mode==='client'){socket.send(new Blob(['queued \u20ac']));socket.close(4002,'client \u20ac');}
         if(mode==='client-empty')socket.close();
+        if(mode==='client-bom')socket.close(4006,'\uFEFFclient');
         if(mode==='abrupt')socket.send('terminate');
       };
       socket.onerror=()=>events.push('error');
@@ -43,7 +45,7 @@ async function close_run(origin,owner){
   return JSON.stringify({rows,validation});
 }
 export const websocket_close_script=(origin,owner)=>'('+close_run.toString()+')('+JSON.stringify(origin)+','+JSON.stringify(owner)+')';
-export async function websocket_close_records(records,owner,count=6){
+export async function websocket_close_records(records,owner,count=8){
   const deadline=Date.now()+5000;
   while(records.filter(record=>record.owner===owner).length<count){assert.ok(Date.now()<deadline,'Server did not finish every WebSocket close');await new Promise(resolve=>setTimeout(resolve,10));}
   return records.filter(record=>record.owner===owner).map(({owner,...record})=>record).sort((a,b)=>a.mode.localeCompare(b.mode));
