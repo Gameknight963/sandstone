@@ -55,6 +55,7 @@ export function window_post_message(target,token,args){
 }
 
 export function register_message_peer(target,token,window){peers.set(target,{token,window});}
+export function message_peer_window(target){return peers.get(target)?.window();}
 export function parent_message_window(){return parentWindow||globalThis.parent;}
 export function top_message_window(){return topWindow||parent_message_window();}
 export function child_message_parent(token){return {token,ancestors:ancestorTokens};}

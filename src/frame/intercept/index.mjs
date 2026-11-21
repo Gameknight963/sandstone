@@ -11,4 +11,5 @@ import './crypto.mjs';
 import './fonts.mjs';
 import './links.mjs';
 import './focus.mjs';
+import './open.mjs';
 export { FakeCSSStyleSheet,create_css_module } from "./cssom.mjs";

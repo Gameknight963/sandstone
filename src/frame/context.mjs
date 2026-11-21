@@ -21,6 +21,7 @@ import {install_node_documents} from './node_documents.mjs';
 import {document_base_url} from './document_base.mjs';
 import {create_response_redirect} from './response.mjs';
 export {get_runtime_context} from './runtime_context.mjs';
+export {is_default_open,default_open} from './intercept/open.mjs';
 const parse_json = JSON.parse;
 const realm_global=globalThis,evaluate_global=globalThis.eval,describe_global=Reflect.getOwnPropertyDescriptor,define_global=Reflect.defineProperty;
 let with_entry;

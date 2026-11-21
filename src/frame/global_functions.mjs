@@ -2,6 +2,8 @@
 // window.addEventListener can share that function with EventTarget.prototype.
 const native_targets=new WeakMap();
 const native_bindings=new WeakMap();
+const native_function_targets=new WeakMap();
+export function unwrap_global_function(value){while(native_function_targets.has(value))value=native_function_targets.get(value);return value;}
 export function bind_native_property(proxy,key){native_bindings.get(proxy)?.(key);}
 export function bind_declared_property(proxy,key){native_bindings.get(proxy)?.(key,true);}
 const scope_targets=new WeakMap();
@@ -34,12 +36,13 @@ export function global_method_names(target){
 }
 export function unwrap_global_target(value){return native_targets.get(value)||value;}
 export function bind_global_function(target, method, virtual_target) {
-  return new Proxy(method, {
+  const bound=new Proxy(method, {
     apply(method, receiver, args) {
       if (receiver === virtual_target || receiver === undefined || receiver === null || native_targets.get(receiver)===target) receiver = target;
       return Reflect.apply(method, receiver, args);
     }
   });
+  native_function_targets.set(bound,method);return bound;
 }
 
 export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,write_native) {
