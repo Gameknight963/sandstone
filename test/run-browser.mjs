@@ -464,8 +464,10 @@ try {
     result.passed.push(...await timed(verifyServiceWorkerWindowClients(page), 'Service worker window clients fixture'));
     result.passed.push(...await timed(verifyWorkerLoaders(page), 'Lazy AMD worker loaders fixture'));
     result.passed.push(...await timed(verifyPromiseWorkerLoaders(page), 'Promise AMD worker loaders fixture'));
+    result.passed.push(...await timed(verifyPromiseWorkerLoaders(page,{lexical:true}), 'Lexical Promise AMD worker loaders fixture'));
     result.passed.push(...await timed(verifyWorkerImportAliases(page), 'Aliased worker imports fixture'));
     result.passed.push(...await timed(verifyAMDServiceWorkerScripts(page), 'AMD service worker scripts fixture'));
+    result.passed.push(...await timed(verifyAMDServiceWorkerScripts(page,{lexical:true}), 'Lexical AMD service worker scripts fixture'));
     result.passed.push(...await timed(verifySyncXHR(page), 'Synchronous worker XHR fixture'));
     result.passed.push(...await timed(verifySynchronousFiles(page), 'Synchronous worker filesystem fixture'));
     result.passed.push(...await timed(verifyNestedWorkerSync(page), 'Nested synchronous worker fixture'));

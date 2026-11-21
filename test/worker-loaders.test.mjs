@@ -7,6 +7,23 @@ import {create_worker_script_loader} from '../src/frame/worker_loader.mjs';
 const source=`class Loader {load(manager,url,loaded,failed){const options=manager.getConfig().getOptionsLiteral();try{options.policy&&(url=options.policy(url)),importScripts(url),loaded()}catch(error){failed(error)}}}`;
 const promiseSource=`function load(url){return new Promise(loaded=>{if('document' in self){throw new Error('Wrong transport')}else self.moduleURL=url,importScripts(url),loaded()});}`;
 
+test('Promise transports retain lexical module metadata until each prepared import executes',async()=>{
+  const source='let moduleURL;'+promiseSource.replace('self.moduleURL','moduleURL');
+  const waiting=[],trace=[];let result;
+  const output=rewrite_source(source+';({jobs:[load("one.js"),load("two.js")],metadata:()=>moduleURL})',['self','importScripts'],{workerLoaders:true});
+  result=runInNewContext(output,{__ctx__:{self:{},importScripts:url=>trace.push([url,result.metadata()]),__load_worker_scripts__(paths,loaded,failed,run){waiting.push(()=>{try{run(...paths);loaded();}catch(error){failed(error);}});}}});
+  assert.equal(waiting.length,2);assert.equal(result.metadata(),undefined);
+  waiting[1]();waiting[0]();await Promise.all(result.jobs);
+  assert.deepEqual(trace,[['two.js','two.js'],['one.js','one.js']]);
+});
+
+test('Lexical Promise transport matching leaves unbound, immutable, executor-local and TDZ metadata alone',()=>{
+  const lexical=promiseSource.replace('self.moduleURL','moduleURL');
+  for(const source of [lexical,'const moduleURL=0;'+lexical,lexical.replace("if('document'", "let moduleURL;if('document'"),lexical+';let moduleURL;', 'let moduleURL;'+lexical.replace('else moduleURL=', 'else {const moduleURL=0;moduleURL=').replace('loaded()});','loaded()}});')]){
+    assert.doesNotMatch(rewrite_source(source,['self','importScripts'],{workerLoaders:true}),/__load_worker_scripts__/);
+  }
+});
+
 test('Promise AMD transports prepare lazy imports and set module metadata at execution time',async()=>{
   const waiting=[],trace=[],self={};
   const output=rewrite_source(promiseSource+';[load("one.js"),load("two.js")];',['self','importScripts'],{workerLoaders:true});

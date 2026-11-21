@@ -13,25 +13,28 @@ async function exercise(){
     worker.postMessage({id:4,paths:['/two.js']});await until(6);return {detached,replies};
   }finally{worker.terminate();}
 }
-export async function verifyPromiseWorkerLoaders(page){
-  const server=createServer((request,response)=>{const path=new URL(request.url,'http://local').pathname;if(path==='/one.js'){response.writeHead(302,{location:'/delivered/one.js'});response.end();return;}setTimeout(()=>{response.writeHead(files[path]||path==='/page'?200:404,{'content-type':path.endsWith('.js')?'text/javascript':'text/html','cache-control':'no-store'});response.end(files[path]||'<body>Promise worker loader');},20);});await listen_browser_server(server);
+export async function verifyPromiseWorkerLoaders(page,{lexical=false}={}){
+  const resources=lexical?{...files,'/worker.js':loader.replace('if(!self.define){','if(!self.define){let moduleURL;').replaceAll('self.moduleURL','moduleURL')}:files;
+  const server=createServer((request,response)=>{const path=new URL(request.url,'http://local').pathname;if(path==='/one.js'){response.writeHead(302,{location:'/delivered/one.js'});response.end();return;}setTimeout(()=>{response.writeHead(resources[path]||path==='/page'?200:404,{'content-type':path.endsWith('.js')?'text/javascript':'text/html','cache-control':'no-store'});response.end(resources[path]||'<body>Promise worker loader');},20);});await listen_browser_server(server);
   const origin='http://127.0.0.1:'+server.address().port,native=await page.context().newPage(),fixture=await page.context().newPage(),errors=[],direct=[],artifact=page.url();
   fixture.on('pageerror',error=>errors.push(error.message));fixture.on('request',request=>{if(/^https?:/.test(request.url())&&request.url()!==artifact)direct.push(request.url());});
   try{
     await native.goto(origin+'/page');const expected=await native.evaluate(exercise);
     assert.equal(expected.detached,true);assert.deepEqual(expected.replies,[{ready:true},{id:0,startup:7,values:[],bytes:[1,2,3]},{id:1,startup:7,values:[41,2],bytes:[]},{id:2,startup:7,values:[41],bytes:[]},{id:3,error:'NetworkError'},{id:4,startup:7,values:[2],bytes:[]}]);
     await fixture.goto(page.url());await fixture.waitForFunction(()=>globalThis.main_frame&&sandstone.libcurl.ready&&!main_frame.is_navigating);
-    await fixture.evaluate(async({origin,files})=>{globalThis.promiseWorkerRequests=[];sandstone.network.session.fetch=async url=>{const path=new URL(url).pathname;promiseWorkerRequests.push(path);if(path==='/one.js')return new Response(null,{status:302,headers:{location:'/delivered/one.js'}});await new Promise(resolve=>setTimeout(resolve,20));return new Response(files[path]||'<body>Promise worker loader',{status:files[path]||path==='/page'?200:404,headers:{'content-type':path.endsWith('.js')?'text/javascript':'text/html','cache-control':'no-store'}});};main_frame.on_load=()=>{};await main_frame.navigate_to(origin+'/page');},{origin,files});
+    await fixture.evaluate(async({origin,files})=>{globalThis.promiseWorkerRequests=[];sandstone.network.session.fetch=async url=>{const path=new URL(url).pathname;promiseWorkerRequests.push(path);if(path==='/one.js')return new Response(null,{status:302,headers:{location:'/delivered/one.js'}});await new Promise(resolve=>setTimeout(resolve,20));return new Response(files[path]||'<body>Promise worker loader',{status:files[path]||path==='/page'?200:404,headers:{'content-type':path.endsWith('.js')?'text/javascript':'text/html','cache-control':'no-store'}});};main_frame.on_load=()=>{};await main_frame.navigate_to(origin+'/page');},{origin,files:resources});
     assert.deepEqual(await fixture.evaluate(source=>main_frame.eval_js(source),'('+exercise.toString()+')()'),expected);
     const requests=await fixture.evaluate(()=>promiseWorkerRequests);assert.equal(requests.filter(path=>path==='/startup.js').length,1);assert.equal(requests.filter(path=>path==='/one.js').length,1);assert.equal(requests.filter(path=>path==='/two.js').length,1);assert.deepEqual(errors,[]);assert.deepEqual(direct,[]);
     return ['Promise AMD startup buffers immediate messages until asynchronous imports install handlers','Lazy Promise imports preserve module identities, redirects and nested synchronous imports','Promise import failures reject without breaking later requests or leaking probe errors'];
   }finally{await native.close();await fixture.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 }
 
-export async function verifyAMDServiceWorkerScripts(page){
+export async function verifyAMDServiceWorkerScripts(page,{lexical=false}={}){
   const fixture=await page.context().newPage(),errors=[],direct=[],origin='https://amd-installed.test';
   fixture.on('pageerror',error=>errors.push(error.message));fixture.on('request',request=>{if(/^https?:/.test(request.url()))direct.push(request.url());});
-  const source=loader.slice(0,loader.indexOf('\ndefine('))+`\ndefine(['./state'],state=>{const ready=fetch('data:text/plain,ready');onmessage=event=>event.waitUntil(ready.then(()=>event.ports[0].postMessage({value:state.value})));});`;
+  let source=loader.slice(0,loader.indexOf('\ndefine('))+`\ndefine(['./state'],state=>{const ready=fetch('data:text/plain,ready');onmessage=event=>event.waitUntil(ready.then(()=>event.ports[0].postMessage({value:state.value})));});`;
+  if(lexical)source=source.replace('if(!self.define){','if(!self.define){let moduleURL;').replaceAll('self.moduleURL','moduleURL');
+  let workers=0;fixture.on('worker',()=>workers++);
   try{
     await fixture.goto(page.url());await fixture.waitForFunction(()=>globalThis.main_frame&&sandstone.libcurl.ready&&!main_frame.is_navigating);
     const result=await fixture.evaluate(async({origin,source})=>{
@@ -40,7 +43,7 @@ export async function verifyAMDServiceWorkerScripts(page){
       const profile={scope:origin+'/',scriptURL:origin+'/worker.js',source,type:'classic'},fresh=await ask(profile),captured=[...requests];requests.length=0;sandstone.network.session.fetch=async url=>{requests.push(url);throw new TypeError('Restoring must not fetch scripts');};
       const restored=await ask({...profile,scripts:fresh.scripts,restoring:true});return {fresh:fresh.value,restored:restored.value,captured,network:requests,scripts:fresh.scripts.map(script=>new URL(script.url).pathname).sort()};
     },{origin,source});
-    assert.deepEqual(result,{fresh:{value:42},restored:{value:42},captured:[origin+'/state.js',origin+'/assets/state.js',origin+'/nested.js'],network:[],scripts:['/nested.js','/state.js','/worker.js']});assert.deepEqual(errors,[]);assert.deepEqual(direct,[]);
+    assert.deepEqual(result,{fresh:{value:42},restored:{value:42},captured:[origin+'/state.js',origin+'/assets/state.js',origin+'/nested.js'],network:[],scripts:['/nested.js','/state.js','/worker.js']});assert.deepEqual(errors,[]);assert.deepEqual(direct,[]);assert.equal(workers,2,'A complete AMD graph launched a discovery probe');
     return ['Classic AMD service workers discover declared dependencies without executing startup probes','AMD service workers retain requested module bases across redirected imports','Installed AMD service workers restart offline from their complete script snapshots'];
   }finally{await fixture.close();}
 }

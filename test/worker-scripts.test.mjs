@@ -17,6 +17,13 @@ test('Classic service-worker AMD declarations preload dependencies without execu
   assert.equal(worker_imports(loader+`define(['require'],require=>require(computedName));`,'https://app.test/worker.js',{staticAMD:true}).dynamic,true);
 });
 
+test('Lexical Workbox-style transports preload complete service-worker graphs without discovery execution',async()=>{
+  const source=`let moduleURL;const modules={};function load(url){return new Promise(done=>{if('document' in self){const moduleURL=document.createElement('script');moduleURL.src=url;}else moduleURL=url,importScripts(url),done()});}self.define=(deps,factory)=>{};define(['./runtime'],()=>{throw new Error('Must not execute');});`;
+  const seen=[],result=await prefetch_worker_scripts(source,'https://app.test/sw.js',async url=>{seen.push(url);return new Response(`define(['exports'],exports=>{exports.value=42});`);},new Map(),new Map(),undefined,{staticAMD:true});
+  assert.deepEqual(seen,['https://app.test/runtime.js']);assert.equal(result.dynamic,false);
+  for(const code of [source.replace('let moduleURL;','const moduleURL=0;'),source.replace('let moduleURL;',''),source.replace('new Promise(done=>{','new Promise(done=>{let moduleURL;')])assert.equal(worker_imports(code,'https://app.test/sw.js',{asyncLoaders:true}).dynamic,true);
+});
+
 test('Worker discovery parses native legacy arrow initializers without executing the worker',()=>{
   assert.deepEqual(worker_imports('for(var callback=()=>1 in {}){};importScripts("./chunk.js");throw new Error("must not execute");','https://site.test/worker.js'),{urls:['https://site.test/chunk.js'],dynamic:false});
 });
