@@ -307,6 +307,9 @@ export function rewrite_iframe(iframe_element) {
         const old_port=runtime.rpc.host.target,old_token=runtime.loader.beacon_context;
         const url=runtime.loader.url,creator_url=blank_options.cookie_url;
         const pending=initial_result_pending={target};
+        // The native string result destroyed this realm. Its initialization
+        // promise can no longer receive replies on the old document's port.
+        blank_initialization=undefined;blank_ready=false;
         clear_initial_javascript();
         commit.then(async()=>{
           await document_barrier(old_port,old_token);
@@ -350,9 +353,11 @@ export function rewrite_iframe(iframe_element) {
   async function run_javascript(pending,revision){
     if(!iframe_element.isConnected)return;
     if(!iframe_url)ensure_blank(native_frame_window(iframe_element));
+    // A normal installation's commit includes its parser-blocking scripts.
+    // Cancel that work before waiting for the serialized registration to settle.
+    if(active_request&&!active_request.signal.aborted){active_request.abort();generation++;release_load();}
     await commit;
     if(revision!==javascript_revision||!iframe_element.isConnected)return;
-    if(active_request&&!active_request.signal.aborted){active_request.abort();generation++;release_load();}
     try{await blank_initialization;}catch(error){if(error?.name!=='AbortError')throw error;}
     if(revision!==javascript_revision||!iframe_element.isConnected)return;
     const result=await navigate_target(pending.url,{id:frame_id});

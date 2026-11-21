@@ -5,6 +5,7 @@ export async function verifyJavascriptNavigationRaces(page){
   const origin='https://javascript-races.test',errors=[],direct=[];
   const parentHTML='<!doctype html><body><script>globalThis.childLoads=0;globalThis.staleMessages=[];globalThis.replacementReport=null;addEventListener("message",event=>{if(event.data==="stale")staleMessages.push(event.data);if(event.data?.replacement)replacementReport={...event.data,messageOrigin:event.origin};});</script>';
   const replacement='<!doctype html><body>Replacement<script>globalThis.replacementLoaded=true;parent.postMessage({replacement:true,url:location.href,origin},"*");</script>';
+  const stalled='<!doctype html><script src="/held.js"></script><body>Old document';
   let held;
   for(const surface of [native,fixture])surface.on('pageerror',error=>errors.push(error.message));
   try{
@@ -15,12 +16,12 @@ export async function verifyJavascriptNavigationRaces(page){
         try{await route.fulfill({contentType:'text/javascript',body:'parent.postMessage("stale","*");'});}catch{}
         request.finished=true;return;
       }
-      await route.fulfill({contentType:'text/html',body:pathname==='/replacement'?replacement:parentHTML});
+      await route.fulfill({contentType:'text/html',body:pathname==='/replacement'?replacement:pathname==='/loading'?stalled:parentHTML});
     });
     await fixture.goto(new URL('../example/bundled.html',import.meta.url).href);
     await fixture.waitForFunction(()=>globalThis.main_frame&&sandstone.libcurl.ready&&!main_frame.is_navigating);
     await fixture.route(/^https?:/,route=>{direct.push(route.request().url());return route.abort();});
-    await fixture.evaluate(({parentHTML,replacement})=>{
+    await fixture.evaluate(({parentHTML,replacement,stalled})=>{
       main_frame.on_load=()=>{};
       sandstone.network.session.fetch=async url=>{
         const pathname=new URL(url).pathname;
@@ -28,9 +29,9 @@ export async function verifyJavascriptNavigationRaces(page){
           const request=javascriptHeld;request.started=true;await request.promise;request.finished=true;
           return new Response('parent.postMessage("stale","*");',{headers:{'content-type':'text/javascript'}});
         }
-        return new Response(pathname==='/replacement'?replacement:parentHTML,{headers:{'content-type':'text/html'}});
+        return new Response(pathname==='/replacement'?replacement:pathname==='/loading'?stalled:parentHTML,{headers:{'content-type':'text/html'}});
       };
-    },{parentHTML,replacement});
+    },{parentHTML,replacement,stalled});
     const read=(proxy,source)=>proxy?fixture.evaluate(source=>main_frame.eval_js(source),source):native.evaluate(source=>eval(source),source);
     const wait=async(predicate,label)=>{
       const deadline=Date.now()+8000;
@@ -39,9 +40,12 @@ export async function verifyJavascriptNavigationRaces(page){
         await fixture.waitForTimeout(20);
       }
     };
-    for(const kind of ['http','javascript','before-execution']){
+    for(const kind of ['http','javascript','loading-javascript','opened-javascript','before-execution']){
       const results=[];
-      for(const proxy of [false,true]){
+      // Chromium can put document.open's returned initial document in a
+      // different agent cluster and block a later same-origin parent JS URL.
+      // Assert the relay's logical same-origin behavior independently here.
+      for(const proxy of kind==='opened-javascript'?[true]:[false,true]){
         console.log(JSON.stringify({fixture:'JavaScript navigation cancellation',kind,proxy}));
         if(proxy){
           await fixture.evaluate(()=>{let release;globalThis.javascriptHeld={started:false,finished:false,promise:new Promise(resolve=>{release=resolve;}),release:()=>release()};});
@@ -50,9 +54,8 @@ export async function verifyJavascriptNavigationRaces(page){
           let release;held={started:false,finished:false,promise:new Promise(resolve=>{release=resolve;}),release:()=>release()};
           await native.goto(origin+'/start');
         }
-        const markup='<!doctype html><script src="/held.js"></script><body>Old document';
-        const first='javascript:'+encodeURIComponent((kind==='before-execution'?'parent.postMessage("stale","*");':'')+JSON.stringify(markup));
-        const next=kind==='javascript'?'javascript:'+encodeURIComponent(JSON.stringify(replacement)):origin+'/replacement';
+        const first=kind==='loading-javascript'?origin+'/loading':'javascript:'+encodeURIComponent((kind==='before-execution'?'parent.postMessage("stale","*");':kind==='opened-javascript'?'document.open();':'')+JSON.stringify(stalled));
+        const next=kind.endsWith('javascript')?'javascript:'+encodeURIComponent(JSON.stringify(replacement)):origin+'/replacement';
         await read(proxy,'globalThis.child=document.createElement("iframe");child.onload=()=>childLoads++;child.src='+JSON.stringify(first)+';document.body.append(child);'+(kind==='before-execution'?'child.src='+JSON.stringify(next)+';':'')+'true');
         if(kind!=='before-execution'){
           await wait(()=>proxy?fixture.evaluate(()=>javascriptHeld.started):held.started,'The original JavaScript result never requested its held script');
@@ -65,6 +68,10 @@ export async function verifyJavascriptNavigationRaces(page){
         const snapshot=JSON.parse(await read(proxy,'JSON.stringify({report:replacementReport,src:child.getAttribute("src"),loads:childLoads,stale:staleMessages.length,readable:(()=>{try{return !!child.contentWindow.document;}catch{return false;}})()})'));
         console.log(JSON.stringify({fixture:'JavaScript navigation result',kind,proxy,report:snapshot.report,loads:snapshot.loads,stale:snapshot.stale,readable:snapshot.readable}));results.push(snapshot);
       }
+      if(kind==='opened-javascript'){
+        assert.deepEqual(results[0],{report:{replacement:true,url:'about:blank',origin,messageOrigin:origin},src:'javascript:'+encodeURIComponent(JSON.stringify(replacement)),loads:1,stale:0,readable:true},kind);
+        continue;
+      }
       // Chromium 159 can change an initial JavaScript result's agent-cluster
       // setting on the next result, despite keeping its tuple and message
       // origins. Native WindowProxy reads then fail between these equal
@@ -73,11 +80,11 @@ export async function verifyJavascriptNavigationRaces(page){
       // https://html.spec.whatwg.org/multipage/browsers.html#origin-keyed-agent-clusters
       const {readable:nativeReadable,...expected}=results[0],{readable:proxyReadable,...actual}=results[1];
       assert.deepEqual(actual,expected,kind);
-      assert.equal(proxyReadable,true,kind);if(kind!=='javascript')assert.equal(nativeReadable,true,kind);
+      assert.equal(proxyReadable,true,kind);if(!kind.endsWith('javascript'))assert.equal(nativeReadable,true,kind);
       assert.equal(results[0].stale,0,kind);assert.equal(results[0].loads,1,kind);
     }
     assert.deepEqual(direct,[],'JavaScript navigation cancellation made a direct HTTP request');
     assert.deepEqual(errors,[],'JavaScript navigation cancellation raised a script error');
   }finally{held?.release();await fixture.close();await nativeContext.close();}
-  return ['HTTP and JavaScript replacements supersede held initial JavaScript results without waiting for abandoned scripts','JavaScript URLs superseded before execution cannot run stale programs or leak bootstrap URLs'];
+  return ['HTTP and JavaScript replacements supersede stalled iframe documents without waiting for abandoned scripts','JavaScript URLs superseded before execution cannot run stale programs or leak bootstrap URLs'];
 }
