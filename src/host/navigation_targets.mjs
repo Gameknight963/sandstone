@@ -27,9 +27,17 @@ rpc.rpc_handlers.navigate_target=async(id,token,name,url,form_data,navigation={}
   if(name&&typeof name==='object'){
     // Window method receivers select an existing context independently of its
     // name. Apply the same root and navigation checks as named destinations.
-    const selected=typeof name.id==='string'&&iframes[name.id];
+    let selected=typeof name.id==='string'&&iframes[name.id];
     if(!selected||selected.root_id!==root.id||selected.worker)return;
-    destination={id:name.parent?(selected.parent_id||selected.id):selected.id};
+    const depth=name.parent?1:name.ancestor??0;
+    if(!Number.isSafeInteger(depth)||depth<0)return;
+    const visited=new Set([selected.id]);
+    for(let step=0;step<depth&&selected.parent_id;step++){
+      selected=iframes[selected.parent_id];
+      if(!selected||selected.root_id!==root.id||visited.has(selected.id))return;
+      visited.add(selected.id);
+    }
+    destination={id:selected.id};
   }
   else if(!name||keyword==='_self')destination={id};
   else if(keyword==='_parent')destination={id:source.parent_id||id};

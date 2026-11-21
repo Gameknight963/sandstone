@@ -56,6 +56,7 @@ export let inherited_base_url, document_origin, cookie_url, location_origin;
 export let is_iframe = false;
 export let automatic_features = true;
 export let sandboxed_context = false;
+export let navigation_sandbox = {};
 export let cookie_cross_site = false;
 export let site_settings = {};
 export let default_settings = {};
@@ -159,6 +160,7 @@ function prepare_html(options) {
   is_iframe = options.is_iframe || false;
   automatic_features = options.automatic_features!==false;
   sandboxed_context = !!options.sandboxed_context;
+  navigation_sandbox = options.navigation_sandbox || {};
   service_worker_host = !!options.service_worker_host;
   cookie_cross_site = !!options.cookie_cross_site;
   default_settings = options.default_settings;

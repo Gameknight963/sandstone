@@ -10,7 +10,7 @@ import {save_response} from '../downloads.mjs';
 import {intercept_iframe_window,native_frame_window,iframe_window} from '../iframe_window.mjs';
 import {child_message_parent} from '../window_messages.mjs';
 import {track_iframe,reconcile_iframes} from '../iframe_lifecycle.mjs';
-import {sandbox_tokens} from '../../navigation_policy.mjs';
+import {sandbox_tokens,navigation_sandbox as navigation_flags} from '../../navigation_policy.mjs';
 import {resource_attribute} from '../resource_attributes.mjs';
 import {register_media_attributes,render_media_attribute,render_internal_media_attribute,media_attribute_mirror,raw_media_attribute} from '../media_attributes.mjs';
 import {iframe_focus_policy} from '../iframe_focus_policy.mjs';
@@ -229,11 +229,12 @@ export function rewrite_iframe(iframe_element) {
       // The child is usable now. Leave the host end unstarted until registration
       // succeeds so early requests queue behind their document's capability.
       runtime.rpc.connect_frame_host(channel.port2,nonce);
-      const creator_url=loader.cookie_url||loader.url,policy=document_referrer_policy();
+      const creator_url=loader.cookie_url||loader.url,policy=document_referrer_policy(),sandbox=authored.get('sandbox');
       let local=[],session=[];try{local=storage_entries(ctx.localStorage);session=storage_entries(ctx.sessionStorage);}catch{}
       const options=blank_options={url,frame_id,beacon_context:token,document_origin:ctx.origin,cookie_url:creator_url,
         automatic_features:loader.automatic_features&&(authored.get('sandbox')===null||sandbox_tokens(authored.get('sandbox')).has('allow-scripts')),
         sandboxed_context:loader.sandboxed_context||authored.get('sandbox')!==null,
+        navigation_sandbox:navigation_flags(loader.navigation_sandbox,sandbox),
         service_worker_state:service_worker_snapshot(),
         inherited_base_url:ctx.document.baseURI,document_referrer:javascript_source()?'':loader.url.startsWith('blob:')?loader.url:request_referrer(creator_url,creator_url,policy),referrer_policy:policy,
         message_origin:ctx.origin,message_parent:child_message_parent(message_token),is_iframe:true,window_name:window_name,
@@ -256,7 +257,6 @@ export function rewrite_iframe(iframe_element) {
       loader.child_navigators.set(frame_id,fetch_src);
       const registration=commit.then(async()=>{
         if(registered){await unregister(frame_id);registered=false;}
-        const sandbox=authored.get('sandbox');
         await register(loader.frame_id,frame_id,url,{blank:true,creator_url,beacon_context:token,sandbox,opaque:opaque_origin,window_name});
         // A removed document can still have accepted unload requests queued.
         // Attach before the serialized unregister retires its context.
@@ -607,6 +607,7 @@ export function rewrite_iframe(iframe_element) {
             is_iframe: true,
             automatic_features:loader.automatic_features&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts')),
             sandboxed_context:loader.sandboxed_context||sandbox!==null,
+            navigation_sandbox:navigation_flags(loader.navigation_sandbox,sandbox),
             message_parent:child_message_parent(message_token),
             message_origin:state.message_origin,
             prepared_context:state.beacon_context
