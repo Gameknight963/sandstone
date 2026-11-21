@@ -31,4 +31,5 @@ export function navigate_target(url,target='',form_data=null,navigation={}){
 }
 rpc.rpc_handlers.find_navigation_target=name=>ctx.name===name?{id:loader.frame_id}:find_frame_target(name,loader.frame_id);
 rpc.rpc_handlers.navigate_child_target=(id,url,form_data,navigation)=>navigate_frame_target(id,url,form_data,navigation);
-rpc.rpc_handlers.navigate_fragment=url=>{history_hash(ctx.history,url);};
+export function navigate_fragment(url,replace=false){history_hash(ctx.history,url,replace);}
+rpc.rpc_handlers.navigate_fragment=navigate_fragment;

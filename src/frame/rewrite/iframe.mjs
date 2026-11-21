@@ -26,6 +26,7 @@ import {native_dom} from '../dom_operations.mjs';
 import {mime_essence,xml_document_type} from '../../mime.mjs';
 import {navigate_target} from '../navigation_targets.mjs';
 import {javascript_document_shell} from '../document_shell.mjs';
+import {window_runtime_context} from '../runtime_context.mjs';
 import {runtime_message,stop_runtime_message,unlisten_runtime} from '../runtime_events.mjs';
 
 const relayed_source=value=>util.url_is_http(value)||/^(?:blob|data):/i.test(String(value));
@@ -430,10 +431,14 @@ export function rewrite_iframe(iframe_element) {
     if(!document_result)initial_result_pending=undefined;
     const inline=navigation.srcdoc||new URL(value,ctx.document.baseURI).href.split('#')[0]==='about:srcdoc';
     if(inline&&authored.get('srcdoc')===null)return;
-    if(!document_result&&!navigation.srcdoc&&active_target&&inline&&iframe_url.split('#')[0]==='about:srcdoc'&&String(value).includes('#')&&navigation.history_mode!=='reload'){
-      return rpc.call_procedure(active_target,'navigate_fragment',[value]);
-    }
     const target_url=convert_url(value,ctx.document.baseURI,loader.character_encoding);
+    // A readable child's pushState is synchronous; its URL notification to the
+    // parent may still be queued when src is assigned in that same task.
+    const current_context=active_target&&window_runtime_context(native_frame_window(iframe_element));
+    const document_url=current_context?current_context.location.href:iframe_url;
+    if(!document_result&&!navigation.srcdoc&&!form_data&&active_target&&navigation.history_mode!=='reload'&&(target_url.includes('#')||navigation.fragment)&&target_url.split('#')[0]===document_url.split('#')[0]){
+      return rpc.call_procedure(active_target,'navigate_fragment',[target_url,navigation.history_mode==='replace']);
+    }
     // Location and named-target navigations do not pass through the src
     // setter. They must also supersede programs waiting on the old context.
     if(!document_result)supersede_javascript();

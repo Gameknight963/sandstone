@@ -57,9 +57,9 @@ rpc.rpc_handlers.navigate_target=async(id,token,name,url,form_data,navigation={}
   const next=new URL(url),current=frame?.url;
   if(next.protocol==='javascript:')return frame?navigate_javascript(source,frame,url):{no_navigation:true};
   let result;
-  if(frame&&current&&next.origin===current.origin&&next.pathname===current.pathname&&next.search===current.search&&url.includes('#')&&!form_data){
+  if(frame&&current&&next.href.split('#')[0]===current.href.split('#')[0]&&url.includes('#')&&!form_data&&navigation.history_mode!=='reload'){
     const target=port(frame);
-    if(target)result=await rpc.call_procedure(target,'navigate_fragment',[url]);
+    if(target)result=await rpc.call_procedure(target,'navigate_fragment',[url,navigation.history_mode==='replace']);
   }else if(destination.parent){
     const parent=iframes[destination.parent],target=parent&&port(parent);
     if(parent?.root_id!==root.id||!target)return;

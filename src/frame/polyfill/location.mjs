@@ -26,8 +26,9 @@ export class FakeLocation {
       if (key !== "origin") descriptor.set = value => {
         if (key === "href") { this.assign(value); return; }
         const next = new URL(internal);
-        next[key] = value;
-        if (key === "hash" && next.href === internal.href) return;
+        if(key==='hash'){const input=`${value}`;next.hash=input===''?'#':input;}
+        else next[key] = value;
+        if (key === "hash" && next.hash === internal.hash) return;
         this.assign(next.href);
       };
       Object.defineProperty(this, key, descriptor);
@@ -36,8 +37,8 @@ export class FakeLocation {
   #navigate(value, mode) {
     const text=`${value}`;
     const next = encoding_parse_url(text, ctx.document.baseURI,loader.character_encoding);
-    const same_base = next.origin === internal.origin && next.pathname === internal.pathname && next.search === internal.search;
-    if (same_base && (next.hash !== internal.hash || next.hash || text.startsWith("#"))) {
+    const same_base = next.href.split('#')[0] === internal.href.split('#')[0];
+    if (same_base && next.href.includes('#')) {
       history_hash(ctx.history,next.href, mode === "replace");
       return;
     }

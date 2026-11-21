@@ -90,9 +90,15 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
       if(context)return context.location.href;
       return url;
     };
-    const navigate=(value,mode)=>{
+    const navigate=(value,mode,fragment=false)=>{
       const url=new URL(`${value}`,ctx.document.baseURI);
-      if(['http:','https:','blob:','data:','javascript:'].includes(url.protocol)||url.protocol==='about:'&&url.pathname==='srcdoc')state.navigate(url.href,mode)?.catch(console.error);
+      const context=window_runtime_context(target);
+      // Location changes between same-origin Windows are synchronous. Use the
+      // child's private history controller so author overrides cannot replace it.
+      if(context&&!state.opaque()&&state.origin()===ctx.origin&&(fragment||url.href.includes('#'))&&url.href.split('#')[0]===context.location.href.split('#')[0]){
+        target.sandstone_frame.navigate_fragment(url.href,mode==='replace');return;
+      }
+      if(['http:','https:','blob:','data:','javascript:'].includes(url.protocol)||url.protocol==='about:'&&url.pathname==='srcdoc')state.navigate(url.href,mode,null,{fragment})?.catch(console.error);
       else if(mode==='replace')nativeLocation().replace(url.href);
       else nativeLocation().href=url.href;
     };
@@ -118,9 +124,11 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
       },
       set(_,key,value){
         if(key==='href'){navigate(value,'push');return true;}
-        const url=new URL(readable());
+        const before=readable(),url=new URL(before),old_hash=url.hash;
         if(['protocol','host','hostname','port','pathname','search','hash'].includes(key)){
-          url[key]=`${value}`;navigate(url.href,'push');return true;
+          const input=`${value}`;url[key]=key==='hash'&&input===''?'#':input;
+          if(key==='hash'&&url.hash===old_hash)return true;
+          navigate(url.href,'push',key==='hash');return true;
         }
         return Reflect.set(nativeLocation(),key,value,nativeLocation());
       }
