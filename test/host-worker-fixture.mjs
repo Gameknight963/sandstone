@@ -1,6 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {retained_worker_main} from './retained-worker-fixture.mjs';
+import {shared_worker_registry_main,shared_worker_identity_script} from './shared-worker-registry.playwright.mjs';
 
 // This is trusted host code, never a remote site's worker. Exercise the service
 // bundle without a Window before giving shared remote runtimes a durable owner.
@@ -54,6 +55,9 @@ export async function host_worker_fixture(){
     if(!path.startsWith('/host-worker/'))return false;
     let body,type='text/javascript';
     if(path==='/host-worker/bundle.js')body=bundle;
+    else if(path==='/host-worker/registry.js')body='importScripts("/host-worker/bundle.js");('+shared_worker_registry_main.toString()+')();';
+    else if(['/host-worker/identity-worker.js','/host-worker/identity-other.js','/host-worker/identity-module.js'].includes(path))body=shared_worker_identity_script;
+    else if(path==='/host-worker/identity-redirect'){response.writeHead(302,{location:'/host-worker/identity-worker.js','cache-control':'no-store'});response.end();return true;}
     else if(path==='/host-worker/runtime.js')body=runtime;
     else if(path==='/host-worker/retained.js')body='importScripts("/host-worker/bundle.js");('+retained_worker_main.toString()+')();';
     else if(path==='/host-worker/retained-denied.js')body='Object.defineProperty(globalThis,"indexedDB",{get(){throw new DOMException("Storage denied","SecurityError");}});importScripts("/host-worker/bundle.js");('+retained_worker_main.toString()+')();';

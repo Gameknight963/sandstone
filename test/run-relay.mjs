@@ -23,6 +23,7 @@ import {verifyServiceWorkerEvents} from './service-worker-events.playwright.mjs'
 import {verifyNativeWorkerLifecycle} from './service-worker-lifecycle-native.playwright.mjs';
 import {host_worker_fixture,verify_host_worker_services} from './host-worker-fixture.mjs';
 import {verify_retained_worker_host} from './retained-worker-fixture.mjs';
+import {verify_shared_worker_registry} from './shared-worker-registry.playwright.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -342,6 +343,7 @@ try{
   console.log(JSON.stringify({fixture:'Service worker lifecycle controls',passed:await verifyNativeWorkerLifecycle(browser)}));
   console.log(JSON.stringify({fixture:'Trusted shared host controls',passed:await verify_host_worker_services(browser,origin)}));
   console.log(JSON.stringify({fixture:'Retained opaque worker services',passed:await verify_retained_worker_host(browser,origin)}));
+  console.log(JSON.stringify({fixture:'Shared worker registry controls',passed:await verify_shared_worker_registry(browser,origin)}));
   const nativeContext=await browser.newContext(),nativePage=await nativeContext.newPage();
   const nativeMetadata=await verify_metadata({
     navigate:url=>nativePage.goto(url),evaluate:source=>metadata_evaluate(nativePage,false,source),
