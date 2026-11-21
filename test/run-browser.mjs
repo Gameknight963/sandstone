@@ -63,6 +63,7 @@ import {verifyXMLParserScripts} from './xml-parser-scripts.playwright.mjs';
 import {verifyXMLIframes} from './xml-iframes.playwright.mjs';
 import {verifyWindowOpen} from './window-open.playwright.mjs';
 import {verifyAncestorWindowOpen} from './window-open-ancestors.playwright.mjs';
+import {verifyJavascriptLinks} from './javascript-links.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -498,6 +499,7 @@ try {
     result.passed.push(...await timed(verifyNavigationLifetime(page), 'Navigation lifetime fixture'));
     result.passed.push(...await timed(verifyScriptLabels(page), 'Script filename fixture'));
     result.passed.push(...await timed(verifyLinks(page), 'Link event fixture'));
+    result.passed.push(...await timed(verifyJavascriptLinks(page), 'JavaScript link decoding fixture'));
     result.passed.push(...await timed(verifyAttributes(page), 'Event attribute fixture'));
     result.passed.push(...await timed(verifyHyperlinks(page), 'Hyperlink URL fixture'));
     result.passed.push(...await timed(verifyHTMLInsertion(page), 'HTML insertion fixture'));
