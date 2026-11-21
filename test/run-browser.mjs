@@ -71,6 +71,7 @@ import {verifyJavascriptNavigationRaces} from './javascript-navigation-races.pla
 import {verifyProvisionalFrame} from './provisional-frame.playwright.mjs';
 import {verifyProvisionalNavigation} from './provisional-navigation.playwright.mjs';
 import {verifyQueuedJavascriptNavigation} from './queued-javascript-navigation.playwright.mjs';
+import {verifyInitialJavascriptQueue} from './initial-javascript-queue.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -499,6 +500,7 @@ try {
     result.passed.push(...await timed(verifyProvisionalFrame(page), 'Provisional frame capabilities fixture'));
     result.passed.push(...await timed(verifyProvisionalNavigation(page), 'Provisional frame navigation fixture'));
     result.passed.push(...await timed(verifyQueuedJavascriptNavigation(page), 'Queued JavaScript navigation fixture'));
+    result.passed.push(...await timed(verifyInitialJavascriptQueue(page), 'Initial JavaScript navigation queue fixture'));
     result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
     result.passed.push(...await timed(verifyAncestorWindows(page), 'Ancestor windows fixture'));
     result.passed.push(...await timed(verifyBroadcast(page), 'Broadcast channel fixture'));

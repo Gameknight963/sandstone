@@ -7,7 +7,7 @@ import {parse_referrer_policy,request_referrer} from '../../referrer.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {is_download} from '../../download.mjs';
 import {save_response} from '../downloads.mjs';
-import {intercept_iframe_window,native_frame_window} from '../iframe_window.mjs';
+import {intercept_iframe_window,native_frame_window,iframe_window} from '../iframe_window.mjs';
 import {child_message_parent} from '../window_messages.mjs';
 import {track_iframe,reconcile_iframes} from '../iframe_lifecycle.mjs';
 import {sandbox_tokens} from '../../navigation_policy.mjs';
@@ -37,15 +37,15 @@ const runtime_loads=new WeakMap();
 // than leaving a consumed one-use function name in its native src attribute.
 const initial_frames=new Map(),initial_callbacks=new WeakMap();
 const initial_dispatch=globalThis.document?'__sandstone_initial_'+create_bootstrap_nonce():undefined;
-const initial_finalizer=globalThis.FinalizationRegistry&&new FinalizationRegistry(id=>initial_frames.delete(id));
+const initial_finalizer=globalThis.FinalizationRegistry&&new FinalizationRegistry(ids=>{for(const id of ids)initial_frames.delete(id);});
 if(initial_dispatch)Object.defineProperty(globalThis,initial_dispatch,{value(target,id,phase){
   const element=initial_frames.get(id)?.deref();
-  return element&&initial_callbacks.get(element)?.(target,phase);
+  return element&&initial_callbacks.get(element)?.get(id)?.(target,phase);
 }});
 if(initial_dispatch)listen_runtime(globalThis,'message',event=>{
   const message=runtime_message(event,'data');
   if(!event.isTrusted||!message||message.sandstone_initial_document!==1)return;
-  const element=initial_frames.get(message.id)?.deref(),callback=element&&initial_callbacks.get(element);
+  const element=initial_frames.get(message.id)?.deref(),callback=element&&initial_callbacks.get(element)?.get(message.id);
   if(!callback||callback.nonce!==message.nonce||runtime_message(event,'source')!==native_frame_window(element))return;
   stop_runtime_message(event);for(const port of runtime_message(event,'ports')||[])port.close();
   callback(native_frame_window(element),1);
@@ -101,12 +101,14 @@ export function rewrite_iframe(iframe_element) {
   let javascript_revision=0,pending_javascript=javascript_source()?{url:javascript_source(),initial:true}:null,blank_initialization;
   const javascript_tasks=new Set();
   function supersede_javascript(){
-    javascript_revision++;pending_javascript=null;
+    javascript_revision++;pending_javascript=null;clear_initial_javascript();
     // A discarded realm may never reply to its initial readiness requests.
     for(const task of javascript_tasks)task.cancel();
     return javascript_revision;
   }
-  let initial_javascript,initial_result_pending,blank_options,blank_nonce;
+  let initial_javascript,initial_source,initial_result_pending,blank_options,blank_nonce,initial_tracking=false;
+  const initial_ids=new Set();
+  const forget_initial_id=id=>{initial_frames.delete(id);initial_ids.delete(id);};
   const blank_url=()=>{
     if(authored.get('srcdoc')!==null)return;
     if(javascript_source())return 'about:blank';
@@ -245,6 +247,9 @@ export function rewrite_iframe(iframe_element) {
       ready.catch(error=>{if(current()&&error?.name!=='AbortError')console.error(error);});
       blank_initialization=ready;
       blank_ready=true;
+      // A child can post to its parent before author code reads contentWindow.
+      // Register its WindowProxy now so those messages unwrap normally.
+      iframe_window(iframe_element);
       loader.child_names.set(frame_id,value=>{window_name=value;});
       loader.child_urls.set(frame_id,(value,context)=>{if(!context||context===token)iframe_url=value;});
       loader.child_navigators.set(frame_id,fetch_src);
@@ -272,49 +277,64 @@ export function rewrite_iframe(iframe_element) {
     finally{unlisten_runtime(port,'message',receive);}
   }
 
-  function clear_initial_javascript(){
-    if(!initial_javascript)return;
-    try{if(initial_javascript.target)delete initial_javascript.target[initial_javascript.child_key];}catch{}
-    initial_callbacks.delete(iframe_element);initial_javascript=undefined;
+  function clear_initial_javascript(only){
+    const callbacks=initial_callbacks.get(iframe_element);
+    for(const [id,callback] of callbacks||[]){
+      if(only&&callback.state!==only)continue;
+      const state=callback.state;
+      try{if(state.target)delete state.target[state.child_key];}catch{}
+      callbacks.delete(id);
+      if(id!==initial_source?.id)forget_initial_id(id);
+      if(initial_javascript===state)initial_javascript=undefined;
+    }
+    if(!callbacks?.size)initial_callbacks.delete(iframe_element);
   }
-  function prepare_initial_javascript(){
+  function prepare_initial_javascript(new_source=false){
     const url=javascript_source(),sandbox=authored.get('sandbox'),tokens=sandbox_tokens(sandbox);
     if(iframe_url||!url||!initial_dispatch||typeof WeakRef!=='function'||authored.get('srcdoc')!==null||ctx.origin==='null'||loader.site_settings.allow_js===false||sandbox!==null&&(!tokens.has('allow-scripts')||!tokens.has('allow-same-origin')))return false;
-    if(initial_javascript)return true;
-    const native_src='javascript:parent['+JSON.stringify(initial_dispatch)+'](this,'+JSON.stringify(frame_id)+',0)';
+    if(initial_javascript&&!new_source)return true;
     if(iframe_element.isConnected){
       // Reconnection is observed after insertion for native move operations.
       // Its already-queued src must be our dispatcher, in a fresh blank realm.
-      try{if(raw_media_attribute(iframe_element,'src')!==native_src||native_frame_window(iframe_element).sandstone_frame)return false;}catch{return false;}
+      try{if(raw_media_attribute(iframe_element,'src')!==initial_source?.native_src||native_frame_window(iframe_element).sandstone_frame)return false;}catch{return false;}
     }
-    if(!initial_frames.has(frame_id)){
-      initial_frames.set(frame_id,new WeakRef(iframe_element));initial_finalizer?.register(iframe_element,frame_id);
+    if(new_source||!initial_source||initial_source.url!==url){
+      if(initial_source&&!initial_callbacks.get(iframe_element)?.has(initial_source.id))forget_initial_id(initial_source.id);
+      const id=create_bootstrap_nonce();
+      initial_source={id,url,native_src:'javascript:parent['+JSON.stringify(initial_dispatch)+'](this,'+JSON.stringify(id)+',0)'};
     }
+    const {id,native_src}=initial_source;
+    if(!initial_frames.has(id)){
+      initial_frames.set(id,new WeakRef(iframe_element));initial_ids.add(id);
+      if(!initial_tracking){initial_finalizer?.register(iframe_element,initial_ids);initial_tracking=true;}
+    }
+    let callbacks=initial_callbacks.get(iframe_element);
+    if(!callbacks)initial_callbacks.set(iframe_element,callbacks=new Map());
     const revision=javascript_revision,state=initial_javascript={revision,phase:0};
-    const current=target=>initial_javascript===state&&revision===javascript_revision&&(state.generation===undefined||state.generation===generation)&&iframe_element.isConnected&&native_frame_window(iframe_element)===target;
-    initial_callbacks.set(iframe_element,(target,phase)=>{
+    const current=target=>callbacks.get(id)?.state===state&&revision===javascript_revision&&(state.generation===undefined||state.generation===generation)&&iframe_element.isConnected&&native_frame_window(iframe_element)===target;
+    const callback=(target,phase)=>{
       if(!current(target)||phase!==state.phase)return;
       if(phase===0){
-        if(!ensure_blank(target)){clear_initial_javascript();return;}
+        if(!ensure_blank(target)){clear_initial_javascript(state);return;}
         state.generation=generation;
         pending_javascript=null;blank_load_pending=false;
         const runtime=target.sandstone_frame;
         state.runtime=runtime;state.document=target.document;
         state.target=target;state.child_key='__sandstone_replacement_'+create_bootstrap_nonce();
-        initial_callbacks.get(iframe_element).nonce=state.child_key;
-        Object.defineProperty(target,state.child_key,{configurable:true,value:()=>globalThis[initial_dispatch](target,frame_id,1)});
+        callback.nonce=state.child_key;
+        Object.defineProperty(target,state.child_key,{configurable:true,value:()=>globalThis[initial_dispatch](target,id,1)});
         const result=runtime.javascript_navigation.evaluate_javascript_url(url);
         if(!current(target))return;
         if(typeof result.html!=='string'){
-          const ready=Promise.all([commit,blank_initialization]);clear_initial_javascript();
-          ready.then(()=>{if(revision===javascript_revision&&iframe_element.isConnected)iframe_element.dispatchEvent(new Event('load'));}).catch(error=>{if(error?.name!=='AbortError')console.error(error);});
+          const ready=Promise.all([commit,blank_initialization]);clear_initial_javascript(state);
+          ready.then(()=>{if(initial_source?.id===id&&revision===javascript_revision&&iframe_element.isConnected)iframe_element.dispatchEvent(new Event('load'));}).catch(error=>{if(error?.name!=='AbortError')console.error(error);});
           return;
         }
-        state.result=result;state.phase=1;
+        state.result=result;state.phase=1;initial_javascript=state;
         // Only the fixed shell and this one-use private callback reach the
         // native parser. Authored resource-bearing HTML stays in the broker.
         const invoke='this['+JSON.stringify(state.child_key)+']';
-        const message=JSON.stringify({sandstone_initial_document:1,id:frame_id,nonce:state.child_key});
+        const message=JSON.stringify({sandstone_initial_document:1,id,nonce:state.child_key});
         return javascript_document_shell(result.html).replace('<head>','<head><script>if('+invoke+')'+invoke+'();else parent.postMessage('+message+',"*");<\/script>');
       }
       let reused=false;
@@ -366,7 +386,8 @@ export function rewrite_iframe(iframe_element) {
       commit=installation.catch(error=>{channel.port1.close();channel.port2.close();if(live()&&error?.name!=='AbortError')console.error(error);});
       context_ready=Promise.all([commit,runtime.loader.document_prepared()]);context_ready.catch(()=>{});
       installation.then(()=>loaded).then(()=>{if(live())iframe_element.dispatchEvent(new Event('load'));}).catch(error=>{if(live()&&error?.name!=='AbortError')console.error(error);});
-    });
+    };
+    callback.state=state;callbacks.set(id,callback);
     if(raw_media_attribute(iframe_element,'src')!==native_src)render_media_attribute(iframe_element,'src',native_src);
     return true;
   }
@@ -380,10 +401,13 @@ export function rewrite_iframe(iframe_element) {
     try{
       if(!iframe_url)ensure_blank(native_frame_window(iframe_element));
       task.generation=generation;
+      let document;
+      try{document=native_frame_window(iframe_element).document;}catch{}
+      const same_document=()=>{try{return !document||native_frame_window(iframe_element).document===document;}catch{return !document;}};
       // A replacement Window needs its own URL, origin and storage capability
       // before it can evaluate a queued JavaScript navigation.
       let ready;
-      do{ready=context_ready;await Promise.race([ready,cancelled]);if(revision!==javascript_revision||!iframe_element.isConnected)return;}while(ready!==context_ready);
+      do{ready=context_ready;await Promise.race([ready,cancelled]);if(revision!==javascript_revision||!iframe_element.isConnected||!same_document())return;}while(ready!==context_ready);
       // Evaluate without waiting for parser-blocking scripts. A string result
       // starts the replacement and cancels the old load in fetch_src; other
       // completion values leave the original document loading normally.
@@ -618,20 +642,23 @@ export function rewrite_iframe(iframe_element) {
 
   set_src=value=>{
       initial_result_pending=undefined;
-      clear_initial_javascript();
       pending_javascript=null;
       authored_src=value;
       authored.set('src',value);
       if(authored.get('srcdoc')!==null){render_media_attribute(iframe_element,'src','');return;}
       const javascript=javascript_source();
       if(javascript){
+        // Native initial JavaScript navigations queue separately. Changing src
+        // must not redirect an already queued dispatcher to the newest source.
+        if(!iframe_element.isConnected)clear_initial_javascript();
         runtime_sandbox=true;render_sandbox();
-        if(prepare_initial_javascript())return;
+        if(prepare_initial_javascript(true))return;
         // Keep a real Attr for native attribute APIs without replacing the
         // active document. Authored JavaScript stays in the virtual runtime.
         render_media_attribute(iframe_element,'src','javascript:void 0');
         pending_javascript={url:javascript,initial:false};queue_javascript();return;
       }
+      clear_initial_javascript();
       let remote=false;
       try{remote=relayed_source(value);}catch{}
       if (!remote || !value){

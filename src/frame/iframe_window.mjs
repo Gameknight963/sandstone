@@ -156,6 +156,8 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
     return state.window;
   }
 });
+const frame_window_getter=descriptor&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentWindow').get;
+export function iframe_window(element){return frame_window_getter?.call(element);}
 
 // Message sources and contentWindow refer to the same WindowProxy in browsers.
 const source=globalThis.MessageEvent&&Object.getOwnPropertyDescriptor(MessageEvent.prototype,'source');
