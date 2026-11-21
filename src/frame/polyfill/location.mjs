@@ -11,15 +11,30 @@ export {share_location} from '../location_interface.mjs';
 export let internal = null;
 export function set_location(value) { flush_document_base();internal = new URL(value); loader.set_url(internal.href); }
 
+const NativeWorkerLocation=globalThis.WorkerLocation,worker_locations=new WeakMap();
+if(NativeWorkerLocation){
+  // Keep the browser's prototype and accessor placement. Only registered
+  // facades use virtual URLs; native receivers retain their native slots.
+  for(const key of Reflect.ownKeys(NativeWorkerLocation.prototype)){
+    const descriptor=Object.getOwnPropertyDescriptor(NativeWorkerLocation.prototype,key);
+    if(descriptor.get)Object.defineProperty(NativeWorkerLocation.prototype,key,{...descriptor,get:new Proxy(descriptor.get,{apply(target,receiver,args){
+      return worker_locations.has(receiver)?worker_locations.get(receiver)[key]:Reflect.apply(target,receiver,args);
+    }})});
+    else if(key==='toString')Object.defineProperty(NativeWorkerLocation.prototype,key,{...descriptor,value:new Proxy(descriptor.value,{apply(target,receiver,args){
+      return worker_locations.has(receiver)?worker_locations.get(receiver).href:Reflect.apply(target,receiver,args);
+    }})});
+  }
+}
 export class FakeWorkerLocation {
   constructor() {
     const url = new URL(loader.url);
+    // Native WorkerLocation objects reject structured cloning.
+    const facade=new Proxy(Object.create(NativeWorkerLocation.prototype),{}),values={};
     for (const key of ["href", "origin", "protocol", "host", "hostname", "port", "pathname", "search", "hash"]) {
-      Object.defineProperty(this, key, {enumerable: true, get: () => key === "origin" ? loader.worker_origin || url.origin : url[key]});
+      values[key]=key==='origin'?loader.worker_origin||url.origin:url[key];
     }
+    worker_locations.set(facade,values);return facade;
   }
-  toString() { return this.href; }
-  get [Symbol.toStringTag]() { return "WorkerLocation"; }
 }
 
 export class FakeLocation {
