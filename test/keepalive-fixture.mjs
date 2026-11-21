@@ -50,9 +50,10 @@ export function keepalive_fixture() {
         }else body=value.body.length>200?{size:value.body.length,hash:createHash('sha256').update(value.body).digest('hex')}:value.body.toString();
         values.push({name:value.name,method:value.method,origin:value.origin,
           referrer:value.referrer?.replace('client='+encodeURIComponent(client),'client=CLIENT')||null,cookie:value.cookie,type,body,
-          // Chromium may finish an already-uploaded request on its pooled socket
-          // after rejecting fetch with AbortError. Compare the observable API.
-          ...(value.name==='abort'?{}:{aborted:value.aborted})});
+          // An abort or worker termination races the held response's release:
+          // native Chromium can close its socket before or after writableEnded.
+          // Delivery, metadata and bounded connection cleanup are checked apart.
+          ...(['abort','worker'].includes(value.name)?{}:{aborted:value.aborted})});
       }
       return values.sort((a,b)=>a.name.localeCompare(b.name));
     }
