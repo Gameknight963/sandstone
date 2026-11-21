@@ -24,7 +24,18 @@ export function pack(source){
   const client=join(source,'client');
   const repositories=[[source,lock.upstream],[join(client,'wisp_client'),lock.wisp],...lock.dependencies.map(dependency=>[join(client,'build',dependency.name),dependency])];
   for(const [path,repository] of repositories)assert.equal(run('git',['rev-parse','HEAD'],path),repository.commit,'Source revision differs: '+path);
-  for(const patch of lock.patches)run('git',['apply','--reverse','--check',join(directory,patch)],source);
+  // Later patches can change an earlier patch's context. Validate the complete
+  // stack in reverse order on disposable copies, preserving the build tree.
+  const validation=mkdtempSync(join(tmpdir(),'sandstone-libcurl-patches-'));
+  for(const patch of lock.patches){
+    const text=readFileSync(join(directory,patch),'utf8');
+    for(const match of text.matchAll(/^\+\+\+ b\/(.+)$/gm)){
+      const filename=match[1].trim(),target=join(validation,filename);
+      assert.ok(resolve(target).startsWith(resolve(validation)+'/')||resolve(target).startsWith(resolve(validation)+'\\'),'Patch path escapes validation directory');
+      mkdirSync(dirname(target),{recursive:true});copyFileSync(join(source,filename),target);
+    }
+  }
+  for(const patch of [...lock.patches].reverse())run('git',['apply','--reverse',join(directory,patch)],validation);
   const ca=readFileSync(join(client,'build/cacert.pem'));
   assert.equal(createHash('sha256').update(ca).digest('hex'),lock.caBundleSHA256);
   const manifest=JSON.parse(readFileSync(join(client,'package.json'),'utf8'));

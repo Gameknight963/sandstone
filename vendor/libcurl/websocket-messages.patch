@@ -1,0 +1,100 @@
+diff --git a/client/javascript/websocket.js b/client/javascript/websocket.js
+index 14cb15b..0330ae2 100644
+--- a/client/javascript/websocket.js
++++ b/client/javascript/websocket.js
+@@ -81,24 +81,28 @@ class CurlWebSocket extends CurlSession {
+ 
+     //CURLE_OK - data received 
+     if (result_code === 0 && !result_closed) {
+-      let data_size = _get_result_size(result_ptr);
+-      let data_heap = Module.HEAPU8.subarray(data_ptr, data_ptr + data_size);
+-      let data = new Uint8Array(data_heap);
+-      
+-      this.recv_buffer.push(data);
+-      if (data_size !== buffer_size && !_get_result_bytes_left(result_ptr)) { //message finished
+-        let full_data = merge_arrays(this.recv_buffer);
+-        let is_text = _get_result_is_text(result_ptr)
+-        this.recv_buffer = [];
+-        if (is_text) {
+-          returned_data = new TextDecoder().decode(full_data);
+-        }
+-        else {
+-          returned_data = full_data;
++      const flags = _get_result_flags(result_ptr);
++      // Control frames can interrupt a fragmented message; they are not data.
++      if (flags & 3) {
++        let data_size = _get_result_size(result_ptr);
++        let data_heap = Module.HEAPU8.subarray(data_ptr, data_ptr + data_size);
++        let data = new Uint8Array(data_heap);
++        
++        this.recv_buffer.push(data);
++        if (!(flags & 4) && !_get_result_bytes_left(result_ptr)) { // complete message
++          let full_data = merge_arrays(this.recv_buffer);
++          let is_text = _get_result_is_text(result_ptr)
++          this.recv_buffer = [];
++          if (is_text) {
++            returned_data = new TextDecoder().decode(full_data);
++          }
++          else {
++            returned_data = full_data;
++          }
+         }
+       }
+     }
+-    
++
+     // websocket was cleanly closed by the server
+     else if (result_code === 0 && result_closed) {
+       const size = _get_result_size(result_ptr);
+diff --git a/client/libcurl/websocket.c b/client/libcurl/websocket.c
+index 1bb8a49..86325aa 100644
+--- a/client/libcurl/websocket.c
++++ b/client/libcurl/websocket.c
+@@ -20,11 +20,13 @@ struct WSResult* recv_from_websocket(CURL* http_handle, int buffer_size) {
+   result->res = (int) res;
+   //ws_meta will be null if the recv is not successful, so don't try reading it otherwise
+   if (res == CURLE_OK) {
++    result->flags = ws_meta->flags;
+     result->closed = (ws_meta->flags & CURLWS_CLOSE);
+     result->is_text = (ws_meta->flags & CURLWS_TEXT);
+     result->bytes_left = ws_meta->bytesleft;
+   }
+   else {
++    result->flags = 0;
+     result->closed = -1;
+     result->is_text = -1;
+     result->bytes_left = -1;
+@@ -68,6 +70,9 @@ int get_result_closed (const struct WSResult* result) {
+ int get_result_bytes_left (const struct WSResult* result) {
+   return result->bytes_left;
+ }
++int get_result_flags (const struct WSResult* result) {
++  return result->flags;
++}
+ int get_result_is_text (const struct WSResult* result) {
+   return result->is_text;
+ }
+diff --git a/client/libcurl/types.h b/client/libcurl/types.h
+index 9c6869d..f477e0c 100644
+--- a/client/libcurl/types.h
++++ b/client/libcurl/types.h
+@@ -19,6 +19,7 @@ struct WSResult {
+   int closed;
+   int bytes_left;
+   int is_text;
++  int flags;
+   char* buffer;
+ };
+ 
+diff --git a/client/exported_funcs.txt b/client/exported_funcs.txt
+index 7659fd2..60a1403 100644
+--- a/client/exported_funcs.txt
++++ b/client/exported_funcs.txt
+@@ -28,6 +28,7 @@ get_result_code
+ get_result_closed
+ get_result_bytes_left
+ get_result_is_text
++get_result_flags
+ 
+ tls_socket_set_options
+ recv_from_socket

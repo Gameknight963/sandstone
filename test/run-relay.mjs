@@ -8,6 +8,7 @@ import {chromium} from 'playwright-core';
 import {server as wisp} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
 import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
 import {is_websocket_close_path,websocket_close_connection,websocket_close_script,websocket_close_records,websocket_lifetime_script,websocket_departure_script} from './websocket-close-fixture.mjs';
+import {is_websocket_message_path,websocket_message_connection,websocket_message_script} from './websocket-message-fixture.mjs';
 import {font_fixture, font_script, constructor_font_script} from './font-fixture.mjs';
 import {keepalive_fixture,keepalive_quota_script,keepalive_finish_script,keepalive_unload_script,keepalive_abort_script,keepalive_worker_script} from './keepalive-fixture.mjs';
 import {cache_fixture,cache_script} from './cache-fixture.mjs';
@@ -152,6 +153,7 @@ echoes.on('headers',(headers,request)=>{
 });
 echoes.on('connection', (socket, request) => {
   if(websocket_close_connection(socket,request,websocketCloses))return;
+  if(websocket_message_connection(socket,request))return;
   if(request.url==='/ws-context')socket.send(JSON.stringify({origin:request.headers.origin,cookies:(request.headers.cookie||'').split('; ').filter(Boolean).sort()}));
   if (request.url === '/ws-close') { socket.close(4001, 'server finished'); return; }
   socket.on('message', (data, isBinary) => socket.send(data, {binary: isBinary}));
@@ -168,7 +170,7 @@ server.on('upgrade',(request,socket,head)=>{
     }
     echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
   }
-  else if (is_websocket_close_path(request.url)||request.url === '/echo' || request.url === '/ws-close' || request.url==='/ws-context') echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
+  else if (is_websocket_close_path(request.url)||is_websocket_message_path(request.url)||request.url === '/echo' || request.url === '/ws-close' || request.url==='/ws-context') echoes.handleUpgrade(request,socket,head,ws=>echoes.emit('connection',ws,request));
   else if (request.url === '/ws-pending') server.emit('ws-pending',socket);
   else if (request.url === '/ws-refused') socket.end('HTTP/1.1 403 Forbidden\r\nSet-Cookie: refused=visible; Path=/\r\nContent-Length: 0\r\n\r\n');
   else wisp.routeRequest(request,socket,head);
@@ -473,6 +475,10 @@ try{
   await nativeChild.evaluate(source=>eval(source),submitFormScript('child-form-native','child','POST',origin));
   await nativeChild.waitForURL(url=>url.pathname==='/request-context/echo');
   const nativeChildContext=contextValues('child-form-native');
+  const nativeWebsocketMessages={};
+  for(const mode of ['receive','echo'])nativeWebsocketMessages[mode]=JSON.parse(await nativePage.evaluate(source=>eval(source),websocket_message_script(origin,mode)));
+  assert.equal(nativeWebsocketMessages.receive.messages.length,8);
+  assert.deepEqual(nativeWebsocketMessages.receive.messages[0],{text:true,length:3,first:65,last:90,sum:8519});
   const nativeWebsocketCloses=JSON.parse(await nativePage.evaluate(source=>eval(source),websocket_close_script(origin,'close-native')));
   assert.deepEqual(nativeWebsocketCloses.rows.map(row=>row.code),[4001,1005,4002,1005,4003,1006]);
   const nativeWebsocketCloseRecords=await websocket_close_records(websocketCloses,'close-native');
@@ -716,6 +722,17 @@ try{
     socket.onclose=event=>resolve(JSON.stringify({state:socket.readyState,code:event.code,reason:event.reason,wasClean:event.wasClean}));
   })`),origin);
   assert.deepEqual(JSON.parse(serverClosed),{state:3,code:4001,reason:'server finished',wasClean:true});
+  for(const mode of ['receive','echo']){
+    const source=websocket_message_script(origin,mode);
+    const result=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),source));
+    assert.deepEqual(result,nativeWebsocketMessages[mode],'WebSocket message assembly: '+mode);
+    const workerResult=JSON.parse(await page.evaluate(source=>main_frame.eval_js(`new Promise((resolve,reject)=>{
+      const url=URL.createObjectURL(new Blob(['onmessage=async()=>postMessage(await ('+${JSON.stringify(source)}+'));'],{type:'text/javascript'}));
+      const worker=new Worker(url);worker.onmessage=event=>{worker.terminate();URL.revokeObjectURL(url);resolve(event.data);};
+      worker.onerror=event=>{event.preventDefault();reject(new Error(event.message));};worker.postMessage('start');
+    })`),source));
+    assert.deepEqual(workerResult,nativeWebsocketMessages[mode],'Worker WebSocket message assembly: '+mode);
+  }
   const closeOwner='close-proxy-'+storageDenied,workerCloseOwner='close-worker-'+storageDenied;
   const closeResults=JSON.parse(await page.evaluate(source=>main_frame.eval_js(source),websocket_close_script(origin,closeOwner)));
   assert.deepEqual(closeResults,nativeWebsocketCloses);
@@ -822,7 +839,7 @@ try{
   assert.deepEqual(direct,[],'A relayed connection made a direct HTTP request');
   assert.deepEqual(errors,[],'A relayed connection produced a browser error');
   assert.ok(closed.some(value=>value.client===client&&value.count===3));
-    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','native/relay Fetch Metadata, resource destinations and history','JavaScript/JSON/CSS module negotiation, redirects and Vary caching','explicit empty Fetch/XHR headers and request bodies','large uploads and bounded transport metadata','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','opaque iframe WebSocket Origin and SameSite cookie parity','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','synthetic lifecycle events preserve SSE reconnection','native iframe unload closes retained event streams','native request cleanup'],events:proxied,direct}));
+    console.log(JSON.stringify({storageDenied,passed:['native/relay Origin and Referer parity','native/relay Fetch Metadata, resource destinations and history','JavaScript/JSON/CSS module negotiation, redirects and Vary caching','explicit empty Fetch/XHR headers and request bodies','large uploads and bounded transport metadata','response/meta/request referrer policies and redirect taint','root/cross-origin iframe form headers and SameSite cookies','virtual document.referrer','native/relay beacon payload and validation parity','beacon binary snapshots and multipart files','accepted/unload/child beacons survive cross-origin navigation','WebSocket echo/protocol/binary ordering','fragmented WebSocket messages, interleaved control frames and large worker messages','opaque iframe WebSocket Origin and SameSite cookie parity','native/relay authenticated cookie parity','HttpOnly/path/SameSite cookie rules','worker WebSockets and server closure','WebSocket pending cancellation and handshake failure','failed handshake cookies and per-site clearing','native/relay SSE event parity','headers before body','UTF-8 IDs and reconnect headers','redirect/reconnect cookies','204 and MIME termination','abort before headers','worker SSE','synthetic lifecycle events preserve SSE reconnection','native iframe unload closes retained event streams','native request cleanup'],events:proxied,direct}));
   await context.close();
   }
 }finally{
