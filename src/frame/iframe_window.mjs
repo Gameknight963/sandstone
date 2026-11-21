@@ -6,6 +6,7 @@ import {register_message_peer,window_post_message} from './window_messages.mjs';
 import {window_open_value,set_window_open} from './intercept/open.mjs';
 import {sandbox_tokens} from '../navigation_policy.mjs';
 import {set_window_event_handler,register_window_event_alias} from './event_identity.mjs';
+import {origin_list} from './polyfill/origin_list.mjs';
 
 const frames=new WeakMap();
 const windows=new WeakMap();
@@ -103,7 +104,7 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
       else if(mode==='replace')nativeLocation().replace(url.href);
       else nativeLocation().href=url.href;
     };
-    let location;
+    let location,ancestorOrigins;
     const methods={
       assign(value){if(this!==location)throw new TypeError('Illegal invocation');if(!arguments.length)throw new TypeError('A URL is required');readable();navigate(value,'push');},
       replace(value){if(this!==location)throw new TypeError('Illegal invocation');if(!arguments.length)throw new TypeError('A URL is required');navigate(value,'replace');},
@@ -117,6 +118,10 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
         if(key===Symbol.toPrimitive)return undefined;
         if(key===Symbol.toStringTag)return 'Location';
         if(Object.hasOwn(methods,key))return methods[key];
+        if(key==='ancestorOrigins'){
+          const context=window_runtime_context(target);if(context)return context.location.ancestorOrigins;
+          return globalThis.DOMStringList?ancestorOrigins??=origin_list([ctx.origin,...ctx.location.ancestorOrigins]):undefined;
+        }
         if(key==='origin'){
           const context=window_runtime_context(target);if(context)return context.location.origin;
         }

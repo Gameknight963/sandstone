@@ -255,7 +255,7 @@ export function wrap_obj(wrapper, target) {
 export function update_ctx(options = {}) {
   let storageReady;
   if(!options.reuse_window){
-    internal.location = is_worker ? new polyfill.FakeWorkerLocation() : new polyfill.FakeLocation();
+    internal.location = is_worker ? new polyfill.FakeWorkerLocation() : new polyfill.FakeLocation(options);
     internal.self = ctx.__proxy__;
     internal.globalThis = ctx.__proxy__;
   }

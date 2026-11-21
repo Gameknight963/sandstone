@@ -47,6 +47,7 @@ export function ancestor_location(target,depth,frame=()=>loader.frame_id,canNavi
       if(key===Symbol.toPrimitive)return undefined;
       if(key===Symbol.toStringTag)return 'Location';
       if(Object.hasOwn(methods,key))return methods[key];
+      if(key==='ancestorOrigins')return window_runtime_context(target).location.ancestorOrigins;
       if(key==='origin')return window_runtime_context(target).location.origin;
       if(['href','protocol','host','hostname','port','pathname','search','hash'].includes(key))return new URL(url)[key];
       return Reflect.get(Location.prototype,key,location);

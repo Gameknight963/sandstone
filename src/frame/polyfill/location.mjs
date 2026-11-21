@@ -3,6 +3,7 @@ import { ctx } from "../context.mjs";
 import {flush_document_base} from '../document_base.mjs';
 import {history_hash} from './history.mjs';
 import {encoding_parse_url} from '../../url_encoding.mjs';
+import {origin_list} from './origin_list.mjs';
 
 export let internal = null;
 export function set_location(value) { flush_document_base();internal = new URL(value); loader.set_url(internal.href); }
@@ -19,8 +20,10 @@ export class FakeWorkerLocation {
 }
 
 export class FakeLocation {
-  constructor() {
+  constructor(options={}) {
     set_location(loader.url);
+    const origins=Array.from(options.message_parent?.origins||[]);let ancestors;
+    if(globalThis.DOMStringList)Object.defineProperty(this,'ancestorOrigins',{enumerable:true,get:()=>ancestors??=origin_list(origins)});
     for (const key of ["href", "origin", "protocol", "host", "hostname", "port", "pathname", "search", "hash"]) {
       const descriptor = {enumerable: true, get: () => key==='origin'&&internal.protocol==='blob:'?loader.location_origin??internal.origin:internal[key]};
       if (key !== "origin") descriptor.set = value => {
