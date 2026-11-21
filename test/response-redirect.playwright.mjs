@@ -1,5 +1,6 @@
 import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
+import {wait_for} from './wait-for.mjs';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 
@@ -52,7 +53,7 @@ export async function verifyResponseRedirect(page){
     assert.deepEqual(await read('('+documentCases.toString()+')('+probe.toString()+')'),expected);
     assert.deepEqual(await read(workers),expectedWorkers);
     await fixture.evaluate(()=>main_frame.navigate_to('https://response-redirect.test/app/client'));
-    await read('(async()=>{await navigator.serviceWorker.register("/app/service.js");await navigator.serviceWorker.ready;return true;})()');await fixture.waitForFunction(async()=>!!await main_frame.eval_js('!!navigator.serviceWorker.controller'));
+    await read('(async()=>{await navigator.serviceWorker.register("/app/service.js");await navigator.serviceWorker.ready;return true;})()');await wait_for(()=>fixture.evaluate(async()=>!!await main_frame.eval_js('!!navigator.serviceWorker.controller')));
     await fixture.evaluate(()=>main_frame.navigate_to('https://response-redirect.test/app/nested/start'));
     assert.deepEqual(await read('({path:location.pathname,hash:location.hash})'),expectedNavigation);assert.deepEqual(errors,[]);assert.deepEqual(direct,[]);
     return ['Relative Response.redirect URLs use dynamic document bases and frozen base elements','Classic/module workers and service-worker navigation use their virtual script URL','Redirect factory conversion, clone metadata, status wrapping and immutable headers match Chromium'];

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {wait_for} from './wait-for.mjs';
 import {Buffer} from 'node:buffer';
 
 const origin='https://html-urls.test';
@@ -63,7 +64,7 @@ export async function verifyHTMLURLs(page,{batch=0,batches=1}={}){
       await native.goto(resourceURL);
       await native.waitForFunction(()=>globalThis.classicReady&&globalThis.moduleReady&&document.querySelector('#image').complete&&document.querySelector('#image').naturalWidth>0);
       await page.evaluate(url=>main_frame.navigate_to(url),resourceURL);
-      await page.waitForFunction(async()=>JSON.parse(await main_frame.eval_js('JSON.stringify(!!(globalThis.classicReady&&globalThis.moduleReady&&document.querySelector("#image").complete&&document.querySelector("#image").naturalWidth>0))')));
+      await wait_for(()=>page.evaluate(async()=>JSON.parse(await main_frame.eval_js('JSON.stringify(!!(globalThis.classicReady&&globalThis.moduleReady&&document.querySelector("#image").complete&&document.querySelector("#image").naturalWidth>0))'))));
       await native.evaluate(()=>fetch('/fetch?q=Тест').then(response=>response.text()));
       await page.evaluate(()=>main_frame.eval_js('fetch("/fetch?q=Тест").then(response=>response.text())'));
       const paths=['/pixel','/responsive','/poster','/classic','/module','/style','/child','/fetch'];

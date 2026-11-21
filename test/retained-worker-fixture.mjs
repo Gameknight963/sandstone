@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {wait_for} from './wait-for.mjs';
 
 export function retained_worker_main(){
   const hosts=new Map(),closed=new Map(),watchers=new Map();
@@ -184,7 +185,7 @@ export async function verify_retained_worker_host(browser,origin){
         const port=retainedClients.at(-1).port;
         globalThis.retainedClearResult=new Promise(resolve=>{port.onmessage=event=>resolve(event.data);});port.postMessage('hold');
       });
-      await second.waitForFunction(async()=>await(await fetch('/host-worker/cookie-status')).json()===1);
+      await wait_for(()=>second.evaluate(async()=>await(await fetch('/host-worker/cookie-status')).json()===1));
       const cleared=await second.evaluate(async()=>{
         const store=sandstone.controller.site_data;store.clear(location.hostname,{cookies:true,localStorage:false});
         store.setCookie(location.origin,'fresh=after; HttpOnly; SameSite=None; Secure; Path=/',true);
@@ -195,7 +196,7 @@ export async function verify_retained_worker_host(browser,origin){
         const port=retainedClients.at(-1).port;
         globalThis.retainedSocketClearResult=new Promise(resolve=>{port.onmessage=event=>resolve(event.data);});port.postMessage('hold-socket');
       });
-      await second.waitForFunction(async()=>await(await fetch('/host-worker/socket-status')).json()===1);
+      await wait_for(()=>second.evaluate(async()=>await(await fetch('/host-worker/socket-status')).json()===1));
       const socketCleared=await second.evaluate(async()=>{
         const store=sandstone.controller.site_data;store.clear(location.hostname,{cookies:true,localStorage:false});
         store.setCookie(location.origin,'fresh=newer; HttpOnly; SameSite=None; Secure; Path=/',true);

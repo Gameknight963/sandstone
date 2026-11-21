@@ -1,5 +1,6 @@
 import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
+import {wait_for} from './wait-for.mjs';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 
@@ -71,7 +72,7 @@ export async function verifyResponseTypes(page){
     await fixture.evaluate(({fn,worker})=>{const resource=eval('('+fn+')');sandstone.network.session.fetch=async url=>{const data=resource(url);return new Response(data.body,{status:data.status,statusText:data.statusText,headers:data.headers});};},{fn:resource.toString(),worker});
     await fixture.evaluate(()=>main_frame.navigate_to('https://response-types.test/client'));
     assert.deepEqual(normalize(await read(api,'https://cross-response-types.test')),normalize(expected));
-    await fixture.evaluate(()=>main_frame.eval_js('(async()=>{await navigator.serviceWorker.register("/sw.js");await navigator.serviceWorker.ready;})()'));await fixture.waitForFunction(async()=>!!await main_frame.eval_js('!!navigator.serviceWorker.controller'));
+    await fixture.evaluate(()=>main_frame.eval_js('(async()=>{await navigator.serviceWorker.register("/sw.js");await navigator.serviceWorker.ready;})()'));await wait_for(()=>fixture.evaluate(async()=>!!await main_frame.eval_js('!!navigator.serviceWorker.controller')));
     assert.deepEqual(await read(controlled,'https://cross-response-types.test'),expectedControlled);
     assert.deepEqual(errors,[]);assert.deepEqual(direct,[]);
     return ['Basic, CORS and opaque fetch responses preserve native headers, URL visibility, cloning and cache consumption','CORS wildcard credentials and cached exposure lists match native Chromium','Service workers return cached opaque image bodies and retain synthetic/pass-through response types'];

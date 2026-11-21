@@ -1,5 +1,6 @@
 import {listen_browser_server} from './browser-server.mjs';
 import assert from 'node:assert/strict';
+import {wait_for} from './wait-for.mjs';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 
@@ -61,7 +62,7 @@ export async function verifyManualRedirects(page){
     await fixture.evaluate(()=>main_frame.navigate_to('https://manual-redirect.test/client'));
     assert.deepEqual(await read(api),expected);
     await read('(async()=>{await navigator.serviceWorker.register("/sw.js");await navigator.serviceWorker.ready;return true;})()');
-    await fixture.waitForFunction(async()=>!!await main_frame.eval_js('!!navigator.serviceWorker.controller'));
+    await wait_for(()=>fixture.evaluate(async()=>!!await main_frame.eval_js('!!navigator.serviceWorker.controller')));
     for(const path of ['/nav-redirect','/nav-body','/nav-cache','/nav-cache-redirect']){
       await fixture.evaluate(url=>main_frame.navigate_to(url),'https://manual-redirect.test'+path);
       assert.deepEqual(await read('({path:location.pathname,hash:location.hash,body:document.body.innerText})'),navigations[path],path);
