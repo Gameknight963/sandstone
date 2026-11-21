@@ -21,6 +21,7 @@ import {upload_fixture,upload_script,verify_uploads,verify_relay_uploads} from '
 import {metadata_fixture,verify_metadata,metadata_evaluate} from './metadata-fixture.mjs';
 import {verifyServiceWorkerEvents} from './service-worker-events.playwright.mjs';
 import {verifyNativeWorkerLifecycle} from './service-worker-lifecycle-native.playwright.mjs';
+import {host_worker_fixture,verify_host_worker_services} from './host-worker-fixture.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -37,10 +38,12 @@ const cacheFixture=cache_fixture();
 const downloadFixture=download_fixture();
 const moduleRequests=module_requests_fixture();
 const metadata=metadata_fixture();
+const hostWorker=await host_worker_fixture();
 const later=(callback,delay)=>{const timer=setTimeout(()=>{timers.delete(timer);callback();},delay);timers.add(timer);};
 const server=create_relay_server((request,response)=>{
   const url=new URL(request.url,'http://localhost');
   const client=url.searchParams.get('client');
+  if(hostWorker.handle(request,response))return;
   if(metadata.handle(request,response,url))return;
   if(fonts.handle(request,response,url))return;
   if(keepalive.handle(request,response,url))return;
@@ -336,6 +339,7 @@ try{
   browser=await chromium.launch({channel:channel==='headless'?undefined:channel,headless:true});
   console.log(JSON.stringify({fixture:'Service worker event controls',passed:await verifyServiceWorkerEvents(browser)}));
   console.log(JSON.stringify({fixture:'Service worker lifecycle controls',passed:await verifyNativeWorkerLifecycle(browser)}));
+  console.log(JSON.stringify({fixture:'Trusted shared host controls',passed:await verify_host_worker_services(browser,origin)}));
   const nativeContext=await browser.newContext(),nativePage=await nativeContext.newPage();
   const nativeMetadata=await verify_metadata({
     navigate:url=>nativePage.goto(url),evaluate:source=>metadata_evaluate(nativePage,false,source),

@@ -50,6 +50,8 @@ rpc_handlers.fetch_keepalive_abort = (...args) => keepalives.abort(...args);
 rpc_handlers.fetch_keepalive_done = (...args) => keepalives.completed(...args);
 
 export async function fetch(url, options, context) {
+  // Consumers may configure the exposed libcurl API directly after WASM loads.
+  initialize_session();
   context=snapshot_request_context(site_data,context);
   const transport=(url,options,context,worker)=>fetch_with_cookies((url,init)=>http_cache.fetch((url,init)=>session.fetch(url,init),url,init,context),site_data,url,options,context,worker);
   return service_worker_fetch?service_worker_fetch(url,options,context,transport):transport(url,options,context);
@@ -57,6 +59,7 @@ export async function fetch(url, options, context) {
 
 export function set_websocket(url) {
   libcurl.set_websocket(url);
+  initialize_session();
 }
 
 function get_ws(frame_id, ws_id) {
@@ -265,8 +268,13 @@ export function clean_ws_connections(id_to_clean,options={}) {
   }
 }
 
-libcurl.events.addEventListener("libcurl_load", () => {
+function initialize_session() {
+  if(session||!libcurl.ready||!libcurl.websocket_url)return;
   console.log(`libcurl.js v${libcurl.version.lib} loaded`);
   const HTTPSession = streaming_http_session(libcurl.HTTPSession);
   session = new HTTPSession({enable_cookies: false})
-});
+}
+libcurl.events.addEventListener("libcurl_load", initialize_session);
+// WASM and relay configuration can arrive in either order. Bundled WASM can
+// also initialize before this module registers its event listener.
+if(libcurl.ready)initialize_session();

@@ -7,10 +7,8 @@ import {crypto_service} from './crypto.mjs';
 let factory;
 let Range;
 try {
-  if (typeof window !== "undefined") {
-    factory = window.indexedDB;
-    Range = window.IDBKeyRange;
-  }
+  factory = globalThis.indexedDB;
+  Range = globalThis.IDBKeyRange;
 } catch {}
 export const indexed_db = new IndexedDBService(factory, {
   Range,
