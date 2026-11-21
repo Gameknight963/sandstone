@@ -48,6 +48,7 @@ function worker_surface(event,receiver){
 
 function authored_worker(){
   let counter=0;
+  const cookieValues=value=>value.split('; ').filter(value=>/^(worker_session|worker_redirect|fresh)=/.test(value)).join('; ');
   const key=crypto.subtle.generateKey({name:'HMAC',hash:'SHA-256'},false,['sign']);
   const open=()=>new Promise((resolve,reject)=>{
     const request=indexedDB.open('retained-worker',1);
@@ -59,12 +60,36 @@ function authored_worker(){
     const port=event.ports[0];port.onmessage=async event=>{
       if(event.data==='close'){close();return;}
       try{
+        if(event.data==='hold-socket'){
+          const cookies=await new Promise((resolve,reject)=>{
+            const ws=new WebSocket(new URL('./socket-held',location.href).href.replace(/^http/,'ws'));
+            ws.onerror=()=>reject(new Error('Held worker WebSocket failed'));
+            ws.onopen=()=>fetch('./cookie-end',{credentials:'include'}).then(response=>response.text()).then(value=>{ws.close(1000);resolve(value);},reject);
+          });
+          port.postMessage({clearedSocketCookies:cookies});return;
+        }
         if(event.data==='hold'){
           await(await fetch('./cookie-held',{credentials:'include'})).text();
           port.postMessage({clearedCookies:await(await fetch('./cookie-end',{credentials:'include'})).text()});return;
         }
         const transport=await(await fetch('./data',{credentials:'omit'})).text();
-        const cookies=await(await fetch('./cookie-start',{credentials:'include'})).text();
+        const cookies=cookieValues(await(await fetch('./cookie-start',{credentials:'include'})).text());
+        const socket=await new Promise((resolve,reject)=>{
+          const events=[],ws=new WebSocket(new URL('./socket',location.href).href.replace(/^http/,'ws'),['other','retained']);let metadata,committed;
+          ws.onopen=()=>{
+            events.push('open');committed=fetch('./cookie-end',{credentials:'include'}).then(response=>response.text()).then(value=>value.includes('worker_socket=handshake')&&!value.includes('socket_scoped=private'));
+            ws.send('echo');
+          };
+          ws.onmessage=event=>{if(event.data==='echo'){events.push('echo');ws.close(1000);}else{events.push('metadata');metadata=JSON.parse(event.data);}};
+          ws.onerror=()=>reject(new Error('Retained authenticated WebSocket failed'));
+          ws.onclose=()=>{events.push('close');Promise.resolve(committed).then(value=>resolve({...metadata,protocol:ws.protocol,committed:value,events}),reject);};
+        });
+        const refused=await new Promise((resolve,reject)=>{
+          const ws=new WebSocket(new URL('./socket-refused',location.href).href.replace(/^http/,'ws'));
+          ws.onopen=()=>reject(new Error('A refused WebSocket unexpectedly opened'));
+          ws.onerror=()=>{};
+          ws.onclose=()=>fetch('./cookie-end',{credentials:'include'}).then(response=>response.text()).then(value=>resolve(value.includes('worker_refused=kept')),reject);
+        });
         const signature=Array.from(new Uint8Array(await crypto.subtle.sign('HMAC',await key,new Uint8Array([4,5,6]))));
         const db=await open();let value;
         await new Promise((resolve,reject)=>{
@@ -73,7 +98,7 @@ function authored_worker(){
           const request=store.get('saved');request.onsuccess=()=>value=request.result;
           tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);
         });db.close();
-        port.postMessage({counter:++counter,surface,origin,transport,cookies,signature,stored:value?[...value]:null});
+        port.postMessage({counter:++counter,surface,origin,transport,cookies,socket,refused,signature,stored:value?[...value]:null});
       }catch(error){port.postMessage({error:{name:error.name,message:error.message,stack:error.stack}});}
     };port.start();
   };
@@ -132,7 +157,7 @@ export async function verify_retained_worker_host(browser,origin){
         worker.port.onmessage=event=>{clearTimeout(timer);event.data.error?reject(new Error(JSON.stringify(event.data.error))):resolve(event.data);};worker.port.postMessage(operation);
       }),{profile,operation});
       const firstReply=await connect(first,'write');
-      const expected={counter:1,surface:nativeSurface,origin,transport:'relayed host data',cookies:'worker_session=secret; worker_redirect=yes',signature:firstReply.signature,stored:[17,34,51]};
+      const expected={counter:1,surface:nativeSurface,origin,transport:'relayed host data',cookies:'worker_session=secret; worker_redirect=yes',socket:{origin,session:'secret',blocked:false,protocol:'retained',committed:true,events:['open','metadata','echo','close']},refused:true,signature:firstReply.signature,stored:[17,34,51]};
       assert.equal(firstReply.signature.length,32);assert.deepEqual(firstReply,expected);
       const audit=await first.evaluate(()=>new Promise(resolve=>{retainedOwner.port.onmessage=event=>{if(event.data.audit)resolve(event.data.notifications);};retainedOwner.port.postMessage({audit:true});}));
       assert.equal(audit,0,'The worker received the metadata owner\'s cookies');
@@ -152,13 +177,24 @@ export async function verify_retained_worker_host(browser,origin){
         await fetch('/host-worker/cookie-release');return await retainedClearResult;
       });
       assert.deepEqual(cleared,{clearedCookies:'fresh=after'});
+      await second.evaluate(()=>{
+        const port=retainedClients.at(-1).port;
+        globalThis.retainedSocketClearResult=new Promise(resolve=>{port.onmessage=event=>resolve(event.data);});port.postMessage('hold-socket');
+      });
+      await second.waitForFunction(async()=>await(await fetch('/host-worker/socket-status')).json()===1);
+      const socketCleared=await second.evaluate(async()=>{
+        const store=sandstone.controller.site_data;store.clear(location.hostname,{cookies:true,localStorage:false});
+        store.setCookie(location.origin,'fresh=newer; HttpOnly; SameSite=None; Secure; Path=/',true);
+        await fetch('/host-worker/socket-release');return await retainedSocketClearResult;
+      });
+      assert.deepEqual(socketCleared,{clearedSocketCookies:'fresh=newer'});
       const closed=await second.evaluate(id=>new Promise((resolve,reject)=>{
         const timer=setTimeout(()=>reject(new Error('Retained worker close report timed out')),10000);
         retainedBackend.port.onmessage=event=>{clearTimeout(timer);resolve(event.data);};retainedBackend.port.postMessage({id,op:'watch-close'});
         retainedClients.at(-1).port.postMessage('close');
       }),profile.id);
       assert.deepEqual(closed,{id:profile.id,frames:0});await second.close();
-      results.push('Opaque '+type+' worker scope, relay cookies/redirects/clearing, nonextractable keys and '+(denied?'memory':'durable')+' IndexedDB survive their creating window');
+      results.push('Opaque '+type+' worker scope, authenticated HTTP/WebSockets, cookie clearing, nonextractable keys and '+(denied?'memory':'durable')+' IndexedDB survive their creating window');
     }
     return results;
   }finally{await context.close();}

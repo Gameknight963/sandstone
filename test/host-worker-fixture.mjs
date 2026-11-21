@@ -1,5 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
+import {WebSocketServer} from '../example/node_modules/ws/wrapper.mjs';
 import {retained_worker_main} from './retained-worker-fixture.mjs';
 import {shared_worker_registry_main,shared_worker_identity_script} from './shared-worker-registry.playwright.mjs';
 
@@ -48,10 +49,31 @@ function shared_host_main(){
 
 export async function host_worker_fixture(){
   const heldCookies=new Set();
+  const heldWebSockets=new Set();
+  const websockets=new WebSocketServer({noServer:true,handleProtocols:protocols=>protocols.has('retained')?'retained':false});
+  websockets.on('headers',(headers,request)=>{
+    headers.push('Set-Cookie: worker_socket=handshake; HttpOnly; SameSite=None; Secure; Path=/','Set-Cookie: socket_scoped=private; HttpOnly; SameSite=None; Secure; Path=/host-worker/socket-only');
+    if(request.url==='/host-worker/socket-held')headers.push('Set-Cookie: worker_session=restored; HttpOnly; SameSite=None; Secure; Path=/','Set-Cookie: fresh=deleted; Max-Age=0; SameSite=None; Secure; Path=/');
+  });
+  websockets.on('connection',(socket,request)=>{
+    const cookies=(request.headers.cookie||'').split('; ');
+    socket.send(JSON.stringify({origin:request.headers.origin,session:cookies.find(value=>value.startsWith('worker_session='))?.slice('worker_session='.length),blocked:cookies.includes('blocked=strict')}));
+    socket.on('message',(value,binary)=>socket.send(value,{binary}));
+  });
   const bundle=await readFile(new URL('../dist/sandstone.js',import.meta.url));
   const runtime=await readFile(new URL('../dist/sandstone_frame.js',import.meta.url));
   const main='importScripts("/host-worker/bundle.js");('+shared_host_main.toString()+')();';
-  return {handle(request,response){
+  return {upgrade(request,socket,head){
+    const path=new URL(request.url,'http://fixture').pathname;
+    if(path==='/host-worker/socket-held'){
+      const held={request,socket,head};heldWebSockets.add(held);socket.on('close',()=>heldWebSockets.delete(held));return true;
+    }
+    if(path==='/host-worker/socket-refused'){
+      socket.end('HTTP/1.1 403 Forbidden\r\nSet-Cookie: worker_refused=kept; HttpOnly; SameSite=None; Secure; Path=/\r\nContent-Length: 0\r\n\r\n');return true;
+    }
+    if(path!=='/host-worker/socket')return false;
+    websockets.handleUpgrade(request,socket,head,ws=>websockets.emit('connection',ws,request));return true;
+  },handle(request,response){
     const path=new URL(request.url,'http://fixture').pathname;
     if(!path.startsWith('/host-worker/'))return false;
     let body,type='text/javascript';
@@ -65,6 +87,11 @@ export async function host_worker_fixture(){
     else if(path==='/host-worker/shared.js')body=main;
     else if(path==='/host-worker/shared-denied.js')body='Object.defineProperty(globalThis,"indexedDB",{get(){throw new DOMException("Storage denied","SecurityError");}});'+main;
     else if(path==='/host-worker/data'){body='relayed host data';type='text/plain';}
+    else if(path==='/host-worker/socket-status'){response.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});response.end(JSON.stringify(heldWebSockets.size));return true;}
+    else if(path==='/host-worker/socket-release'){
+      for(const {request,socket,head} of heldWebSockets)websockets.handleUpgrade(request,socket,head,ws=>websockets.emit('connection',ws,request));
+      heldWebSockets.clear();response.writeHead(204);response.end();return true;
+    }
     else if(path==='/host-worker/cookie-held'){heldCookies.add(response);response.on('close',()=>heldCookies.delete(response));return true;}
     else if(path==='/host-worker/cookie-status'){response.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});response.end(JSON.stringify(heldCookies.size));return true;}
     else if(path==='/host-worker/cookie-release'){

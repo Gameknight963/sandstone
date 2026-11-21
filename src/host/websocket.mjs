@@ -86,10 +86,7 @@ export function retire_websocket(socket){
 }
 // WebSocket handshakes use HTTP cookie rules, including HttpOnly cookies. The
 // source is the virtual page/worker origin, never the local HTML file's origin.
-export function websocket_options(store, input, {url, top_url = url, userAgent, cross_site=false,broadcast_origin}) {
-  store.refresh?.();
-  const cookieGeneration=store.cookieGeneration;
-  const cookieEpochs=store.cookieEpochSnapshot?.();
+function websocket_context(input,{url,top_url=url,userAgent,cross_site=false,broadcast_origin}){
   const target = new URL(input);
   if (!['ws:', 'wss:'].includes(target.protocol)) throw new TypeError('Invalid WebSocket URL');
   target.protocol = target.protocol === 'wss:' ? 'https:' : 'http:';
@@ -97,6 +94,13 @@ export function websocket_options(store, input, {url, top_url = url, userAgent, 
   const opaque=broadcast_origin?.startsWith('opaque:');
   const sameSiteContext = !opaque && !cross_site && same_site(top, source) && same_site(top, target) ? 'strict' : 'none';
   const headers = {Origin: opaque?'null':source.origin, 'User-Agent': userAgent};
+  return {target,sameSiteContext,headers};
+}
+export function websocket_options(store, input, context) {
+  store.refresh?.();
+  const cookieGeneration=store.cookieGeneration;
+  const cookieEpochs=store.cookieEpochSnapshot?.();
+  const {target,sameSiteContext,headers}=websocket_context(input,context);
   const cookie = cookie_header(store.cookies,target.href,{sameSiteContext});
   if (cookie) headers.Cookie = cookie;
   return {
@@ -105,4 +109,55 @@ export function websocket_options(store, input, {url, top_url = url, userAgent, 
       if (name === 'set-cookie') store.setCookie(target.href, value,true,{crossSite:sameSiteContext==='none',...(cookieGeneration===undefined?{}:{cookieGeneration}),...(cookieEpochs===undefined?{}:{cookieEpochs})});
     }
   };
+}
+
+// Keep the actual socket on the retained host. Only cookie decisions travel
+// over the trusted UI channel, including writes from failed HTTP handshakes.
+export async function websocket_policy_options(store,input,context,signal){
+  const {target,sameSiteContext,headers}=websocket_context(input,context);
+  const {cookieGeneration,cookieEpochs}=await store.captureCookieContext(context,signal);
+  const cookie=await store.cookieHeader(target.href,{sameSiteContext},signal);
+  if(cookie)headers.Cookie=cookie;
+  let writes=Promise.resolve();
+  return {headers,
+    onHeader(name,value){
+      if(name!=='set-cookie')return;
+      // Headers already accepted from the transport still commit if its client
+      // closes while policy work is pending. The captured clear barrier remains.
+      writes=writes.then(()=>store.setCookie(target.href,value,true,{crossSite:sameSiteContext==='none',cookieGeneration,cookieEpochs}));
+      writes.catch(()=>{});
+    },
+    cookiesReady:()=>writes
+  };
+}
+
+// Present the transport interface while policy lookup is pending, so close()
+// and document retirement can cancel a stalled provider before a socket exists.
+export class CookieWebSocket {
+  constructor(Transport,store,url,protocols,context){
+    this.controller=new AbortController();this.events=Promise.resolve();
+    this.start(Transport,store,url,protocols,context).catch(()=>this.cleanup(1));
+  }
+  async start(Transport,store,url,protocols,context){
+    const options=await websocket_policy_options(store,url,context,this.controller.signal);
+    this.controller.signal.throwIfAborted();
+    const socket=this.socket=new Transport(url,protocols,options);
+    for(const type of ['open','message','close','error'])socket['on'+type]=data=>{
+      const committed=options.cookiesReady();
+      this.events=this.events.then(async()=>{
+        await committed;
+        if(!this.stopped)this['on'+type]?.(data);
+      }).catch(()=>this.cleanup(1));
+    };
+  }
+  get connected(){return !!this.socket?.connected;}
+  get protocol(){return this.socket?.protocol||'';}
+  send(data){this.socket?.send(data);}
+  close(code,reason){if(this.socket)this.socket.close(code,reason);else this.abort();}
+  abort(){
+    if(this.stopped)return;this.stopped=true;this.controller.abort();this.socket?.abort();
+  }
+  cleanup(code){
+    if(this.stopped)return;this.abort();this.onerror?.(code);
+  }
 }

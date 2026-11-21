@@ -165,6 +165,7 @@ echoes.on('connection', (socket, request) => {
   socket.on('message', (data, isBinary) => socket.send(data, {binary: isBinary}));
 });
 server.on('upgrade',(request,socket,head)=>{
+  if(hostWorker.upgrade(request,socket,head))return;
   const path=new URL(request.url,'http://localhost').pathname;
   if(path==='/ws-close'&&Object.hasOwn(request.headers,'sec-websocket-protocol')){
     socket.end('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n');return;

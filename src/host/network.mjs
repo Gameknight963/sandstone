@@ -5,7 +5,7 @@ import { site_data } from "./site_data.mjs";
 import { fetch_with_cookies,snapshot_request_context } from "./request.mjs";
 import { requests, request_key, cancel_requests } from "./streams.mjs";
 import { streaming_http_session } from "./http_session.mjs";
-import { relay_websocket_class, websocket_options,WebSocketOutbound } from "./websocket.mjs";
+import { relay_websocket_class, websocket_options,WebSocketOutbound,CookieWebSocket } from "./websocket.mjs";
 import { BeaconQueue } from './beacon.mjs';
 import {KeepaliveRequests} from './keepalive.mjs';
 import {http_cache} from './http_cache.mjs';
@@ -176,11 +176,11 @@ rpc_handlers["ws_new"] = function (frame_id, url, protocols) {
   const frame = iframes[frame_id];
   if (!frame) throw new TypeError('Unknown frame');
   const source = frame.request_url || (frame.url.origin === 'null' && frame.origin && frame.origin !== 'null' ? frame.origin + '/' : frame.url.href);
-  const options = websocket_options(site_data, url, {
+  const context = {
     url: source, top_url: iframes[frame.root_id]?.url.href || source, userAgent: navigator.userAgent,cross_site:frame_cross_site(frame,iframes),broadcast_origin:frame.broadcast_origin
-  });
+  };
   const RelayWebSocket = relay_websocket_class(libcurl.CurlWebSocket);
-  let ws = new RelayWebSocket(url, protocols, options);
+  let ws = frame.cookie_policy?new CookieWebSocket(RelayWebSocket,frame.cookie_policy,url,protocols,context):new RelayWebSocket(url,protocols,websocket_options(site_data,url,context));
   let ws_events = [];
 
   if (!ws_connections[frame_id]) ws_connections[frame_id] = {};
@@ -196,8 +196,8 @@ rpc_handlers["ws_new"] = function (frame_id, url, protocols) {
   for (let event_name of ["open", "message", "close", "error"]) {
     ws["on" + event_name] = (data) => {
       if(ws_info.retired)return;
-      if (event_name === 'open') data = {protocol: ws.protocol || '', cookies: site_data.documentCookies(source,{crossSite:frame_cross_site(frame,iframes)})};
-      if (event_name === 'error') data = {cookies: site_data.documentCookies(source,{crossSite:frame_cross_site(frame,iframes)})};
+      if (event_name === 'open') data = {protocol: ws.protocol || '', cookies: frame.cookie_policy?undefined:site_data.documentCookies(source,{crossSite:frame_cross_site(frame,iframes)})};
+      if (event_name === 'error') data = {cookies: frame.cookie_policy?undefined:site_data.documentCookies(source,{crossSite:frame_cross_site(frame,iframes)})};
       if (event_name === 'close' || event_name === 'error') ws_info.ended = true;
       ws_info.events.push([event_name, data]);
       ws_info.callback?.();
