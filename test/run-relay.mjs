@@ -25,6 +25,7 @@ import {host_worker_fixture,verify_host_worker_services} from './host-worker-fix
 import {verify_retained_worker_host} from './retained-worker-fixture.mjs';
 import {verify_shared_worker_registry} from './shared-worker-registry.playwright.mjs';
 import {verify_cookie_policy_handoff} from './cookie-policy-handoff.playwright.mjs';
+import {verify_worker_backend} from './worker-backend.playwright.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -347,6 +348,7 @@ try{
   console.log(JSON.stringify({fixture:'Retained opaque worker services',passed:await verify_retained_worker_host(browser,origin)}));
   console.log(JSON.stringify({fixture:'Shared worker registry controls',passed:await verify_shared_worker_registry(browser,origin)}));
   console.log(JSON.stringify({fixture:'Cookie policy handoff controls',passed:await verify_cookie_policy_handoff(browser,origin)}));
+  console.log(JSON.stringify({fixture:'Embedded worker backend controls',passed:await verify_worker_backend(browser,origin)}));
   const nativeContext=await browser.newContext(),nativePage=await nativeContext.newPage();
   const nativeMetadata=await verify_metadata({
     navigate:url=>nativePage.goto(url),evaluate:source=>metadata_evaluate(nativePage,false,source),

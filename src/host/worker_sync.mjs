@@ -1,5 +1,5 @@
 import {beacons} from './network.mjs';
-import {iframes} from './controller.mjs';
+import {iframes} from './frames.mjs';
 import {rpc_handlers,call_procedure,notify} from '../rpc.mjs';
 import {worker_renderer} from '../worker_context.mjs';
 

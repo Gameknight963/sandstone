@@ -1,6 +1,6 @@
-import { iframes } from "./controller.mjs";
+import { iframes } from "./frames.mjs";
 import { rpc_handlers } from "../rpc.mjs";
-import { libcurl } from "libcurl.js/bundled";
+import { libcurl } from "libcurl.js";
 import { site_data } from "./site_data.mjs";
 import { fetch_with_cookies,snapshot_request_context } from "./request.mjs";
 import { requests, request_key, cancel_requests } from "./streams.mjs";

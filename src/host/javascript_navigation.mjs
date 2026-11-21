@@ -1,4 +1,4 @@
-import {iframes} from './controller.mjs';
+import {iframes} from './frames.mjs';
 import * as rpc from '../rpc.mjs';
 import {beacons} from './network.mjs';
 

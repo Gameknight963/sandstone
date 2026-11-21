@@ -56,7 +56,7 @@ const bundles = [
   },
   {
     name: "sandstone",
-    dependencies: ["sandstone_frame"],
+    dependencies: ["sandstone_frame","sandstone_shared_backend"],
     entry: "./src/host/index.mjs",
     output: {
       filename: "sandstone.js",
@@ -67,8 +67,9 @@ const bundles = [
     },
     module: {
       rules: [
+        {resource:/libcurl\.wasm$/,type:'asset/inline',generator:{dataUrl:{mimetype:'application/octet-stream'}}},
         {
-          resource: /dist[\\/]sandstone_frame\.js$/,
+          resource: /dist[\\/]sandstone_(frame|shared_backend)\.js$/,
           type: "asset/source"
         },
       ],
@@ -88,6 +89,17 @@ const bundles = [
     ]
   },
 ];
+
+bundles.push({
+  name:'sandstone_shared_backend',
+  entry:'./src/host/shared_backend.mjs',
+  output:{filename:'sandstone_shared_backend.js'},
+  optimization:{minimizer:[new TerserPlugin({extractComments:false})]},
+  plugins:[
+    new webpack.BannerPlugin({banner:banner_text.trim()})
+  ],
+  mode:'development'
+});
 
 bundles.push({
   ...bundles[1],

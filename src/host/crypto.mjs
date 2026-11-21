@@ -1,6 +1,6 @@
 import {CryptoService} from '../crypto/service.mjs';
 import {rpc_handlers} from '../rpc.mjs';
-import {iframes} from './controller.mjs';
+import {iframes} from './frames.mjs';
 
 export const crypto_service = new CryptoService();
 rpc_handlers.crypto = async (id, method, args) => {

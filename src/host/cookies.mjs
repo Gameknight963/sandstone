@@ -1,5 +1,5 @@
 import {domainMatch} from 'tough-cookie';
-import {iframes} from './controller.mjs';
+import {iframes} from './frames.mjs';
 import {beacons} from './network.mjs';
 import {site_data} from './site_data.mjs';
 import * as rpc from '../rpc.mjs';

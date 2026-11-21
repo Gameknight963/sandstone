@@ -1,4 +1,4 @@
-import {iframes} from './controller.mjs';
+import {iframes} from './frames.mjs';
 import {frame_cross_site} from './frame_context.mjs';
 import {site_data} from './site_data.mjs';
 import * as rpc from '../rpc.mjs';

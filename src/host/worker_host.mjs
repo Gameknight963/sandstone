@@ -1,4 +1,4 @@
-import {iframes} from './controller.mjs';
+import {iframes} from './frames.mjs';
 import {beacons,clean_ws_connections} from './network.mjs';
 import {indexed_db} from './indexeddb.mjs';
 import {crypto_service} from './crypto.mjs';

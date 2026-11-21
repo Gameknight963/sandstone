@@ -26,16 +26,17 @@ export {cache_storage} from './cache.mjs';
 export {file_system} from './filesystem.mjs';
 export function prepare_site_data_clear(hostname,selection,root){return prepare_clear(hostname,selection,root,iframes,network.beacons.contexts);}
 
-import { version } from "./index.mjs";
+import { version } from "./version.mjs";
 
-import { libcurl } from "libcurl.js/bundled";
+import { libcurl } from "libcurl.js";
 
 //frame_js is a string, which is imported using webpack
 import frame_js from "../../dist/sandstone_frame.js";
 
 const frame_html=runtime_html(frame_js);
 
-export const iframes = {};
+import {iframes} from './frames.mjs';
+export {iframes};
 const saved_child_histories = new Map();
 export const persist_storage_key = "proxy_local_storage";
 export let local_storage = {};

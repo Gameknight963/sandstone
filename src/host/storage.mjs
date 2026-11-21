@@ -1,4 +1,4 @@
-import {iframes} from './controller.mjs';
+import {iframes} from './frames.mjs';
 import {site_data} from './site_data.mjs';
 import {beacons} from './network.mjs';
 import {apply_storage_change} from '../storage_changes.mjs';

@@ -1,5 +1,5 @@
 import { IndexedDBService } from "../idb/service.mjs";
-import { iframes } from "./controller.mjs";
+import { iframes } from "./frames.mjs";
 import { rpc_handlers } from "../rpc.mjs";
 import { site_data } from "./site_data.mjs";
 import {crypto_service} from './crypto.mjs';
