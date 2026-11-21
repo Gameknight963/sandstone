@@ -10,7 +10,8 @@ import {create_worker_script_loader} from '../worker_loader.mjs';
 import {create_sync_http_client} from '../../sync_http.mjs';
 import {snapshot_sync_body} from '../../sync_http_body.mjs';
 import '../worker_sync.mjs';
-import {on_document_unload} from '../runtime_events.mjs';
+import {on_document_unload,listen_runtime} from '../runtime_events.mjs';
+import {mark_authored_event} from '../../event_scope.mjs';
 import {document_referrer_policy} from '../intercept/document.mjs';
 import {parse_referrer_policy,default_referrer_policy} from '../../referrer.mjs';
 import {validate_module_response} from '../modules.mjs';
@@ -26,6 +27,9 @@ import {document_states} from '../document_identity.mjs';
 const NativeWorker = globalThis.Worker;
 const native_import_scripts = globalThis.importScripts?.bind(globalThis);
 const native_post = globalThis.postMessage?.bind(globalThis);
+const native_port_post=globalThis.MessagePort?.prototype.postMessage;
+const native_port_start=globalThis.MessagePort?.prototype.start;
+let worker_report=native_post,worker_start;
 const NativeXHR = globalThis.XMLHttpRequest;
 const NativeSharedBuffer=globalThis.SharedArrayBuffer;
 const native_isolated=globalThis.crossOriginIsolated===true;
@@ -67,7 +71,7 @@ export function sync_worker_request(url,options,timeout){
 let callback_script_loader,startup_imports=0,start_requested=false,start_scheduled=false;
 function schedule_worker_start(){
   if(worker_ready||!start_requested||start_scheduled||startup_imports)return;
-  start_scheduled=true;native_timeout(()=>{start_scheduled=false;if(startup_imports)return;worker_ready=true;pump();},0);
+  start_scheduled=true;native_timeout(()=>{start_scheduled=false;if(startup_imports)return;worker_ready=true;worker_start?.resolve();pump();},0);
 }
 export function load_worker_scripts(paths,loaded,failed,execute){
   callback_script_loader??=create_worker_script_loader({cache:network.resource_cache,
@@ -125,7 +129,7 @@ function import_worker_scripts(paths,entry=false) {
       network.cache_put(url, source);
     }
     if (source === undefined && worker_options?.probe) {
-      native_post({sandstone_worker: worker_options.token, type: "need-script", url});
+      worker_report({sandstone_worker: worker_options.token, type: "need-script", url});
       throw new DOMException("Worker discovery needs a script", "NetworkError");
     }
     // Import when called, through the normal HTTP cache and script request
@@ -154,7 +158,10 @@ function import_worker_scripts(paths,entry=false) {
 }
 
 // Invoked by the native worker bootstrap, in its own thread and opaque origin.
-export function initialize_worker(options) {
+export function initialize_worker(options,transport) {
+  if(worker_options)throw new DOMException('Worker runtime is already initialized','InvalidStateError');
+  worker_report=transport?.report||native_post;
+  const ready=transport?new Promise((resolve,reject)=>worker_start={resolve,reject}):undefined;
   options.source??=options.sources?.[options.url];
   worker_options = options;
   loader.set_worker_context(options);
@@ -168,8 +175,9 @@ export function initialize_worker(options) {
     if(!ctx_vars.includes('FileSystemSyncAccessHandle'))ctx_vars.push('FileSystemSyncAccessHandle');
   }
   update_ctx();
+  if(options.shared_worker)listen_runtime(globalThis,'connect',event=>mark_authored_event(event,{target:globalThis,alias:ctx.self}),true);
   if(options.service_worker)configure_service_worker_scripts(options.service_worker);
-  const service=options.service_worker&&create_service_worker_runtime({profile:options.service_worker,target:ctx.self,Request:ctx.Request,encode:encode_message,scripts:service_worker_script_snapshot,send:(packet,ports)=>native_post({sandstone_service_worker:options.token,...packet},ports)});
+  const service=options.service_worker&&create_service_worker_runtime({profile:options.service_worker,target:ctx.self,Request:ctx.Request,encode:encode_message,scripts:service_worker_script_snapshot,send:(packet,ports)=>worker_report({sandstone_service_worker:options.token,...packet},ports)});
   if(service){
     install_service_worker_globals(service,{target:ctx.self,names:ctx_vars});
     for(const type of ['install','activate','fetch','message','messageerror'])bind_native_property(ctx.self,'on'+type);
@@ -186,7 +194,7 @@ export function initialize_worker(options) {
     globalThis.postMessage = () => {};
     for (const key of ["log", "warn", "error", "info"]) console[key] = () => {};
     try { fakeImportScripts(options.url); } catch {}
-    native_timeout(() => native_post({sandstone_worker: options.token, type: "probe-done"}), 500);
+    native_timeout(() => worker_report({sandstone_worker: options.token, type: "probe-done"}), 500);
     return;
   }
 
@@ -194,7 +202,7 @@ export function initialize_worker(options) {
   let host_ready = false;
   let started = false;
   const start = async () => {
-    if (started || !port || !host_ready) return;
+    if (started || (!transport&&!port) || !host_ready) return;
     started = true;
     network.enable_network();
     try {
@@ -218,7 +226,8 @@ export function initialize_worker(options) {
       mark_worker_started();
       service?.start();
     } catch (error) {
-      native_post({sandstone_worker: options.token, type: "error", message: error.message, name: error.name, stack: error.stack});
+      worker_report({sandstone_worker: options.token, type: "error", message: error.message, name: error.name, stack: error.stack});
+      worker_start?.reject(error);
     }
   };
   rpc.set_on_attach(() => { host_ready = true; start(); });
@@ -232,16 +241,31 @@ export function initialize_worker(options) {
     port.start();
     start();
   };
-  globalThis.addEventListener("message", connect);
+  if(!transport)globalThis.addEventListener("message", connect);
   const native_close = globalThis.close.bind(globalThis);
   if(service){
     for(const name of ['postMessage','close','Worker','DedicatedWorkerGlobalScope']){
       let owner=globalThis;while(owner){Reflect.deleteProperty(owner,name);owner=Object.getPrototypeOf(owner);}
     }
   }else replace_worker_method('close',() => {
-    native_post({sandstone_worker: options.token, type: "closed"});
+    worker_report({sandstone_worker: options.token, type: "closed"});
     native_close();
   });
+  if(transport)rpc.connect_frame_host(transport.host,transport.nonce);
+  return ready;
+}
+
+// The trusted bootstrap supplies private control and service ports. Neither
+// becomes a global postMessage function or a dedicated-worker message event.
+export function initialize_shared_worker(options,host,control,nonce){
+  if(worker_options)throw new DOMException('Worker runtime is already initialized','InvalidStateError');
+  if(typeof SharedWorkerGlobalScope==='undefined'||!(globalThis instanceof SharedWorkerGlobalScope))throw new TypeError('A native SharedWorker scope is required');
+  if(options?.probe||options?.service_worker)throw new TypeError('A shared worker cannot use a discovery or service-worker profile');
+  Reflect.apply(native_port_start,host,[]);Reflect.apply(native_port_start,control,[]);
+  // The first native connection belongs to the private bootstrap. Remove its
+  // handler before installing the runtime capture listener and authored code.
+  globalThis.onconnect=null;
+  return initialize_worker({...options,shared_worker:true,sync_http:false},{host,nonce,report:(packet,transfer)=>Reflect.apply(native_port_post,control,[packet,transfer])});
 }
 
 function worker_string(value){

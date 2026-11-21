@@ -19,7 +19,7 @@ const names=`
   NodeList DOMTokenList DOMStringMap DOMRect DOMRectReadOnly CSSStyleSheet CSSRule CSSRuleList
   CSSStyleDeclaration CSSFontFaceRule CSSGroupingRule CSSImportRule CSSKeyframesRule StyleSheet
   MediaList MediaQueryList DocumentType Window WorkerGlobalScope
-  DedicatedWorkerGlobalScope Navigator WorkerNavigator Screen History Location WorkerLocation Storage
+  DedicatedWorkerGlobalScope SharedWorkerGlobalScope Navigator WorkerNavigator Screen History Location WorkerLocation Storage
   HTMLElement HTMLAnchorElement HTMLAreaElement HTMLAudioElement HTMLBaseElement HTMLBodyElement
   HTMLButtonElement HTMLCanvasElement HTMLDialogElement HTMLEmbedElement HTMLFormElement HTMLFrameSetElement HTMLHeadElement HTMLHtmlElement
   HTMLIFrameElement HTMLImageElement HTMLInputElement HTMLLinkElement HTMLMediaElement HTMLObjectElement

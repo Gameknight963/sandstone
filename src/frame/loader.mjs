@@ -33,6 +33,7 @@ export let runtime_src = self.document?.currentScript?.textContent;
 export let worker_type;
 export let worker_origin;
 export let worker_probe = false;
+export let shared_worker = false;
 export let service_worker = false;
 export let service_worker_host = false;
 export let url; //the proxied page url
@@ -136,6 +137,7 @@ export function set_worker_context(options) {
   worker_type = options.type;
   worker_origin = options.origin;
   worker_probe = !!options.probe;
+  shared_worker = !!options.shared_worker;
   service_worker = !!options.service_worker;
   configure_filesystem();
   runtime_src = options.runtime_src;
