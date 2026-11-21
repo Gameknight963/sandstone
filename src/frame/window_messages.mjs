@@ -2,6 +2,7 @@ import {window_runtime_context} from './runtime_context.mjs';
 import {ctx} from './context.mjs';
 import {create_obj_proxy,unwrap_global_target} from './global_functions.mjs';
 import {encode_message} from './polyfill/crypto.mjs';
+import {window_open_value,set_window_open} from './intercept/open.mjs';
 
 const peers=new WeakMap(),received=new WeakMap();
 const post=globalThis.Window&&globalThis.postMessage;
@@ -62,9 +63,14 @@ export function child_message_parent(token){return {token,ancestors:ancestorToke
 export function self_post_message(...args){return window_post_message(globalThis,selfToken,args);}
 
 function ancestor_window(target,token,parent,top){
-  let window;
+  let window;const open_state={};
+  const readable_open=()=>{
+    const context=window_runtime_context(target);
+    if(!context||context.origin!==ctx.origin||ctx.origin==='null')throw new DOMException('Blocked access to a cross-origin window','SecurityError');
+  };
   const replacements=Object.create(null);
   Object.defineProperties(replacements,{
+    open:{get(){readable_open();return window_open_value(target,window,open_state);}},
     postMessage:{value:(...args)=>window_post_message(target,token,args)},
     window:{get:()=>window},self:{get:()=>window},frames:{get:()=>window},
     parent:{get:()=>parent?.()||window},top:{get:()=>top?.()||window}
@@ -72,6 +78,9 @@ function ancestor_window(target,token,parent,top){
   window=create_obj_proxy(replacements,[],target,undefined,key=>{
     const context=window_runtime_context(target);
     return context?context[key]:target[key];
+  },(key,value)=>{
+    if(key==='open'){readable_open();return set_window_open(target,value,open_state);}
+    return Reflect.set(target,key,value,target);
   });
   register_message_peer(target,token,()=>window);
   return window;

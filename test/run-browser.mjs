@@ -62,6 +62,7 @@ import {verifyXMLStylesheets} from './xml-stylesheets.playwright.mjs';
 import {verifyXMLParserScripts} from './xml-parser-scripts.playwright.mjs';
 import {verifyXMLIframes} from './xml-iframes.playwright.mjs';
 import {verifyWindowOpen} from './window-open.playwright.mjs';
+import {verifyAncestorWindowOpen} from './window-open-ancestors.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -472,6 +473,7 @@ try {
     result.passed.push(...await timed(verifyRootInitialization(page), 'Root initialization fixture'));
     result.passed.push(...await timed(verifyIframeWindow(page), 'Frame window fixture'));
     result.passed.push(...await timed(verifyWindowOpen(page), 'Window.open fixture'));
+    result.passed.push(...await timed(verifyAncestorWindowOpen(page), 'Ancestor window.open fixture'));
     result.passed.push(...await timed(verifyFrameDOM(page), 'Same-origin frame DOM fixture'));
     result.passed.push(...await timed(verifyFrameTraversal(page), 'Same-origin frame traversal fixture'));
     result.passed.push(...await timed(verifyFrameRanges(page), 'Same-origin frame range fixture'));

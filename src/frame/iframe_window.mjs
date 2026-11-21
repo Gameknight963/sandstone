@@ -1,8 +1,8 @@
 import {window_runtime_context} from './runtime_context.mjs';
 import {ctx} from './context.mjs';
-import {create_obj_proxy,unwrap_global_target} from './global_functions.mjs';
+import {create_obj_proxy} from './global_functions.mjs';
 import {register_message_peer,window_post_message} from './window_messages.mjs';
-import {frame_open_method} from './intercept/open.mjs';
+import {window_open_value,set_window_open} from './intercept/open.mjs';
 import {sandbox_tokens} from '../navigation_policy.mjs';
 import {set_window_event_handler,register_window_event_alias} from './event_identity.mjs';
 
@@ -132,18 +132,7 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
     Object.defineProperties(replacements,{
       open:{get(){
         readable();
-        const context=window_runtime_context(target);
-        const current=target.open;
-        if(state.openAssignments?.has(current))return current;
-        if(!context&&typeof current!=='function')return current;
-        if(!context||target.sandstone_frame.context.is_default_open()){
-          state.open??=frame_open_method(target,state.window);
-          return state.open;
-        }
-        const method=context_value(target,'open');if(typeof method!=='function')return method;
-        state.openMethods??=new WeakMap();
-        if(!state.openMethods.has(method))state.openMethods.set(method,new Proxy(method,{apply(fn,receiver,args){return Reflect.apply(fn,unwrap_global_target(receiver),args);}}));
-        return state.openMethods.get(method);
+        return window_open_value(target,state.window,state);
       }},
       document:{get(){
         readable();
@@ -160,12 +149,8 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
     });
     state.window=create_obj_proxy(replacements,['location'],target,undefined,key=>context_value(target,key),(key,value,alias)=>{
       if(typeof key==='string'&&key.startsWith('on')){readable();return set_window_event_handler(target,key,value,alias);}
-      if(key==='open')readable();
-      const restoring=key==='open'&&value===state.open;
-      if(restoring&&window_runtime_context(target))value=target.sandstone_frame.context.default_open();
-      const assigned=Reflect.set(target,key,value,target);
-      if(assigned&&key==='open'&&!restoring&&typeof value==='function'){state.openAssignments??=new WeakSet();state.openAssignments.add(value);}
-      return assigned;
+      if(key==='open'){readable();return set_window_open(target,value,state);}
+      return Reflect.set(target,key,value,target);
     });
     if(!state.opaque()&&(!state.url()||state.origin()===ctx.origin))register_window_event_alias(state.window,target);
     windows.set(target,state.window);

@@ -21,9 +21,16 @@ rpc.rpc_handlers.navigate_target=async(id,token,name,url,form_data,navigation={}
   const root=iframes[source.root_id];if(!root)return;
   const context={url:source.request_url||source.url.href,top_url:root.url.href,cross_site:frame_cross_site(source,iframes),broadcast_origin:source.broadcast_origin,document:token,frame:id};
   navigation={...navigation,initiated:true,source_frame_id:id,source_context:context};
-  const keyword=name.toLowerCase();
+  const keyword=typeof name==='string'?name.toLowerCase():'';
   let destination;
-  if(!name||keyword==='_self')destination={id};
+  if(name&&typeof name==='object'){
+    // Window method receivers select an existing context independently of its
+    // name. Apply the same root and navigation checks as named destinations.
+    const selected=typeof name.id==='string'&&iframes[name.id];
+    if(!selected||selected.root_id!==root.id||selected.worker)return;
+    destination={id:name.parent?(selected.parent_id||selected.id):selected.id};
+  }
+  else if(!name||keyword==='_self')destination={id};
   else if(keyword==='_parent')destination={id:source.parent_id||id};
   else if(keyword==='_top')destination={id:source.root_id};
   else if(keyword!=='_blank'){
