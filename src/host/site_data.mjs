@@ -3,6 +3,7 @@ import {http_cache} from './http_cache.mjs';
 import {storage_cookie} from '../cookie.mjs';
 import {apply_storage_change} from '../storage_changes.mjs';
 import {SiteDataStorage,cookie_storage_key,compare_storage_order} from './site_data_storage.mjs';
+import {CookieSession} from './cookie_session.mjs';
 
 const storage_key = "sandstone_site_data_v1";
 const session_key='sandstone_session_cookies_v1';
@@ -24,7 +25,7 @@ function secure_cookie_context(source,allowSecureOnLocal){
 
 // Browser storage is optional: file: and data: documents may be denied access.
 export class SiteDataStore {
-  constructor(storage,{sessionStorage}={}) {
+  constructor(storage,{sessionStorage,Channel,locks}={}) {
     this.storage = storage;
     this.sessionStorage=sessionStorage;
     this.local = Object.create(null);
@@ -37,7 +38,7 @@ export class SiteDataStore {
     this.persistent = false;
     this.localListeners=new Set();
     this.cookieListeners=new Set();this.cookieSnapshots=new Map();
-    this.sessionCookies=new Map();this.cookieEpochs=new Map();
+    this.sessionCookies=new Map();this.pendingSessionCookies=new Map();this.cookieEpochs=new Map();
     try{
       const entries=JSON.parse(sessionStorage?.getItem(session_key)||'[]');
       if(Array.isArray(entries))for(const pair of entries){
@@ -47,6 +48,11 @@ export class SiteDataStore {
       }
     }catch{}
     this.load();
+    this.ready=Promise.resolve();
+    if(this.persistence&&Channel&&locks){
+      this.cookieSession=new CookieSession({Channel,locks,snapshot:()=>{this.refresh();return [...this.sessionCookies];},receive:entries=>this.receiveSessionCookies(entries)});
+      this.ready=this.cookieSession.ready;
+    }
   }
 
   load() {
@@ -89,6 +95,16 @@ export class SiteDataStore {
       if(!initial&&!event&&revision===this.storageRevision)return;
       const snapshot=this.persistence.snapshot(),previous=this.cookies.serializeSync();
       const known=new Set(snapshot.cookies.map(cookie_storage_key));
+      // BroadcastChannel and native storage events can reach another process
+      // in either order. Retain newer snapshots until its storage cache sees
+      // the corresponding record; never install a cookie without that match.
+      for(const [id,entry] of this.pendingSessionCookies){
+        const order=snapshot.cookieOrders.get(id);if(!order)continue;
+        const comparison=compare_storage_order(entry.order,order);
+        if(comparison>0)continue;
+        this.pendingSessionCookies.delete(id);
+        if(comparison===0&&!known.has(id)&&entry.epoch===(snapshot.epochs.get(entry.cookie.domain)||''))this.sessionCookies.set(id,entry);
+      }
       for(const [id,entry] of this.sessionCookies){
         const order=snapshot.cookieOrders.get(id);
         if(entry.epoch!==this.persistence.cookieEpoch(entry.cookie.domain)||known.has(id)||!order||compare_storage_order(entry.order,order)!==0)this.sessionCookies.delete(id);
@@ -149,6 +165,21 @@ export class SiteDataStore {
     // Native sessionStorage survives reloads of this host without turning a
     // remote session cookie into durable, cross-browser-session site data.
     try{this.sessionStorage?.setItem(session_key,JSON.stringify([...this.sessionCookies]));}catch{}
+    this.cookieSession?.changed();
+  }
+
+  receiveSessionCookies(entries){
+    if(!this.persistence)return;
+    for(const pair of entries){
+      if(!Array.isArray(pair)||pair.length!==2)continue;
+      const [id,entry]=pair;
+      try{
+        if(!entry||typeof entry.epoch!=='string'||!Array.isArray(entry.order)||entry.order.length!==3||!Number.isFinite(entry.order[0])||!Number.isFinite(entry.order[1])||typeof entry.order[2]!=='string'||cookie_storage_key(entry.cookie)!==id||!Cookie.fromJSON(entry.cookie)||durable(entry.cookie))continue;
+        const previous=this.pendingSessionCookies.get(id);
+        if(!previous||compare_storage_order(entry.order,previous.order)>=0)this.pendingSessionCookies.set(id,entry);
+      }catch{}
+    }
+    this.storageRevision=undefined;this.refresh();
   }
 
   setLocal(origin, entries) {
@@ -298,10 +329,11 @@ export class SiteDataStore {
   }
 }
 
-let browser_storage,browser_session_storage;
+let browser_storage,browser_session_storage,browser_locks;
 try { if (typeof window !== "undefined") browser_storage = globalThis.localStorage; } catch {}
 try { if (typeof window !== "undefined") browser_session_storage = globalThis.sessionStorage; } catch {}
-export const site_data = new SiteDataStore(browser_storage,{sessionStorage:browser_session_storage});
+try { if (typeof window !== "undefined") browser_locks = globalThis.navigator?.locks; } catch {}
+export const site_data = new SiteDataStore(browser_storage,{sessionStorage:browser_session_storage,Channel:globalThis.BroadcastChannel,locks:browser_locks});
 globalThis.addEventListener?.('storage',event=>{
   if(event.storageArea===browser_storage&&(event.key===null||event.key.startsWith('sandstone_site_data_v2:')))site_data.refresh(false,site_data.persistence?.storageEvent(event));
 });

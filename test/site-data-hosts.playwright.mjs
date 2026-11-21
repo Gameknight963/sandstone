@@ -52,7 +52,12 @@ export async function verifyHostSiteData(browser,target){
     },{origin:legacyOrigin,legacy});
     await write(first,'document.cookie="login=one; Max-Age=86400; Path=/";document.cookie="temporary=session; Path=/";localStorage.setItem("saved","one")');
     await first.evaluate(()=>sandstone.controller.site_data.setCookie('https://host-state.test/','secret=hidden; HttpOnly; Path=/'));
-    await wait(second,'document.cookie==="login=one"&&localStorage.saved==="one"&&storageEvents.length===1');
+    await wait(second,'document.cookie==="login=one; temporary=session"&&localStorage.saved==="one"&&storageEvents.length===1');
+    await second.waitForFunction(()=>sandstone.controller.site_data.cookies.getCookieStringSync('https://host-state.test/').includes('secret=hidden'));
+    const joining=await context.newPage();await open(joining,'/joining');
+    assert.equal(await read(joining,'document.cookie'),'login=one; temporary=session','A joining host initialized before receiving session cookies');
+    assert.ok(await joining.evaluate(()=>sandstone.controller.site_data.cookies.getCookieStringSync('https://host-state.test/').includes('secret=hidden')));
+    await joining.close();
     assert.deepEqual(await read(second,'storageEvents'),[{key:'saved',oldValue:null,newValue:'one',url:origin+'/first',area:true}]);
     await write(first,`globalThis.writer=document.createElement('iframe');writer.srcdoc='<script>localStorage.setItem("child","srcdoc")<\\/script>';document.body.append(writer)`);
     await wait(second,'localStorage.child==="srcdoc"');
@@ -84,6 +89,6 @@ export async function verifyHostSiteData(browser,target){
     await first.reload();await open(first,'/cleared');
     assert.deepEqual(await read(first,'({cookie:document.cookie,size:localStorage.length})'),{cookie:'',size:0});
     assert.deepEqual(errors,[]);
-    return ['Independent standalone hosts synchronize cookies and storage events','Inherited-origin child storage events retain native source URLs across hosts','Host reloads retain session cookies while keeping HttpOnly values private','Peer writes preserve durable site data across host reloads','Cross-host clears reject late cookies and cannot restore stale snapshots'];
+    return ['Independent standalone hosts synchronize cookies and storage events','Inherited-origin child storage events retain native source URLs across hosts','Existing and joining hosts share session cookies while keeping HttpOnly values private','Host reloads retain session cookies while keeping HttpOnly values private','Peer writes preserve durable site data across host reloads','Cross-host clears reject late cookies and cannot restore stale snapshots'];
   }finally{await context.close();}
 }

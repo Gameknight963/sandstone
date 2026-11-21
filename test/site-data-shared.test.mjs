@@ -52,6 +52,30 @@ test('Denied session storage retains working in-memory cookies and durable site 
   assert.deepEqual(new SiteDataStore(storage,{sessionStorage:denied}).local[editor],[['document','saved']]);
 });
 
+test('Peer session snapshots accept only the current cookie records and clear epochs',()=>{
+  const storage=new Storage(),first=new SiteDataStore(storage),peer=new SiteDataStore(storage);
+  first.setCookie(account,'login=old; HttpOnly; Path=/');const old=[...first.sessionCookies];
+  peer.receiveSessionCookies(old);assert.equal(peer.cookies.getCookieStringSync(account),'login=old');
+  assert.deepEqual(cookie(peer,account),[]);
+  first.setCookie(account,'login=new; HttpOnly; Path=/');
+  peer.receiveSessionCookies(old);assert.equal(peer.cookies.getCookieStringSync(account),'');
+  const current=[...first.sessionCookies];peer.receiveSessionCookies(current);
+  assert.equal(peer.cookies.getCookieStringSync(account),'login=new');
+  first.clear('accounts.test');peer.receiveSessionCookies(current);
+  assert.equal(peer.cookies.getCookieStringSync(account),'');
+});
+
+test('A cookie broadcast arriving before the native storage update is applied afterwards',()=>{
+  const storage=new Storage(),first=new SiteDataStore(storage),cached=new Storage();
+  cached.values=new Map(storage.values);const peer=new SiteDataStore(cached);
+  first.setCookie(account,'login=shared; HttpOnly; Path=/');
+  peer.receiveSessionCookies([...first.sessionCookies]);
+  assert.equal(peer.cookies.getCookieStringSync(account),'');
+  cached.values=new Map(storage.values);peer.refresh();
+  assert.equal(peer.cookies.getCookieStringSync(account),'login=shared');
+  assert.deepEqual(cookie(peer,account),[]);
+});
+
 test('Independent hosts preserve cookies and localStorage written by their peers',()=>{
   const storage=new Storage(),first=new SiteDataStore(storage),second=new SiteDataStore(storage);
   first.setCookie(account,'login=first; Max-Age=86400; Path=/');

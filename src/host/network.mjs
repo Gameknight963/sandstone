@@ -50,6 +50,7 @@ rpc_handlers.fetch_keepalive_abort = (...args) => keepalives.abort(...args);
 rpc_handlers.fetch_keepalive_done = (...args) => keepalives.completed(...args);
 
 export async function fetch(url, options, context) {
+  await site_data.ready;
   // Consumers may configure the exposed libcurl API directly after WASM loads.
   initialize_session();
   context=snapshot_request_context(site_data,context);

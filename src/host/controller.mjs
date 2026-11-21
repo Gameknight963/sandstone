@@ -99,6 +99,7 @@ export class ProxyFrame {
     const runtime_wait=this.runtime_wait=new AbortController();
     this.is_navigating = true;
     await this.wait_for_libcurl();
+    await site_data.ready;
     if (navigation_id !== this.navigation_id) return;
     if (!util.is_valid_url(url)) {
       throw TypeError("Invalid URL");
