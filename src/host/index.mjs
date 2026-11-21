@@ -1,6 +1,7 @@
 export * as controller from "./controller.mjs";
 export * as network from "./network.mjs";
 export * as service_workers from './service_worker.mjs';
+export {WorkerServiceHost} from './worker_host.mjs';
 
 import * as rpc from "../rpc.mjs";
 rpc.set_role("host");

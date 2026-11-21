@@ -11,6 +11,7 @@ export function navigation_request_context(contexts,snapshot,root_id){
 }
 
 export function frame_cross_site(frame,frames) {
+  if(frame.retained_cross_site)return true;
   const root=frames[frame.root_id]||frame,top=new URL(root.url);
   for(let current=frame;current;current=frames[current.parent_id]){
     if(current.broadcast_origin?.startsWith('opaque:'))return true;
