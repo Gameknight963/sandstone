@@ -50,7 +50,8 @@ export async function verifyHostSiteData(browser,target){
       // An older host may still save its old snapshot after migration.
       localStorage.setItem('sandstone_site_data_v1',legacy);
     },{origin:legacyOrigin,legacy});
-    await write(first,'document.cookie="login=one; Max-Age=86400; Path=/";localStorage.setItem("saved","one")');
+    await write(first,'document.cookie="login=one; Max-Age=86400; Path=/";document.cookie="temporary=session; Path=/";localStorage.setItem("saved","one")');
+    await first.evaluate(()=>sandstone.controller.site_data.setCookie('https://host-state.test/','secret=hidden; HttpOnly; Path=/'));
     await wait(second,'document.cookie==="login=one"&&localStorage.saved==="one"&&storageEvents.length===1');
     assert.deepEqual(await read(second,'storageEvents'),[{key:'saved',oldValue:null,newValue:'one',url:origin+'/first',area:true}]);
     await write(first,`globalThis.writer=document.createElement('iframe');writer.srcdoc='<script>localStorage.setItem("child","srcdoc")<\\/script>';document.body.append(writer)`);
@@ -65,7 +66,8 @@ export async function verifyHostSiteData(browser,target){
       const store=sandstone.controller.site_data;
       return {cookie:store.cookies.getCookieStringSync(origin+'/'),local:store.local[origin]||[]};
     },legacyOrigin),{cookie:'',local:[]});
-    assert.deepEqual(await read(first,'({cookie:document.cookie,value:localStorage.saved})'),{cookie:'login=one',value:'one'});
+    assert.deepEqual(await read(first,'({cookie:document.cookie,value:localStorage.saved})'),{cookie:'login=one; temporary=session',value:'one'});
+    assert.ok(await first.evaluate(()=>sandstone.controller.site_data.cookies.getCookieStringSync('https://host-state.test/').includes('secret=hidden')),'Reload lost an HttpOnly session cookie');
     await write(first,'localStorage.setItem("other","two");localStorage.clear()');
     await wait(second,'localStorage.length===0&&storageEvents.some(event=>event.key===null)');
     assert.deepEqual(await read(second,'storageEvents.at(-1)'),{key:null,oldValue:null,newValue:null,url:origin+'/reloaded',area:true});
@@ -82,6 +84,6 @@ export async function verifyHostSiteData(browser,target){
     await first.reload();await open(first,'/cleared');
     assert.deepEqual(await read(first,'({cookie:document.cookie,size:localStorage.length})'),{cookie:'',size:0});
     assert.deepEqual(errors,[]);
-    return ['Independent standalone hosts synchronize cookies and storage events','Inherited-origin child storage events retain native source URLs across hosts','Peer writes preserve durable site data across host reloads','Cross-host clears reject late cookies and cannot restore stale snapshots'];
+    return ['Independent standalone hosts synchronize cookies and storage events','Inherited-origin child storage events retain native source URLs across hosts','Host reloads retain session cookies while keeping HttpOnly values private','Peer writes preserve durable site data across host reloads','Cross-host clears reject late cookies and cannot restore stale snapshots'];
   }finally{await context.close();}
 }

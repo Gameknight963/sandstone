@@ -21,6 +21,37 @@ class Storage {
 const cookie=(store,url)=>store.documentCookies(url).cookies.map(value=>value.key+'='+value.value).sort();
 const account='https://accounts.test/',editor='https://editor.test';
 
+test('Session cookies survive host reloads without becoming durable cookies',()=>{
+  const storage=new Storage(),sessionStorage=new Storage(),first=new SiteDataStore(storage,{sessionStorage});
+  first.setCookie(account,'login=session; HttpOnly; Path=/');
+  const restored=new SiteDataStore(storage,{sessionStorage});
+  assert.equal(restored.cookies.getCookieStringSync(account),'login=session');
+  assert.deepEqual(cookie(restored,account),[],'HttpOnly cookies became script-readable');
+  assert.equal(new SiteDataStore(storage,{sessionStorage:new Storage()}).cookies.getCookieStringSync(account),'');
+  assert.deepEqual([...storage.values].filter(([key])=>key.startsWith('sandstone_site_data_v2:["cookie",')).map(([,value])=>JSON.parse(value).value),[null]);
+});
+
+test('Reloaded session snapshots cannot revive cleared or superseded cookies',()=>{
+  const storage=new Storage(),sessionStorage=new Storage(),first=new SiteDataStore(storage,{sessionStorage});
+  first.setCookie(account,'login=old; Path=/');
+  const stale=[...sessionStorage.values];
+  const peer=new SiteDataStore(storage);peer.setCookie(account,'login=new; Path=/');
+  first.refresh();assert.equal(first.cookies.getCookieStringSync(account),'');
+  sessionStorage.values=new Map(stale);
+  assert.equal(new SiteDataStore(storage,{sessionStorage}).cookies.getCookieStringSync(account),'');
+  first.setCookie(account,'login=second; Path=/');const beforeClear=[...sessionStorage.values];
+  peer.clear('accounts.test');sessionStorage.values=new Map(beforeClear);
+  assert.equal(new SiteDataStore(storage,{sessionStorage}).cookies.getCookieStringSync(account),'');
+});
+
+test('Denied session storage retains working in-memory cookies and durable site data',()=>{
+  const denied={getItem(){throw new DOMException('Denied','SecurityError');},setItem(){throw new DOMException('Full','QuotaExceededError');}};
+  const storage=new Storage(),store=new SiteDataStore(storage,{sessionStorage:denied});
+  store.setCookie(account,'login=session; Path=/');store.setLocal(editor,[['document','saved']]);
+  assert.equal(store.cookies.getCookieStringSync(account),'login=session');
+  assert.deepEqual(new SiteDataStore(storage,{sessionStorage:denied}).local[editor],[['document','saved']]);
+});
+
 test('Independent hosts preserve cookies and localStorage written by their peers',()=>{
   const storage=new Storage(),first=new SiteDataStore(storage),second=new SiteDataStore(storage);
   first.setCookie(account,'login=first; Max-Age=86400; Path=/');

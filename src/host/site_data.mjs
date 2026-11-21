@@ -5,6 +5,7 @@ import {apply_storage_change} from '../storage_changes.mjs';
 import {SiteDataStorage,cookie_storage_key,compare_storage_order} from './site_data_storage.mjs';
 
 const storage_key = "sandstone_site_data_v1";
+const session_key='sandstone_session_cookies_v1';
 const secureContexts=new Map();
 const durable=cookie=>(cookie.expires&&cookie.expires!=='Infinity')||typeof cookie.maxAge==='number';
 const fingerprint=cookies=>JSON.stringify(cookies.map(({lastAccessed,...cookie})=>cookie).sort((a,b)=>cookie_storage_key(a).localeCompare(cookie_storage_key(b))));
@@ -23,8 +24,9 @@ function secure_cookie_context(source,allowSecureOnLocal){
 
 // Browser storage is optional: file: and data: documents may be denied access.
 export class SiteDataStore {
-  constructor(storage) {
+  constructor(storage,{sessionStorage}={}) {
     this.storage = storage;
+    this.sessionStorage=sessionStorage;
     this.local = Object.create(null);
     this.cookies = new CookieJar();
     this.cookieGeneration=0;this.cookieCleared=new Map();
@@ -36,6 +38,14 @@ export class SiteDataStore {
     this.localListeners=new Set();
     this.cookieListeners=new Set();this.cookieSnapshots=new Map();
     this.sessionCookies=new Map();this.cookieEpochs=new Map();
+    try{
+      const entries=JSON.parse(sessionStorage?.getItem(session_key)||'[]');
+      if(Array.isArray(entries))for(const pair of entries){
+        if(!Array.isArray(pair)||pair.length!==2)continue;
+        const [id,entry]=pair;
+        if(entry&&typeof entry.epoch==='string'&&Array.isArray(entry.order)&&entry.order.length===3&&Number.isFinite(entry.order[0])&&Number.isFinite(entry.order[1])&&typeof entry.order[2]==='string'&&Cookie.fromJSON(entry.cookie)&&cookie_storage_key(entry.cookie)===id)this.sessionCookies.set(id,entry);
+      }
+    }catch{}
     this.load();
   }
 
@@ -80,7 +90,8 @@ export class SiteDataStore {
       const snapshot=this.persistence.snapshot(),previous=this.cookies.serializeSync();
       const known=new Set(snapshot.cookies.map(cookie_storage_key));
       for(const [id,entry] of this.sessionCookies){
-        if(entry.epoch!==this.persistence.cookieEpoch(entry.cookie.domain)||known.has(id))this.sessionCookies.delete(id);
+        const order=snapshot.cookieOrders.get(id);
+        if(entry.epoch!==this.persistence.cookieEpoch(entry.cookie.domain)||known.has(id)||!order||compare_storage_order(entry.order,order)!==0)this.sessionCookies.delete(id);
         else{snapshot.cookies.push(entry.cookie);snapshot.cookieOrders.set(id,entry.order);}
       }
       snapshot.cookies.sort((a,b)=>compare_storage_order(snapshot.cookieOrders.get(cookie_storage_key(a)),snapshot.cookieOrders.get(cookie_storage_key(b))));
@@ -102,6 +113,7 @@ export class SiteDataStore {
         changed.add(origin);
       }
       this.indexed=snapshot.indexed;this.indexedSnapshot=JSON.stringify(this.indexed);
+      this.saveSessionCookies();
       if(!initial){
         if(event)changed.add(event.origin);
         for(const origin of changed)for(const listener of this.localListeners)listener(origin,this.local[origin]||[],event?.origin===origin?event.change:undefined);
@@ -114,6 +126,7 @@ export class SiteDataStore {
   cookieEpochSnapshot(){return this.persistence?(this.epochSnapshot??=Object.freeze(Object.fromEntries(this.cookieEpochs))):undefined;}
 
   persist() {
+    this.saveSessionCookies();
     try {
       if (!this.storage) return;
       if(this.persistence){
@@ -130,6 +143,12 @@ export class SiteDataStore {
     } catch {
       this.persistent = false;
     }
+  }
+
+  saveSessionCookies(){
+    // Native sessionStorage survives reloads of this host without turning a
+    // remote session cookie into durable, cross-browser-session site data.
+    try{this.sessionStorage?.setItem(session_key,JSON.stringify([...this.sessionCookies]));}catch{}
   }
 
   setLocal(origin, entries) {
@@ -272,15 +291,17 @@ export class SiteDataStore {
       const data = this.cookies.serializeSync();
       data.cookies = data.cookies.filter(cookie => cookie.domain !== hostname);
       this.cookies = CookieJar.deserializeSync(data);
+      for(const [id,entry] of this.sessionCookies)if(entry.cookie.domain===hostname)this.sessionCookies.delete(id);
       for(const listener of this.cookieListeners)listener(hostname);
     }
     this.persist();
   }
 }
 
-let browser_storage;
+let browser_storage,browser_session_storage;
 try { if (typeof window !== "undefined") browser_storage = globalThis.localStorage; } catch {}
-export const site_data = new SiteDataStore(browser_storage);
+try { if (typeof window !== "undefined") browser_session_storage = globalThis.sessionStorage; } catch {}
+export const site_data = new SiteDataStore(browser_storage,{sessionStorage:browser_session_storage});
 globalThis.addEventListener?.('storage',event=>{
   if(event.storageArea===browser_storage&&(event.key===null||event.key.startsWith('sandstone_site_data_v2:')))site_data.refresh(false,site_data.persistence?.storageEvent(event));
 });
