@@ -25,7 +25,7 @@ export async function verifyProvisionalFrame(page){
       globalThis.restoreProvisionalTransport=()=>{MessagePort.prototype.postMessage=send;};
       MessagePort.prototype.postMessage=function(...args){
         const message=args[0];
-        if(message?.type==='procedure'&&message.procedure==='html'&&message.arguments[0]?.url===url){
+        if(message?.type==='procedure'&&message.procedure==='prepare_document'&&message.arguments[0]?.url===url){
           globalThis.provisionalHTMLHeld=true;
           globalThis.releaseProvisionalHTML=()=>Reflect.apply(send,this,args);return;
         }

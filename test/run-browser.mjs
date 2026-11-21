@@ -69,6 +69,7 @@ import {verifyJavascriptNavigation} from './javascript-navigation.playwright.mjs
 import {verifyJavascriptDocumentResults} from './javascript-document-results.playwright.mjs';
 import {verifyJavascriptNavigationRaces} from './javascript-navigation-races.playwright.mjs';
 import {verifyProvisionalFrame} from './provisional-frame.playwright.mjs';
+import {verifyProvisionalNavigation} from './provisional-navigation.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 
@@ -495,6 +496,7 @@ try {
     result.passed.push(...await timed(verifyLocalIframes(page), 'Local HTML frame fixture'));
     for(const mode of ['standards','quirks','limited'])result.passed.push(...await timed(verifyDocumentReuse(page,{mode}), 'Reused native Document fixture '+mode));
     result.passed.push(...await timed(verifyProvisionalFrame(page), 'Provisional frame capabilities fixture'));
+    result.passed.push(...await timed(verifyProvisionalNavigation(page), 'Provisional frame navigation fixture'));
     result.passed.push(...await timed(verifyWindowMessages(page), 'Window messages fixture'));
     result.passed.push(...await timed(verifyAncestorWindows(page), 'Ancestor windows fixture'));
     result.passed.push(...await timed(verifyBroadcast(page), 'Broadcast channel fixture'));

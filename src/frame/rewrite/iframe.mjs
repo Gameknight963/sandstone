@@ -167,7 +167,20 @@ export function rewrite_iframe(iframe_element) {
   let initial_name=iframe_element.name;
   let window_name=initial_name,opaque_origin=false;
   let iframe_url = "";
-  let generation=0,active_request,commit=Promise.resolve();
+  let generation=0,active_request,commit=Promise.resolve(),context_ready=commit;
+  const javascript_tasks=new Set();
+  async function wait_javascript(signal,revision){
+    let aborted;
+    const cancelled=new Promise(resolve=>{aborted=resolve;signal.addEventListener('abort',aborted,{once:true});});
+    try{
+      while(!signal.aborted){
+        const pending=[...javascript_tasks].filter(task=>task.generation===revision).map(task=>task.completed);
+        if(!pending.length)return;
+        await Promise.race([Promise.all(pending),cancelled]);
+      }
+    }
+    finally{signal.removeEventListener('abort',aborted);}
+  }
   const retire=()=>{
     initial_result_pending=undefined;
     generation++;active_request?.abort();iframe_url='';active_target=undefined;blank_ready=false;blank_load_pending=true;release_load();
@@ -238,6 +251,7 @@ export function rewrite_iframe(iframe_element) {
         registered=true;rpc.attach_host(channel.port1,frame_id);
       });
       commit=registration.catch(error=>{channel.port1.close();channel.port2.close();if(current())console.error(error);});
+      context_ready=Promise.all([commit,ready]);context_ready.catch(()=>{});
       return true;
     }catch(error){channel.port1.close();channel.port2.close();iframe_url='';throw error;}
     finally{initializing_blank=false;}
@@ -309,7 +323,7 @@ export function rewrite_iframe(iframe_element) {
         const pending=initial_result_pending={target};
         // The native string result destroyed this realm. Its initialization
         // promise can no longer receive replies on the old document's port.
-        blank_initialization=undefined;blank_ready=false;
+        blank_initialization=undefined;blank_ready=false;context_ready=commit;
         clear_initial_javascript();
         commit.then(async()=>{
           await document_barrier(old_port,old_token);
@@ -326,7 +340,7 @@ export function rewrite_iframe(iframe_element) {
       const live=()=>revision===javascript_revision&&generation===generation_id&&iframe_element.isConnected&&native_frame_window(iframe_element)===target&&target.sandstone_frame===runtime;
       runtime.rpc.connect_reused_frame_host(channel.port2,blank_nonce);
       iframe_url=runtime.loader.url;
-      const options={...blank_options,...result.document,url:iframe_url,html:result.html,beacon_context:token,cookie_url:'about:blank',window_name:target.name,signal:controller.signal};
+      const options={...blank_options,...result.document,url:iframe_url,html:result.html,beacon_context:token,cookie_url:'about:blank',window_name:target.name,signal:controller.signal,before_parse:()=>wait_javascript(controller.signal,generation_id)};
       // This updates the document view synchronously, before queued authored
       // microtasks. Loading waits on the replacement's unstarted host channel.
       const loaded=runtime.loader.load_reused_document(options);
@@ -344,6 +358,7 @@ export function rewrite_iframe(iframe_element) {
         registered=true;rpc.attach_host(channel.port1,frame_id);
       })();
       commit=installation.catch(error=>{channel.port1.close();channel.port2.close();if(live()&&error?.name!=='AbortError')console.error(error);});
+      context_ready=Promise.all([commit,runtime.loader.document_prepared()]);context_ready.catch(()=>{});
       installation.then(()=>loaded).then(()=>{if(live())iframe_element.dispatchEvent(new Event('load'));}).catch(error=>{if(live()&&error?.name!=='AbortError')console.error(error);});
     });
     if(raw_media_attribute(iframe_element,'src')!==native_src)render_media_attribute(iframe_element,'src',native_src);
@@ -352,17 +367,23 @@ export function rewrite_iframe(iframe_element) {
 
   async function run_javascript(pending,revision){
     if(!iframe_element.isConnected)return;
-    if(!iframe_url)ensure_blank(native_frame_window(iframe_element));
-    // A normal installation's commit includes its parser-blocking scripts.
-    // Cancel that work before waiting for the serialized registration to settle.
-    if(active_request&&!active_request.signal.aborted){active_request.abort();generation++;release_load();}
-    await commit;
-    if(revision!==javascript_revision||!iframe_element.isConnected)return;
-    try{await blank_initialization;}catch(error){if(error?.name!=='AbortError')throw error;}
-    if(revision!==javascript_revision||!iframe_element.isConnected)return;
-    const result=await navigate_target(pending.url,{id:frame_id});
-    if(pending.initial&&result?.executed&&revision===javascript_revision&&iframe_element.isConnected&&!result.replaced&&blank_load_pending){blank_load_pending=false;iframe_element.dispatchEvent(new Event('load'));}
-    return result;
+    let finish;
+    const completed=new Promise(resolve=>{finish=resolve;});
+    const task={generation,completed};javascript_tasks.add(task);
+    try{
+      if(!iframe_url)ensure_blank(native_frame_window(iframe_element));
+      task.generation=generation;
+      // A replacement Window needs its own URL, origin and storage capability
+      // before it can evaluate a queued JavaScript navigation.
+      let ready;
+      do{ready=context_ready;await ready;if(revision!==javascript_revision||!iframe_element.isConnected)return;}while(ready!==context_ready);
+      // Evaluate without waiting for parser-blocking scripts. A string result
+      // starts the replacement and cancels the old load in fetch_src; other
+      // completion values leave the original document loading normally.
+      const result=await navigate_target(pending.url,{id:frame_id});
+      if(pending.initial&&result?.executed&&revision===javascript_revision&&iframe_element.isConnected&&!result.replaced&&blank_load_pending){blank_load_pending=false;iframe_element.dispatchEvent(new Event('load'));}
+      return result;
+    }finally{javascript_tasks.delete(task);finish();}
   }
   function queue_javascript(){
     if(!pending_javascript||!iframe_element.isConnected)return;
@@ -449,123 +470,137 @@ export function rewrite_iframe(iframe_element) {
     // so the next one can unregister it before claiming the same frame ID.
     const installation=commit.then(async()=>{
       if(!current())return;
-      if (registered) {await unregister(frame_id, {keep_history: true});registered=false;}
-      if(!current())return;
-
-      //load the frame runtime
-      const bootstrap_nonce=create_bootstrap_nonce();
-      policy_url=/^about:(?:blank|srcdoc)(?:[?#]|$)/.test(final_url)?ctx.location.href:final_url;render_focus();
-      const use_inline=authored.get('srcdoc')!==null;
-      const share_origin=shares_origin(final_url);
-      const mime=error||share_origin?'text/html':content_type;
-      const runtime_source=mime==='text/html'?bootstrap_html(loader.frame_html,bootstrap_nonce,2):bootstrap_xml(loader.runtime_src,mime,bootstrap_nonce,2);
-      const runtime_url=use_inline?'about:srcdoc#'+crypto.randomUUID():share_origin?'about:blank?'+crypto.randomUUID():runtime_seed(bootstrap_nonce);
-      const runtime_html=use_inline?runtime_source.replace(/(<head[^>]*>)/i,'$1<script>history.replaceState(null,"",'+JSON.stringify(runtime_url)+');document.currentScript.remove();<\/script>'):undefined;
-      await new Promise((resolve) => {
-        const cleanup=()=>{if(native_runtime_load===loaded)native_runtime_load=undefined;controller.signal.removeEventListener('abort',aborted);};
-        const aborted=()=>{cleanup();resolve();};
-        const loaded=event=>{
-          event.stopImmediatePropagation();
-          if(share_origin){
-            let target,doc;
-            try{target=native_frame_window(iframe_element);doc=target.document;if(doc.URL!==runtime_url)return;}catch{return;}
-            // Populate a fresh inherited-origin document using its pristine
-            // DOM methods. Replacing the inert script executes the runtime in
-            // the child's own realm without giving it the host's origin.
-            if(!doc.doctype)doc.insertBefore(doc.implementation.createDocumentType('html','',''),doc.documentElement);
-            doc.documentElement.innerHTML=runtime_source;
-            const old=doc.querySelector('script'),script=doc.createElement('script');
-            script.setAttribute('data-sandstone-bootstrap',old.getAttribute('data-sandstone-bootstrap'));
-            script.textContent=old.textContent;old.replaceWith(script);
-          }
-          cleanup();resolve();
-        };
-        native_runtime_load=loaded;
-        controller.signal.addEventListener('abort',aborted,{once:true});
-        if(use_inline){physical_inline=runtime_html;render_media_attribute(iframe_element,'srcdoc',runtime_html);}
-        else if(authored_src!==null)render_media_attribute(iframe_element,'src',runtime_url);
-        else native_frame_window(iframe_element).location.href=runtime_url;
-      });
-      if(!current())return;
-      // A load event may belong to the previous document or the blank reset.
-      // The reflected src is virtual, so identify the physical runtime explicitly.
+      let finish_context;
+      context_ready=new Promise(resolve=>{finish_context=resolve;});
       try{
-        await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:runtime_url,nonce:bootstrap_nonce});
-        if(!use_inline&&!share_origin){
-          const prepared=await rpc.load_frame_runtime(iframe_element,runtime_source,bootstrap_nonce,{signal:controller.signal,mime});
-          if(!current())return;
-          rpc.commit_frame_runtime(iframe_element,prepared,bootstrap_nonce);
-          await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:prepared,nonce:bootstrap_nonce});
-        }
-      }
-      catch(error){if(!current())return;throw error;}
-      if(!current())return;
-
-      //create the rpc message channel
-      let msg_channel = new MessageChannel();
-      rpc.attach_host(msg_channel.port1, frame_id);
-      rpc.set_host(iframe_element, msg_channel.port2,{nonce:bootstrap_nonce});
-
-      //create additional rpc target for sending the html
-      let msg_channel_2 = new MessageChannel();
-      let rpc_target = new rpc.RPCTarget(msg_channel_2.port1);
-      active_target=rpc_target;
-      // This second channel only acknowledges page installation. A child must
-      // not invoke its parent's eval/HTML handlers or forward attachments on it.
-      rpc_target.onmessage=(event,target)=>{
-        if(event.data?.type==='reply')return rpc.message_listener(event,target);
-        for(const port of event.ports)port.close();
-      };
-      msg_channel_2.port1.start();
-      rpc.set_host(iframe_element, msg_channel_2.port2,{nonce:bootstrap_nonce});
-      const send_page=options=>rpc.call_procedure(rpc_target,'html',[options],{signal:controller.signal});
-
-      iframe_url=final_url;
-      const sandbox=iframe_element.getAttribute('sandbox'),opaque=sandbox!==null&&!sandbox_tokens(sandbox).has('allow-same-origin');
-      const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,sandbox,window_name:initial_name,srcdoc:inline,blank:blank_result,creator_url:blank_result?document_result.creator_url:undefined,blob,request_metadata_token,document_result:!!document_result});
-      registered = true;
-      window_name=state.window_name;opaque_origin=state.message_origin==='null';
-      loader.child_names.set(frame_id,value=>{window_name=value;});
-      loader.child_urls.set(frame_id,(value,context)=>{if(!context||context===state.beacon_context)iframe_url=value;});
-      if(!current())return;
-      loader.child_navigators.set(frame_id, fetch_src);
-      try {
-        await send_page({
-          url: final_url,
-          html: html,
-          character_encoding,
-          frame_id: frame_id,
-          error: error,
-          ...state,
-          referrer_policy,document_referrer,
-          inherited_base_url,
-          settings: {allow_js:loader.site_settings.allow_js!==false&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts'))},
-          default_settings: loader.default_settings,
-          version: loader.version,
-          is_iframe: true,
-          automatic_features:loader.automatic_features&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts')),
-          sandboxed_context:loader.sandboxed_context||sandbox!==null,
-          message_parent:child_message_parent(message_token),
-          message_origin:state.message_origin
-        });
-      }
-      catch (error) {
+        if (registered) {await unregister(frame_id, {keep_history: true});registered=false;}
         if(!current())return;
-        let error_msg = util.format_error(error);
-        await send_page({
-          url: final_url,
-          html: html,
-          frame_id: frame_id,
-          error: error_msg,
-          local_storage: undefined,
-          settings: {},
-          default_settings: loader.default_settings,
-          version: loader.version
-        });
-      }
 
-      if(current()){try{iframe_element.dispatchEvent(new Event("load"));}finally{release_load();}}
-      if(navigation.result_document&&current())return {document_context:state.beacon_context,failed:!!error};
+        //load the frame runtime
+        const bootstrap_nonce=create_bootstrap_nonce();
+        policy_url=/^about:(?:blank|srcdoc)(?:[?#]|$)/.test(final_url)?ctx.location.href:final_url;render_focus();
+        const use_inline=authored.get('srcdoc')!==null;
+        const share_origin=shares_origin(final_url);
+        const mime=error||share_origin?'text/html':content_type;
+        const runtime_source=mime==='text/html'?bootstrap_html(loader.frame_html,bootstrap_nonce,2):bootstrap_xml(loader.runtime_src,mime,bootstrap_nonce,2);
+        const runtime_url=use_inline?'about:srcdoc#'+crypto.randomUUID():share_origin?'about:blank?'+crypto.randomUUID():runtime_seed(bootstrap_nonce);
+        const runtime_html=use_inline?runtime_source.replace(/(<head[^>]*>)/i,'$1<script>history.replaceState(null,"",'+JSON.stringify(runtime_url)+');document.currentScript.remove();<\/script>'):undefined;
+        await new Promise((resolve) => {
+          const cleanup=()=>{if(native_runtime_load===loaded)native_runtime_load=undefined;controller.signal.removeEventListener('abort',aborted);};
+          const aborted=()=>{cleanup();resolve();};
+          const loaded=event=>{
+            event.stopImmediatePropagation();
+            if(share_origin){
+              let target,doc;
+              try{target=native_frame_window(iframe_element);doc=target.document;if(doc.URL!==runtime_url)return;}catch{return;}
+              // Populate a fresh inherited-origin document using its pristine
+              // DOM methods. Replacing the inert script executes the runtime in
+              // the child's own realm without giving it the host's origin.
+              if(!doc.doctype)doc.insertBefore(doc.implementation.createDocumentType('html','',''),doc.documentElement);
+              doc.documentElement.innerHTML=runtime_source;
+              const old=doc.querySelector('script'),script=doc.createElement('script');
+              script.setAttribute('data-sandstone-bootstrap',old.getAttribute('data-sandstone-bootstrap'));
+              script.textContent=old.textContent;old.replaceWith(script);
+            }
+            cleanup();resolve();
+          };
+          native_runtime_load=loaded;
+          controller.signal.addEventListener('abort',aborted,{once:true});
+          if(use_inline){physical_inline=runtime_html;render_media_attribute(iframe_element,'srcdoc',runtime_html);}
+          else if(authored_src!==null)render_media_attribute(iframe_element,'src',runtime_url);
+          else native_frame_window(iframe_element).location.href=runtime_url;
+        });
+        if(!current())return;
+        // A load event may belong to the previous document or the blank reset.
+        // The reflected src is virtual, so identify the physical runtime explicitly.
+        try{
+          await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:runtime_url,nonce:bootstrap_nonce});
+          if(!use_inline&&!share_origin){
+            const prepared=await rpc.load_frame_runtime(iframe_element,runtime_source,bootstrap_nonce,{signal:controller.signal,mime});
+            if(!current())return;
+            rpc.commit_frame_runtime(iframe_element,prepared,bootstrap_nonce);
+            await rpc.wait_on_frame(iframe_element,{signal:controller.signal,url:prepared,nonce:bootstrap_nonce});
+          }
+        }
+        catch(error){if(!current())return;throw error;}
+        if(!current())return;
+
+        //create the rpc message channel
+        let msg_channel = new MessageChannel();
+        rpc.attach_host(msg_channel.port1, frame_id);
+        rpc.set_host(iframe_element, msg_channel.port2,{nonce:bootstrap_nonce});
+
+        //create additional rpc target for sending the html
+        let msg_channel_2 = new MessageChannel();
+        let rpc_target = new rpc.RPCTarget(msg_channel_2.port1);
+        active_target=rpc_target;
+        // This second channel only acknowledges page installation. A child must
+        // not invoke its parent's eval/HTML handlers or forward attachments on it.
+        rpc_target.onmessage=(event,target)=>{
+          if(event.data?.type==='reply')return rpc.message_listener(event,target);
+          for(const port of event.ports)port.close();
+        };
+        msg_channel_2.port1.start();
+        rpc.set_host(iframe_element, msg_channel_2.port2,{nonce:bootstrap_nonce});
+        const send_page=options=>rpc.call_procedure(rpc_target,'html',[options],{signal:controller.signal});
+
+        iframe_url=final_url;
+        const sandbox=iframe_element.getAttribute('sandbox'),opaque=sandbox!==null&&!sandbox_tokens(sandbox).has('allow-same-origin');
+        const state = await register(loader.frame_id, frame_id, final_url, {history_mode:navigation.history_mode,opaque,sandbox,window_name:initial_name,srcdoc:inline,blank:blank_result,creator_url:blank_result?document_result.creator_url:undefined,blob,request_metadata_token,document_result:!!document_result});
+        registered = true;
+        window_name=state.window_name;opaque_origin=state.message_origin==='null';
+        loader.child_names.set(frame_id,value=>{window_name=value;});
+        loader.child_urls.set(frame_id,(value,context)=>{if(!context||context===state.beacon_context)iframe_url=value;});
+        if(!current())return;
+        loader.child_navigators.set(frame_id, fetch_src);
+        const page_options={
+            url: final_url,
+            html: html,
+            character_encoding,
+            frame_id: frame_id,
+            error: error,
+            ...state,
+            referrer_policy,document_referrer,
+            inherited_base_url,
+            settings: {allow_js:loader.site_settings.allow_js!==false&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts'))},
+            default_settings: loader.default_settings,
+            version: loader.version,
+            is_iframe: true,
+            automatic_features:loader.automatic_features&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts')),
+            sandboxed_context:loader.sandboxed_context||sandbox!==null,
+            message_parent:child_message_parent(message_token),
+            message_origin:state.message_origin,
+            prepared_context:state.beacon_context
+        };
+        const {html:page_html,prepared_context,...preparation}=page_options;
+        await rpc.call_procedure(rpc_target,'prepare_document',[preparation],{signal:controller.signal});
+        finish_context();
+        // A string result cancels this load; a non-string completion resumes it
+        // after the queued program has run in the prepared document context.
+        await wait_javascript(controller.signal,revision);
+        if(!current())return;
+        try {
+          await send_page(page_options);
+        }
+        catch (error) {
+          if(!current())return;
+          let error_msg = util.format_error(error);
+          await send_page({
+            url: final_url,
+            html: html,
+            frame_id: frame_id,
+            prepared_context:state.beacon_context,
+            error: error_msg,
+            local_storage: undefined,
+            settings: {},
+            default_settings: loader.default_settings,
+            version: loader.version
+          });
+        }
+
+        if(current()){try{iframe_element.dispatchEvent(new Event("load"));}finally{release_load();}}
+        if(navigation.result_document&&current())return {document_context:state.beacon_context,failed:!!error};
+      }finally{finish_context();}
     });
     commit=installation.catch(()=>{});
     return installation.catch(error=>{if(current()){release_load();throw error;}});

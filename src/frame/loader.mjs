@@ -145,6 +145,8 @@ function get_frame_html() {
   frame_html=runtime_html(runtime_src);
 }
 
+let document_preparation=Promise.resolve();
+export const document_prepared=()=>document_preparation;
 function prepare_html(options) {
   character_encoding=options.character_encoding||'UTF-8';
   referrer_policy = options.referrer_policy || default_referrer_policy;
@@ -177,7 +179,7 @@ function prepare_html(options) {
   configure_filesystem();
   configure_document_encoding(document,ctx.document,character_encoding);
   configure_window_messages(options);
-  return Promise.all([ready,configure_cookies(options.cookies,ctx.document),configure_service_workers(options)]).then(result=>{configure_autofocus();return result;});
+  return document_preparation=Promise.all([ready,configure_cookies(options.cookies,ctx.document),configure_service_workers(options)]).then(result=>{configure_autofocus();return result;});
 }
 
 export function initialize_blank(options,onload,onurl){
@@ -193,9 +195,20 @@ export async function load_reused_document(options){
   await load_html({...options,reuse_window:true});
 }
 
+let prepared_document,preparing_document=false;
+async function prepare_document(options){
+  if(is_loaded||preparing_document||prepared_document)throw new DOMException('The document is already initialized','InvalidStateError');
+  preparing_document=true;
+  try{await prepare_html(options);prepared_document={token:beacon_context,frame:frame_id,url:options.url};is_loaded=true;}
+  finally{preparing_document=false;}
+}
+
 async function load_html(options) {
   options.signal?.throwIfAborted();
-  await prepare_html(options);
+  if(options.prepared_context!==undefined){
+    if(options.prepared_context!==prepared_document?.token||options.frame_id!==prepared_document.frame||options.url!==prepared_document.url)throw new DOMException('The prepared document does not match','SecurityError');
+  }else await prepare_html(options);
+  if(options.before_parse)await options.before_parse();
   options.signal?.throwIfAborted();
 
   if (options.error) {
@@ -238,5 +251,6 @@ function external_eval(js) {
 }
 
 rpc.rpc_handlers["html"] = load_html;
+rpc.rpc_handlers.prepare_document=prepare_document;
 rpc.rpc_handlers["favicon"] = get_favicon;
 rpc.rpc_handlers["eval"] = external_eval;
