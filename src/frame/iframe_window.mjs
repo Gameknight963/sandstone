@@ -1,4 +1,4 @@
-import {window_runtime_context} from './runtime_context.mjs';
+import {window_runtime_context,window_runtime_value,window_runtime_accessor} from './runtime_context.mjs';
 import {ctx} from './context.mjs';
 import {create_obj_proxy} from './global_functions.mjs';
 import {register_message_peer,window_post_message} from './window_messages.mjs';
@@ -12,10 +12,7 @@ const window_states=new WeakMap();
 export function frame_window_state(target){return window_states.get(target);}
 const descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentWindow');
 const document_descriptor=globalThis.HTMLIFrameElement&&Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,'contentDocument');
-function context_value(target,key){
-  const context=window_runtime_context(target);
-  return context?context[key]:target[key];
-}
+const context_value=window_runtime_value;
 if(document_descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentDocument',{...document_descriptor,get(){
   const value=document_descriptor.get.call(this),state=frames.get(this);if(!value||!state)return value;
   state.prepare?.(descriptor.get.call(this));
@@ -151,7 +148,7 @@ if(descriptor)Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',
       if(typeof key==='string'&&key.startsWith('on')){readable();return set_window_event_handler(target,key,value,alias);}
       if(key==='open'){readable();return set_window_open(target,value,state);}
       return Reflect.set(target,key,value,target);
-    });
+    },{virtual_accessors:true,read_accessor:key=>window_runtime_accessor(target,key)});
     if(!state.opaque()&&(!state.url()||state.origin()===ctx.origin))register_window_event_alias(state.window,target);
     windows.set(target,state.window);
     window_states.set(target,state);

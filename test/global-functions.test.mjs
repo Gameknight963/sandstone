@@ -183,6 +183,79 @@ test('Reflected virtual accessors stay lazy, retain getter identity and preserve
   assert.equal(virtual.storage,'patched');assert.equal(original.get.call(virtual),'virtual');
 });
 
+test('Window accessor views never return provisional native objects through bound or unbound reflected getters',()=>{
+  const nativeNavigator={kind:'native'},virtualNavigator={kind:'virtual'},target={};let ready=false,nativeReads=0;
+  Object.defineProperty(target,'navigator',{configurable:true,enumerable:true,get(){nativeReads++;if(this!=null&&this!==target)throw new TypeError('Illegal invocation');return nativeNavigator;}});
+  const read=()=>ready?virtualNavigator:undefined;
+  const view=create_obj_proxy({},[],target,undefined,read,undefined,{virtual_accessors:true});
+  const first=Object.getOwnPropertyDescriptor(view,'navigator'),second=Object.getOwnPropertyDescriptor(view,'navigator');
+  const get=first.get;
+  assert.equal(first.get,second.get);assert.equal(first.enumerable,true);assert.equal(nativeReads,0);
+  assert.equal(view.navigator,undefined);assert.equal(get(),undefined);assert.equal(first.get.call(null),undefined);
+  assert.equal(first.get.call(view),undefined);assert.equal(first.get.call(target),undefined);assert.equal(nativeReads,0);
+  ready=true;
+  assert.equal(view.navigator,virtualNavigator);assert.equal(get(),virtualNavigator);assert.equal(first.get.call(view),virtualNavigator);
+  assert.equal(first.get,Object.getOwnPropertyDescriptor(view,'navigator').get);assert.equal(nativeReads,0);
+  assert.throws(()=>first.get.call({}),TypeError);assert.equal(nativeReads,1);
+});
+
+test('Borrowed Window getters and setters use the destination view without observing its property overrides',()=>{
+  const writes=[],make=name=>{
+    const target={};Object.defineProperty(target,'location',{configurable:true,enumerable:true,get(){throw new Error('Native location escaped');},set(){throw new Error('Native location setter escaped');}});
+    const location={name},model={get location(){return location;},set location(value){writes.push([name,value]);}};
+    return {target,view:create_obj_proxy(model,['location'],target,undefined,undefined,undefined,{virtual_accessors:true}),location};
+  };
+  const a=make('a'),b=make('b'),property=Object.getOwnPropertyDescriptor(a.view,'location');
+  const {get,set}=property;
+  assert.equal(get(),a.location);assert.equal(property.get.call(b.view),b.location);assert.equal(property.get.call(b.target),b.location);
+  Object.defineProperty(b.view,'location',{value:'own override',configurable:true});
+  assert.equal(b.view.location,'own override');assert.equal(property.get.call(b.view),b.location);
+  set('default');property.set.call(b.view,'borrowed');property.set.call(b.target,'raw receiver');
+  assert.deepEqual(writes,[['a','default'],['b','borrowed'],['b','raw receiver']]);
+});
+
+test('Unforgeable Window accessors reflect virtual slots and restore without changing native descriptors',()=>{
+  const target={},location={href:'virtual'};let nativeReads=0;
+  Object.defineProperty(target,'location',{enumerable:true,get(){nativeReads++;return 'native';},set(){throw new Error('Native navigation');}});
+  const physical=Object.getOwnPropertyDescriptor(target,'location'),writes=[];
+  const view=create_obj_proxy({get location(){return location;},set location(value){writes.push(value);}},['location'],target,undefined,undefined,undefined,{virtual_accessors:true});
+  const property=Object.getOwnPropertyDescriptor(view,'location'),get=property.get,set=property.set;
+  assert.equal(property.configurable,false);assert.equal(get(),location);assert.equal(get.call(view),location);
+  assert.equal(Reflect.getOwnPropertyDescriptor(view,'location').get,get);
+  assert.equal(Object.getOwnPropertyDescriptors(view).location.get,get);
+  set('relative');assert.deepEqual(writes,['relative']);assert.equal(nativeReads,0);
+  assert.equal(Object.defineProperty(view,'location',property),view);
+  assert.equal(Reflect.defineProperty(view,'location',property),true);
+  assert.equal(Object.defineProperties(view,{location:property}),view);
+  assert.equal(Reflect.defineProperty(view,'location',{get(){}}),false);
+  assert.throws(()=>Object.defineProperty(view,'location',{get(){}}),TypeError);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(target,'location'),physical);
+  assert.equal(Reflect.deleteProperty(view,'location'),false);
+  Object.preventExtensions(view);assert.equal(get(),location);assert.equal(Object.isExtensible(view),false);
+});
+
+test('Window getters without a replacement still adapt borrowed virtual receivers',()=>{
+  const make=()=>{
+    const target={navigator:{}};
+    Object.defineProperty(target,'platform',{configurable:true,get(){if(this!==target)throw new TypeError('Illegal invocation');return this.navigator;}});
+    return {target,view:create_obj_proxy({},[],target,undefined,undefined,undefined,{virtual_accessors:true})};
+  };
+  const a=make(),b=make(),{get}=Object.getOwnPropertyDescriptor(a.view,'platform');
+  assert.equal(get(),a.target.navigator);assert.equal(get.call(b.view),b.target.navigator);
+  assert.throws(()=>get.call({}),TypeError);
+});
+
+test('Window reflection converts property keys and descriptor fields once before applying definitions',()=>{
+  const view=create_obj_proxy({},[],{},undefined,undefined,undefined,{virtual_accessors:true}),events=[];
+  const key={[Symbol.toPrimitive](hint){events.push(hint);return 'value';}};
+  const input=new Proxy({value:42,writable:true,configurable:true},{has(object,name){events.push('has:'+name);return Reflect.has(object,name);},get(object,name){events.push('get:'+name);return Reflect.get(object,name);}});
+  assert.equal(Reflect.defineProperty(view,key,input),true);assert.equal(view.value,42);
+  assert.deepEqual(events,['string','has:enumerable','has:configurable','get:configurable','has:value','get:value','has:writable','get:writable','has:get','has:set']);
+  assert.throws(()=>Object.defineProperties(view,{first:{value:'should not install'},second:{get:1}}),TypeError);
+  assert.equal(Object.hasOwn(view,'first'),false);
+  assert.throws(()=>Object.defineProperties(view,undefined),TypeError);
+});
+
 test('Descriptor-based instrumentation and restoration preserve virtual APIs and writable flags',()=>{
   const target={api(){return 'native';}},api=()=> 'virtual',virtual=create_obj_proxy({api},['api'],target);
   const original=Object.getOwnPropertyDescriptor(virtual,'api');

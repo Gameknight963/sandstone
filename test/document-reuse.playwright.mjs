@@ -56,6 +56,7 @@ export async function verifyDocumentReuse(page,{mode='standards'}={}){
         if(proxy)child.addEventListener('load',async()=>{
           try{
             let rejected;
+            if(runtime.context.get_runtime_context()!==undefined)throw new Error('The old document context remained public after native replacement');
             const channel=endpoint();
             try{runtime.rpc.connect_reused_frame_host(channel.port2,'wrong nonce');}catch(error){rejected=error.name;}
             if(rejected!=='SecurityError')throw new Error('Host rebind accepted the wrong bootstrap nonce');
@@ -68,6 +69,7 @@ export async function verifyDocumentReuse(page,{mode='standards'}={}){
             try{await runtime.loader.load_reused_document({...options,document_origin:'http://another-origin.test',beacon_context:'rejected',html:markup});}catch(error){rejected=error.name;}
             if(rejected!=='SecurityError')throw new Error('Window reuse accepted a changed virtual origin');
             await runtime.loader.load_reused_document({...options,beacon_context:'after',local_storage:[['seed','saved']],html:markup});
+            if(!runtime.context.get_runtime_context())throw new Error('The replacement context did not activate');
             try{await runtime.loader.load_reused_document({...options,beacon_context:'third',html:markup});}catch(error){rejected=error.name;}
             if(rejected!=='InvalidStateError')throw new Error('Window reuse accepted the same document twice');
             try{runtime.rpc.connect_reused_frame_host(channel.port2,nonce);}catch(error){rejected=error.name;}

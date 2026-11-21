@@ -99,7 +99,7 @@ export function rewrite_iframe(iframe_element) {
   const authored=new Map(['src','srcdoc','sandbox','allow'].map(key=>[key,iframe_element.getAttribute(key)]));
   const javascript_source=(value=authored_src)=>{try{const url=convert_url(value,ctx.document.baseURI,loader.character_encoding);if(url.startsWith('javascript:'))return url;}catch{}};
   let javascript_revision=0,pending_javascript=javascript_source()?{url:javascript_source(),initial:true}:null,blank_initialization;
-  let initial_javascript,blank_options,blank_nonce;
+  let initial_javascript,initial_result_pending,blank_options,blank_nonce;
   const blank_url=()=>{
     if(authored.get('srcdoc')!==null)return;
     if(javascript_source())return 'about:blank';
@@ -169,6 +169,7 @@ export function rewrite_iframe(iframe_element) {
   let iframe_url = "";
   let generation=0,active_request,commit=Promise.resolve();
   const retire=()=>{
+    initial_result_pending=undefined;
     generation++;active_request?.abort();iframe_url='';active_target=undefined;blank_ready=false;blank_load_pending=true;release_load();
     const closing=generation;
     const release=commit.then(async()=>{
@@ -181,6 +182,10 @@ export function rewrite_iframe(iframe_element) {
 
   ensure_blank=target=>{
     if(!initializing_blank)reconcile_iframes(iframe_element);
+    if(initial_result_pending?.target===target)return false;
+    if(initial_javascript?.phase===1){
+      try{if(target.document!==initial_javascript.document)return false;}catch{return false;}
+    }
     if(blank_ready){try{if(target.sandstone_frame===blank_runtime)return true;}catch{}blank_ready=false;}
     const url=blank_url();
     if(initializing_blank||native_runtime_load||!url||!iframe_element.isConnected)return false;
@@ -301,11 +306,12 @@ export function rewrite_iframe(iframe_element) {
         const runtime=state.runtime,result=state.result,revision_id=generation;
         const old_port=runtime.rpc.host.target,old_token=runtime.loader.beacon_context;
         const url=runtime.loader.url,creator_url=blank_options.cookie_url;
+        const pending=initial_result_pending={target};
         clear_initial_javascript();
         commit.then(async()=>{
           await document_barrier(old_port,old_token);
           if(revision===javascript_revision&&generation===revision_id&&iframe_element.isConnected)await fetch_src(url,null,{history_mode:'replace',result_document:true},{...result.document,html:result.html,creator_url});
-        }).catch(error=>{if(revision===javascript_revision&&iframe_element.isConnected&&error?.name!=='AbortError')console.error(error);});
+        }).catch(error=>{if(revision===javascript_revision&&iframe_element.isConnected&&error?.name!=='AbortError')console.error(error);}).finally(()=>{if(initial_result_pending===pending)initial_result_pending=undefined;});
         return;
       }
       const runtime=state.runtime,result=state.result,old_ready=blank_initialization,old_commit=commit;
@@ -364,6 +370,7 @@ export function rewrite_iframe(iframe_element) {
     if(!iframe_element.isConnected||native_dom.owner.call(iframe_element)!==document)return;
     const javascript=javascript_source(value);
     if(javascript)return run_javascript({url:javascript,initial:false},++javascript_revision);
+    if(!document_result)initial_result_pending=undefined;
     const inline=navigation.srcdoc||new URL(value,ctx.document.baseURI).href.split('#')[0]==='about:srcdoc';
     if(inline&&authored.get('srcdoc')===null)return;
     if(!document_result&&!navigation.srcdoc&&active_target&&inline&&iframe_url.split('#')[0]==='about:srcdoc'&&String(value).includes('#')&&navigation.history_mode!=='reload'){
@@ -560,6 +567,7 @@ export function rewrite_iframe(iframe_element) {
   }
 
   set_src=value=>{
+      initial_result_pending=undefined;
       clear_initial_javascript();
       javascript_revision++;pending_javascript=null;
       authored_src=value;

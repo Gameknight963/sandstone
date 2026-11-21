@@ -21,6 +21,7 @@ import {install_node_documents} from './node_documents.mjs';
 import {document_base_url} from './document_base.mjs';
 import {create_response_redirect} from './response.mjs';
 export {get_runtime_context} from './runtime_context.mjs';
+export {get_global_reflection_group} from './global_reflection.mjs';
 export {is_default_open,default_open} from './intercept/open.mjs';
 const parse_json = JSON.parse;
 const realm_global=globalThis,evaluate_global=globalThis.eval,describe_global=Reflect.getOwnPropertyDescriptor,define_global=Reflect.defineProperty;
@@ -58,7 +59,7 @@ export class CustomCTX {
   get __module_intrinsics__(){return worker_module_intrinsics;}
   constructor() {
     ctx_vars.push(...new Set([...get_handler_keys(this),...global_method_names(globalThis),...html_constructor_names]));
-    this.__proxy__ = create_obj_proxy(this, ctx_vars, globalThis, (value,key)=>virtual_html_constructor(virtual_frame_window(value,key)));
+    this.__proxy__ = create_obj_proxy(this, ctx_vars, globalThis, (value,key)=>virtual_html_constructor(virtual_frame_window(value,key)),undefined,undefined,{virtual_accessors:true});
   }
 
   set location(value) {internal.location.assign(value)}

@@ -1,4 +1,4 @@
-import {window_runtime_context} from './runtime_context.mjs';
+import {window_runtime_context,window_runtime_value,window_runtime_accessor} from './runtime_context.mjs';
 import {ctx} from './context.mjs';
 import {create_obj_proxy,unwrap_global_target} from './global_functions.mjs';
 import {encode_message} from './polyfill/crypto.mjs';
@@ -75,13 +75,10 @@ function ancestor_window(target,token,parent,top){
     window:{get:()=>window},self:{get:()=>window},frames:{get:()=>window},
     parent:{get:()=>parent?.()||window},top:{get:()=>top?.()||window}
   });
-  window=create_obj_proxy(replacements,[],target,undefined,key=>{
-    const context=window_runtime_context(target);
-    return context?context[key]:target[key];
-  },(key,value)=>{
+  window=create_obj_proxy(replacements,[],target,undefined,key=>window_runtime_value(target,key),(key,value)=>{
     if(key==='open'){readable_open();return set_window_open(target,value,open_state);}
     return Reflect.set(target,key,value,target);
-  });
+  },{virtual_accessors:true,read_accessor:key=>window_runtime_accessor(target,key)});
   register_message_peer(target,token,()=>window);
   return window;
 }

@@ -1,7 +1,9 @@
+import {register_global_reflection,global_accessor_view} from './global_reflection.mjs';
 // Binding a global method must not write .call/.apply onto the original function:
 // window.addEventListener can share that function with EventTarget.prototype.
 const native_targets=new WeakMap();
 const native_bindings=new WeakMap();
+const virtual_accessor_functions=new WeakMap();
 const native_function_targets=new WeakMap();
 export function unwrap_global_function(value){while(native_function_targets.has(value))value=native_function_targets.get(value);return value;}
 export function bind_native_property(proxy,key){native_bindings.get(proxy)?.(key);}
@@ -45,8 +47,8 @@ export function bind_global_function(target, method, virtual_target) {
   native_function_targets.set(bound,method);return bound;
 }
 
-export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,write_native) {
-  const methods = new WeakMap(),overrides=new Map(),deleted=new Set(),accessors=new Map(),live=new Set();
+export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,write_native,{virtual_accessors=false,read_accessor=read_native}={}) {
+  const methods = new WeakMap(),overrides=new Map(),deleted=new Set(),accessors=new Map(),generated_accessors=new Map(),live=new Set();
   const originalOwn=new Set(Reflect.ownKeys(target));
   const descriptor=(object,key)=>{while(object){const found=Reflect.getOwnPropertyDescriptor(object,key);if(found)return found;object=Reflect.getPrototypeOf(object);}};
   const remember=value=>{if(typeof value==='function'&&!methods.has(value))methods.set(value,value);return value;};
@@ -87,26 +89,41 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
       }
       return value;
   };
-  const own=key=>{
+  const own=(key,reflected=false)=>{
     const native=Reflect.getOwnPropertyDescriptor(target,key),override=overrides.get(key);
     if(live.has(key))return native&&'value'in native?{...native,value:read(key)}:native;
-    if(native&&!native.configurable)return 'value'in native&&native.writable?{...native,value:read(key)}:native;
+    if(native&&!native.configurable&&('value'in native||!reflected))return 'value'in native&&native.writable?{...native,value:read(key)}:native;
     if(!native&&!Reflect.isExtensible(target))return;
     if(override)return {...override};
     if(!native)return;
     if('value'in native)return {...native,value:read(key)};
-    if(deleted.has(key)||!replacement_allowed(key)||!(key in obj))return native;
-    const implementation=descriptor(obj,key);
+    if(deleted.has(key)||!replacement_allowed(key))return native;
+    let implementation=key in obj?descriptor(obj,key):undefined;
+    if(!implementation&&virtual_accessors){
+      implementation=generated_accessors.get(key);
+      if(!implementation||implementation.nativeGet!==native.get||implementation.nativeSet!==native.set){
+        implementation={nativeGet:native.get,nativeSet:native.set,
+          get:()=>read_accessor?read_accessor(key):native.get&&Reflect.apply(native.get,target,[]),
+          set:value=>write_native?write_native(key,value,proxy):native.set&&Reflect.apply(native.set,target,[value])};
+        generated_accessors.set(key,implementation);
+      }
+    }
     if(!implementation)return native;
     let cached=accessors.get(key);
     if(!cached||cached.nativeGet!==native.get||cached.nativeSet!==native.set||cached.get!==implementation.get||cached.set!==implementation.set||cached.value!==implementation.value){
-      const adapt=(method,operation)=>method&&new Proxy(method,{apply(fn,receiver,args){
-        if(receiver===proxy||receiver===target)return operation(...args);
+      const adapt=(method,operation,kind)=>{
+        if(!method)return;
+        const wrapped=new Proxy(method,{apply(fn,receiver,args){
+        if(receiver===proxy||receiver===target||virtual_accessors&&receiver==null)return operation(...args);
+        const view=virtual_accessors&&global_accessor_view(receiver);
+        if(view)return kind==='get'?view.get(key):view.set(key,args[0]);
         return Reflect.apply(fn,unwrap_global_target(receiver),args);
-      }});
+        }});
+        virtual_accessor_functions.set(wrapped,method);return wrapped;
+      };
       cached={nativeGet:native.get,nativeSet:native.set,...implementation,
-        getter:adapt(native.get,()=>implementation.get?implementation.get.call(obj):implementation.value),
-        setter:adapt(native.set,value=>implementation.set?implementation.set.call(obj,value):Reflect.set(target,key,value,target))};
+        getter:adapt(native.get,()=>implementation.get?implementation.get.call(obj):implementation.value,'get'),
+        setter:adapt(native.set,value=>implementation.set?implementation.set.call(obj,value):Reflect.set(target,key,value,target),'set')};
       accessors.set(key,cached);
     }
     return {...native,get:cached.getter,set:cached.setter};
@@ -190,6 +207,19 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
     }
   });
   native_targets.set(proxy,target);
+  if(virtual_accessors){
+    const view={get(key){const implementation=descriptor(obj,key);return implementation?.get?implementation.get.call(obj):implementation&&'value'in implementation?implementation.value:read_accessor?read_accessor(key):read(key);},
+      set(key,value){const implementation=descriptor(obj,key);return implementation?.set?implementation.set.call(obj,value):write_native?write_native(key,value,proxy):Reflect.set(target,key,value,target);}};
+    register_global_reflection(target,{accessor:view});
+    register_global_reflection(proxy,{accessor:view,describe:key=>own(key,true),define(key,input){
+      const physical=Reflect.getOwnPropertyDescriptor(target,key),normalized={...input};
+      if(physical&&!physical.configurable)for(const name of ['get','set']){
+        const original=virtual_accessor_functions.get(input[name]);
+        if(original&&original===physical[name])normalized[name]=original;
+      }
+      return define(key,normalized);
+    }});
+  }
   // A published global declaration remains a native variable binding. Raw
   // identifier writes, property writes and later descriptors share that slot.
   native_bindings.set(proxy,(key,declared=false)=>{
