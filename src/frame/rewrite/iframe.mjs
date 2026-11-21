@@ -99,6 +99,13 @@ export function rewrite_iframe(iframe_element) {
   const authored=new Map(['src','srcdoc','sandbox','allow'].map(key=>[key,iframe_element.getAttribute(key)]));
   const javascript_source=(value=authored_src)=>{try{const url=convert_url(value,ctx.document.baseURI,loader.character_encoding);if(url.startsWith('javascript:'))return url;}catch{}};
   let javascript_revision=0,pending_javascript=javascript_source()?{url:javascript_source(),initial:true}:null,blank_initialization;
+  const javascript_tasks=new Set();
+  function supersede_javascript(){
+    javascript_revision++;pending_javascript=null;
+    // A discarded realm may never reply to its initial readiness requests.
+    for(const task of javascript_tasks)task.cancel();
+    return javascript_revision;
+  }
   let initial_javascript,initial_result_pending,blank_options,blank_nonce;
   const blank_url=()=>{
     if(authored.get('srcdoc')!==null)return;
@@ -168,7 +175,6 @@ export function rewrite_iframe(iframe_element) {
   let window_name=initial_name,opaque_origin=false;
   let iframe_url = "";
   let generation=0,active_request,commit=Promise.resolve(),context_ready=commit;
-  const javascript_tasks=new Set();
   async function wait_javascript(signal,revision){
     let aborted;
     const cancelled=new Promise(resolve=>{aborted=resolve;signal.addEventListener('abort',aborted,{once:true});});
@@ -367,16 +373,17 @@ export function rewrite_iframe(iframe_element) {
 
   async function run_javascript(pending,revision){
     if(!iframe_element.isConnected)return;
-    let finish;
+    let finish,cancel;
     const completed=new Promise(resolve=>{finish=resolve;});
-    const task={generation,completed};javascript_tasks.add(task);
+    const cancelled=new Promise(resolve=>{cancel=resolve;});
+    const task={generation,completed,cancel};javascript_tasks.add(task);
     try{
       if(!iframe_url)ensure_blank(native_frame_window(iframe_element));
       task.generation=generation;
       // A replacement Window needs its own URL, origin and storage capability
       // before it can evaluate a queued JavaScript navigation.
       let ready;
-      do{ready=context_ready;await ready;if(revision!==javascript_revision||!iframe_element.isConnected)return;}while(ready!==context_ready);
+      do{ready=context_ready;await Promise.race([ready,cancelled]);if(revision!==javascript_revision||!iframe_element.isConnected)return;}while(ready!==context_ready);
       // Evaluate without waiting for parser-blocking scripts. A string result
       // starts the replacement and cancels the old load in fetch_src; other
       // completion values leave the original document loading normally.
@@ -395,7 +402,7 @@ export function rewrite_iframe(iframe_element) {
     navigation={activation:navigation_activation(),...navigation};
     if(!iframe_element.isConnected||native_dom.owner.call(iframe_element)!==document)return;
     const javascript=javascript_source(value);
-    if(javascript)return run_javascript({url:javascript,initial:false},++javascript_revision);
+    if(javascript)return run_javascript({url:javascript,initial:false},javascript_revision);
     if(!document_result)initial_result_pending=undefined;
     const inline=navigation.srcdoc||new URL(value,ctx.document.baseURI).href.split('#')[0]==='about:srcdoc';
     if(inline&&authored.get('srcdoc')===null)return;
@@ -403,6 +410,9 @@ export function rewrite_iframe(iframe_element) {
       return rpc.call_procedure(active_target,'navigate_fragment',[value]);
     }
     const target_url=convert_url(value,ctx.document.baseURI,loader.character_encoding);
+    // Location and named-target navigations do not pass through the src
+    // setter. They must also supersede programs waiting on the old context.
+    if(!document_result)supersede_javascript();
     const blank_result=!!document_result&&/^about:blank(?:#|$)/.test(target_url);
     const local=/^(?:blob|data):/.test(target_url),blob=target_url.startsWith('blob:');
     runtime_sandbox=true;render_sandbox();
@@ -609,7 +619,7 @@ export function rewrite_iframe(iframe_element) {
   set_src=value=>{
       initial_result_pending=undefined;
       clear_initial_javascript();
-      javascript_revision++;pending_javascript=null;
+      pending_javascript=null;
       authored_src=value;
       authored.set('src',value);
       if(authored.get('srcdoc')!==null){render_media_attribute(iframe_element,'src','');return;}
@@ -617,12 +627,15 @@ export function rewrite_iframe(iframe_element) {
       if(javascript){
         runtime_sandbox=true;render_sandbox();
         if(prepare_initial_javascript())return;
-        if(!iframe_url)render_media_attribute(iframe_element,'src','');
+        // Keep a real Attr for native attribute APIs without replacing the
+        // active document. Authored JavaScript stays in the virtual runtime.
+        render_media_attribute(iframe_element,'src','javascript:void 0');
         pending_javascript={url:javascript,initial:false};queue_javascript();return;
       }
       let remote=false;
       try{remote=relayed_source(value);}catch{}
       if (!remote || !value){
+        supersede_javascript();
         if(blank_url()){
           active_request?.abort();generation++;blank_load_pending=true;
           runtime_sandbox=true;render_sandbox();render_media_attribute(iframe_element,'src',value??'');return;
@@ -649,7 +662,7 @@ export function rewrite_iframe(iframe_element) {
   track_iframe(iframe_element,{
     disconnect(){
       clear_initial_javascript();
-      javascript_revision++;pending_javascript=null;
+      supersede_javascript();
       retire();
       if(javascript_source()){
         prepare_initial_javascript();return;
