@@ -118,6 +118,17 @@ test('Native storage records retain virtual event URLs and clear emits one publi
   assert.deepEqual(storage.events.map(event=>persistence.storageEvent(event)).filter(Boolean),[{origin:editor,change:{key:null,oldValue:null,newValue:null,url:editor+'/clear'}}]);
 });
 
+test('Inherited-origin storage writers retain blank and srcdoc URLs in peer events',()=>{
+  for(const url of ['about:blank','about:srcdoc']){
+    const storage=new Storage(),store=new SiteDataStore(storage),persistence=new SiteDataStorage(storage);
+    for(const change of [{type:'set',key:'child',value:'saved'},{type:'clear'}]){
+      storage.events=[];store.changeLocal(editor,{...change,url});
+      const events=storage.events.map(event=>persistence.storageEvent(event)).filter(Boolean);
+      assert.equal(events.length,1);assert.equal(events[0].origin,editor);assert.equal(events[0].change.url,url);
+    }
+  }
+});
+
 test('Cookie creation order survives native storage enumeration in a different order',()=>{
   const storage=new Storage(),store=new SiteDataStore(storage),creation=new Date().toISOString();
   const common={key:'token',path:'/',maxAge:86400,creation,lastAccessed:creation};

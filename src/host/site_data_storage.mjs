@@ -4,7 +4,9 @@ const durable=cookie=>(cookie.expires&&cookie.expires!=='Infinity')||typeof cook
 export const cookie_storage_key=cookie=>JSON.stringify([cookie.domain,cookie.path||'/',cookie.key||'']);
 const same=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
 export const compare_storage_order=(a,b)=>a[0]-b[0]||a[1]-b[1]||String(a[2]).localeCompare(String(b[2]));
-const source=(origin,input)=>{try{const url=new URL(input||origin);if(url.origin===origin)return url.href;}catch{}return origin+'/';};
+// Inputs arrive from the host's authenticated document context. Blank/srcdoc
+// documents inherit an origin while retaining their own URL in storage events.
+const source=(origin,input)=>{try{const url=new URL(input||origin);if(url.origin===origin||url.protocol==='about:'&&['blank','srcdoc'].includes(url.pathname))return url.href;}catch{}return origin+'/';};
 const token=value=>{try{return JSON.parse(value)?.id||value;}catch{return value;}};
 
 // Each cookie and localStorage entry has its own native storage key. An epoch

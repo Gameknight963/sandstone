@@ -59,19 +59,19 @@ function commit(id,source,change,kind){
   if(kind==='local'&&source.cleared_local)return;
   if(kind==='local')site_data.refresh();
   const {origin}=source;
+  let url=source.url;
+  try{if(new URL(change.url).origin===origin)url=new URL(change.url).href;}catch{}
   const previous=kind==='local'?site_data.local[origin]:source.session[origin];
   const next=apply_storage_change(previous,change);
   if(kind==='local'){
     committingLocal=true;
-    try{site_data.changeLocal(origin,change);}finally{committingLocal=false;}
+    try{site_data.changeLocal(origin,{...change,url});}finally{committingLocal=false;}
   }else source.session[origin]=next;
   const before=new Map(previous||[]),key=change.type==='clear'?null:change.key;
   const oldValue=key===null?null:before.get(key)??null;
   const newValue=change.type==='set'?change.value:null;
   const changed=key===null?before.size>0:oldValue!==newValue;
   const version=revision(kind,source,true);
-  let url=source.url;
-  try{if(new URL(change.url).origin===origin)url=new URL(change.url).href;}catch{}
   for(const [peerId,peer] of clients){
     if(peer.origin!==origin||(kind==='session'&&peer.root!==source.root))continue;
     const owner=peerId===id&&peer.token===change.context;

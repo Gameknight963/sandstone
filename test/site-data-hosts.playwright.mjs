@@ -31,6 +31,14 @@ export async function verifyHostSiteData(browser,target){
     },origin+path);
   }
   try{
+    const native=await context.newPage();
+    await native.route(origin+'/**',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><body>Native storage event'}));
+    await native.goto(origin+'/native');
+    const childURL=await native.evaluate(()=>new Promise(resolve=>{
+      addEventListener('storage',event=>{if(event.key==='child')resolve(event.url);},{once:true});
+      const frame=document.createElement('iframe');frame.srcdoc='<script>localStorage.setItem("child","srcdoc")<\/script>';document.body.append(frame);
+    }));
+    assert.equal(childURL,'about:srcdoc');await native.close();
     const first=await context.newPage(),second=await context.newPage();
     await open(first,'/first');await open(second,'/second');
     assert.deepEqual(await first.evaluate(origin=>{
@@ -45,8 +53,12 @@ export async function verifyHostSiteData(browser,target){
     await write(first,'document.cookie="login=one; Max-Age=86400; Path=/";localStorage.setItem("saved","one")');
     await wait(second,'document.cookie==="login=one"&&localStorage.saved==="one"&&storageEvents.length===1');
     assert.deepEqual(await read(second,'storageEvents'),[{key:'saved',oldValue:null,newValue:'one',url:origin+'/first',area:true}]);
+    await write(first,`globalThis.writer=document.createElement('iframe');writer.srcdoc='<script>localStorage.setItem("child","srcdoc")<\\/script>';document.body.append(writer)`);
+    await wait(second,'localStorage.child==="srcdoc"');
+    assert.deepEqual(await read(second,'storageEvents.at(-1)'),{key:'child',oldValue:null,newValue:'srcdoc',url:childURL,area:true});
+    await write(first,'writer.remove();storageEvents.length=0');
     await write(first,'localStorage.setItem("saved","one")');
-    await second.waitForTimeout(50);assert.equal(await read(second,'storageEvents.length'),1);
+    await second.waitForTimeout(50);assert.equal(await read(second,'storageEvents.length'),2);
     await first.evaluate(()=>history.replaceState(null,'',location.href.split('#')[0]));
     await first.reload();await open(first,'/reloaded');
     assert.deepEqual(await first.evaluate(origin=>{
@@ -70,6 +82,6 @@ export async function verifyHostSiteData(browser,target){
     await first.reload();await open(first,'/cleared');
     assert.deepEqual(await read(first,'({cookie:document.cookie,size:localStorage.length})'),{cookie:'',size:0});
     assert.deepEqual(errors,[]);
-    return ['Independent standalone hosts synchronize cookies and storage events','Peer writes preserve durable site data across host reloads','Cross-host clears reject late cookies and cannot restore stale snapshots'];
+    return ['Independent standalone hosts synchronize cookies and storage events','Inherited-origin child storage events retain native source URLs across hosts','Peer writes preserve durable site data across host reloads','Cross-host clears reject late cookies and cannot restore stale snapshots'];
   }finally{await context.close();}
 }
