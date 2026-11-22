@@ -10,6 +10,7 @@ import {owner_prefix,publish_backend} from './worker_discovery.mjs';
 import {crypto_service} from './crypto.mjs';
 import {PortRelay} from './port_relay.mjs';
 import {SharedWorkerOwners} from '../shared_worker/owners.mjs';
+import {actor_profile} from '../shared_worker/bootstrap.mjs';
 
 // This bundle runs only in a trusted host-origin worker. Authored JavaScript
 // belongs in a separate opaque runtime, connected through WorkerServiceHost.
@@ -18,7 +19,7 @@ const hosts=new Map(),providers=new PolicyProviders();
 const cookie_policy=new CookiePolicyBridge((message,options)=>providers.request(message,options));
 const identity=create_bootstrap_nonce();
 const actorTargets=new Map();
-const actors=new SharedWorkerOwners({createProfile:(_,initialization)=>({url:initialization.native_url}),onUIClosed:id=>actorTargets.delete(id),onError:error=>{
+const actors=new SharedWorkerOwners({createProfile:(_,initialization)=>initialization?.native_url?{url:initialization.native_url}:actor_profile(),onUIClosed:id=>actorTargets.delete(id),onError:error=>{
   try{actorTargets.get(error.ui)?.postMessage({type:'actor-error',worker:error.actor,client:error.client,message:String(error.message||'Shared worker failed'),filename:String(error.filename||'')});}catch{}
 }});
 let websocket,ready,publication,publishedKey,ending=false;
