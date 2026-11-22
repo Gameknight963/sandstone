@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {wait_for} from './wait-for.mjs';
 
 function authored(){
   let connections=0;
@@ -17,7 +18,7 @@ function authored(){
 }
 
 export async function verify_shared_bootstrap(browser,origin){
-  const context=await browser.newContext(),deadline=setTimeout(()=>context.close().catch(()=>{}),45000);
+  const context=await browser.newContext(),session=await browser.newBrowserCDPSession(),deadline=setTimeout(()=>context.close().catch(()=>{}),45000);
   const load=async()=>{
     const page=await context.newPage();await page.goto(origin+'/host-worker/page');await page.addScriptTag({url:origin+'/host-worker/bundle.js'});
     await page.evaluate(async websocket=>{
@@ -110,6 +111,24 @@ export async function verify_shared_bootstrap(browser,origin){
     assert.equal(recovered.hello.phase,'bootstrap');assert.notEqual(recovered.hello.instance,failedInstance);assert.equal(recovered.value.value,'recovered');
     await b.evaluate(()=>{const closed=take(recoveryControl.port);recoveryControl.port.postMessage({sandstone_actor:recoveryControl.profile.nonce,instance:recoveryControl.hello.instance,type:'terminate'});return closed;});
     await b.evaluate(()=>backend.request('close',{worker:service}));await b.evaluate(()=>backend.request('actor-close',{worker:recoveryControl.id}));
-    return ['An abandoned bootstrap candidate does not prevent another UI initializing the same opaque actor','Private native instance greetings precede trusted authored connect events','Native scope replacement receives a new identity and ignores stale termination commands','Module startup can become ready before an unresolved top-level await finishes','Authored native API instrumentation cannot disable private termination','A startup failure reports its error and the next constructor starts a fresh native instance'];
-  }finally{clearTimeout(deadline);await context.close();}
+    const survivor=await load(),orphanDescriptor={...descriptor,url:'https://shared-bootstrap.test/orphan.js',options:{name:'orphan',extendedLifetime:true}};
+    const orphan=await b.evaluate(async({descriptor,source})=>{
+      globalThis.orphan=await acquire({document:'orphan-control',descriptor});
+      const initialized=await initialize(orphan,source);await initialized.ready;globalThis.service=initialized.service;
+      return {id:orphan.id,url:orphan.profile.url,instance:orphan.hello.instance};
+    },{descriptor:orphanDescriptor,source:'('+authored.toString()+')();'});
+    const exists=async()=>(await session.send('Target.getTargets')).targetInfos.some(target=>target.type==='shared_worker'&&target.url===orphan.url);
+    assert.equal(await exists(),true);await b.evaluate(()=>backend.request('close',{worker:service}));await b.close();
+    await wait_for(async()=>!await exists(),{timeout:15000});
+    const replacement=await survivor.evaluate(async({descriptor,source})=>{
+      globalThis.replacement=await acquire({document:'physical-replacement',descriptor});
+      const initialized=await initialize(replacement,source);await initialized.ready;globalThis.service=initialized.service;
+      const client=await acquire({document:'physical-client',descriptor}),received=take(client.port);client.port.postMessage('new owner');
+      return {id:replacement.id,hello:replacement.hello,value:await received};
+    },{descriptor:orphanDescriptor,source:'('+authored.toString()+')();'});
+    assert.equal(replacement.id,orphan.id);assert.notEqual(replacement.hello.instance,orphan.instance);assert.equal(replacement.hello.phase,'bootstrap');assert.equal(replacement.value.connection,1);
+    await survivor.evaluate(()=>{const closed=take(replacement.port);replacement.port.postMessage({sandstone_actor:replacement.profile.nonce,instance:replacement.hello.instance,type:'terminate'});return closed;});
+    await survivor.evaluate(()=>backend.request('close',{worker:service}));await survivor.evaluate(()=>backend.request('actor-close',{worker:replacement.id}));
+    return ['An abandoned bootstrap candidate does not prevent another UI initializing the same opaque actor','Private native instance greetings precede trusted authored connect events','Native scope replacement receives a new identity and ignores stale termination commands','Module startup can become ready before an unresolved top-level await finishes','Authored native API instrumentation cannot disable private termination','A startup failure reports its error and the next constructor starts a fresh native instance','Losing every physical actor owner permits a fresh native instance within the retained registry lifetime'];
+  }finally{clearTimeout(deadline);await context.close();await session.detach();}
 }
