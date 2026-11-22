@@ -47,6 +47,7 @@
   "files": [
     "src",
     "dist",
+    "vendor/scramjet",
     "vendor/libcurl"
   ]
 }

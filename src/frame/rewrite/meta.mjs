@@ -1,23 +1,28 @@
 import { ctx, convert_url } from "../context.mjs";
 import * as loader from "../loader.mjs";
+import {parseDeclarativeRefresh} from '../../vendor/scramjet/refresh.mjs';
 
 function rewrite_refresh(meta_element) {
   meta_element.setAttribute("http-equiv", "__refresh");
-  let content = meta_element.getAttribute("content");
-  if (!content) return;
-
-  //regex that splits out time and url of the refresh header
-  let content_regex = /(\d+)([;,] ?url=['"]?(.+?)['"]?)?$/im;
-  let matches = content.match(content_regex);
-  let [match, timeout, _, url] = matches;
-  if (!timeout || !match) return;
-  if (!url) url = "/"
-  
-  //do the navigation
-  url = convert_url(url, ctx.location.href);
-  setTimeout(() => {
-    loader.navigate(loader.frame_id, url);
-  }, parseInt(timeout) * 1000);
+  const parsed = parseDeclarativeRefresh(meta_element.getAttribute("content") || '');
+  if (!parsed) return;
+  let url;
+  try {
+    // A missing target reloads the document, including its path and query.
+    // An authored relative target uses the document's effective base URL.
+    url = parsed.url === null ? ctx.location.href : convert_url(parsed.url, ctx.document.baseURI);
+  } catch { return; }
+  // Browser timers overflow after about 25 days. Split long refresh delays so
+  // a large server-provided timeout cannot turn into an immediate navigation.
+  let remaining = parsed.time * 1000;
+  if (!Number.isFinite(remaining)) return;
+  const frame = loader.frame_id;
+  const wait = () => {
+    const delay = Math.min(remaining, 2147483647);
+    remaining -= delay;
+    setTimeout(() => remaining > 0 ? wait() : loader.navigate(frame, url), delay);
+  };
+  wait();
 }
 
 function rewrite_csp(meta_element) {

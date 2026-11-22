@@ -18,6 +18,7 @@ import {verifyAutofocus,verifyAutofocusWithoutScripts} from './autofocus.playwri
 import {verifyIframeLoadLifetime} from './iframe-load-lifetime.playwright.mjs';
 import {verifyCookieExpiry} from './cookie-expiry.playwright.mjs';
 import {verifyWorkerBroadcastOrder} from './worker-broadcast-order.playwright.mjs';
+import {verifyMetaRefresh} from './meta-refresh.playwright.mjs';
 import {verifyFragmentNavigation} from './fragment-navigation.playwright.mjs';
 import {verifyIframeFragments} from './iframe-fragments.playwright.mjs';
 import {verifyIframeLocationEncoding} from './iframe-location-encoding.playwright.mjs';
@@ -539,6 +540,7 @@ try {
     result.passed.push(...await timed(verifyAncestorWindows(page), 'Ancestor windows fixture'));
     result.passed.push(...await timed(verifyBroadcast(page), 'Broadcast channel fixture'));
     result.passed.push(...await timed(verifyWorkerBroadcastOrder(page), 'Worker broadcast registration fixture'));
+    result.passed.push(...await timed(verifyMetaRefresh(page), 'Meta refresh fixture'));
     result.passed.push(...await timed(verifyLocks(page), 'Web Locks fixture'));
     result.passed.push(...await timed(verifyIframeRaces(page), 'Iframe race fixture'));
     result.passed.push(...await timed(verifyIframeLifecycle(page), 'Iframe lifecycle fixture'));
