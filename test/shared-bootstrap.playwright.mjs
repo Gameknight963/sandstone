@@ -93,6 +93,23 @@ export async function verify_shared_bootstrap(browser,origin){
     const terminated=await b.evaluate(()=>{const closed=take(moduleControl.port);moduleControl.port.postMessage({sandstone_actor:moduleControl.profile.nonce,instance:moduleControl.hello.instance,type:'terminate'});return closed;});
     assert.equal(terminated.type,'closed');assert.equal(terminated.instance,moduleReady);
     await b.evaluate(()=>backend.request('close',{worker:service}));await b.evaluate(()=>backend.request('actor-close',{worker:moduleControl.id}));
-    return ['An abandoned bootstrap candidate does not prevent another UI initializing the same opaque actor','Private native instance greetings precede trusted authored connect events','Native scope replacement receives a new identity and ignores stale termination commands','Module startup can become ready before an unresolved top-level await finishes','Authored native API instrumentation cannot disable private termination'];
+    const failureDescriptor={...descriptor,url:'https://shared-bootstrap.test/failure.js',options:{name:'failure'}};
+    const failedInstance=await b.evaluate(async descriptor=>{
+      globalThis.failureControl=await acquire({document:'failure-control',descriptor});return failureControl.hello.instance;
+    },failureDescriptor);
+    await assert.rejects(b.evaluate(async()=>{
+      const initialized=await initialize(failureControl,'throw new SyntaxError("startup failure");');globalThis.service=initialized.service;await initialized.ready;
+    }),/startup failure/);
+    await b.evaluate(()=>backend.request('close',{worker:service}));
+    const recovered=await b.evaluate(async({descriptor,source})=>{
+      globalThis.recoveryControl=await acquire({document:'recovery-control',descriptor});
+      const initialized=await initialize(recoveryControl,source);globalThis.service=initialized.service;await initialized.ready;
+      const client=await acquire({document:'recovery-client',descriptor}),received=take(client.port);client.port.postMessage('recovered');
+      return {hello:recoveryControl.hello,value:await received};
+    },{descriptor:failureDescriptor,source:'('+authored.toString()+')();'});
+    assert.equal(recovered.hello.phase,'bootstrap');assert.notEqual(recovered.hello.instance,failedInstance);assert.equal(recovered.value.value,'recovered');
+    await b.evaluate(()=>{const closed=take(recoveryControl.port);recoveryControl.port.postMessage({sandstone_actor:recoveryControl.profile.nonce,instance:recoveryControl.hello.instance,type:'terminate'});return closed;});
+    await b.evaluate(()=>backend.request('close',{worker:service}));await b.evaluate(()=>backend.request('actor-close',{worker:recoveryControl.id}));
+    return ['An abandoned bootstrap candidate does not prevent another UI initializing the same opaque actor','Private native instance greetings precede trusted authored connect events','Native scope replacement receives a new identity and ignores stale termination commands','Module startup can become ready before an unresolved top-level await finishes','Authored native API instrumentation cannot disable private termination','A startup failure reports its error and the next constructor starts a fresh native instance'];
   }finally{clearTimeout(deadline);await context.close();}
 }
