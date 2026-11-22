@@ -36,7 +36,6 @@ import frame_js from "../../dist/sandstone_frame.js";
 const frame_html=runtime_html(frame_js);
 
 import {iframes} from './frames.mjs';
-import {search_destination} from '../search_redirect.mjs';
 export {iframes};
 const saved_child_histories = new Map();
 export const persist_storage_key = "proxy_local_storage";
@@ -94,7 +93,6 @@ export class ProxyFrame {
   }
 
   async navigate_to(url, form_data=null, navigation = {}, document_result) {
-    if(!form_data&&!document_result)url=search_destination(url);
     if (!util.is_valid_url(url)) throw TypeError("Invalid URL");
     if(new URL(url).protocol==='javascript:')return navigate_javascript(this,this,url);
     const navigation_id = ++this.navigation_id;
@@ -358,7 +356,6 @@ rpc.rpc_handlers["frame_register"] = async (parent_id, child_id, url, options = 
     session_storage: parent.session_storage,
     history: saved?.history || new NavigationHistory(),
     async navigate_to(url, form_data, navigation = {}, document_result) {
-      if(!form_data&&!document_result)url=search_destination(url);
       const previous_url=child.url;
       navigation = {...navigation,source_url:navigation.source_context?.url||child.request_url||child.url.href};
       child.url = new URL(url, child.url);
