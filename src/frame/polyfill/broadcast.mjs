@@ -2,6 +2,7 @@ import * as loader from '../loader.mjs';
 import * as rpc from '../../rpc.mjs';
 import {encode_message} from './crypto.mjs';
 import {worker_task} from '../worker_tasks.mjs';
+import {create_bootstrap_nonce} from '../../bootstrap.mjs';
 
 const states=new WeakMap(),Port=globalThis.MessagePort;
 const close=Port.prototype.close,start=Port.prototype.start,clone=globalThis.structuredClone;
@@ -18,7 +19,7 @@ export class BroadcastChannel extends EventTarget {
     // Keep the native port as the EventTarget so delivery retains native trust,
     // listener ordering, target/currentTarget identity and cancellation.
     Object.setPrototypeOf(port,new.target.prototype);
-    const id=Array.from(crypto.getRandomValues(new Uint32Array(4))).join(':');
+    const id=create_bootstrap_nonce();
     states.set(port,{name,id,context:loader.beacon_context,closed:false});
     add.call(port,'message',event=>{
       if(!event.isTrusted)return;
@@ -30,7 +31,7 @@ export class BroadcastChannel extends EventTarget {
       Object.defineProperties(event,{data:{value:value.data},origin:{value:value.origin}});
     },true);
     start.call(port);
-    worker_task(rpc.call_procedure(rpc.host,'broadcast_open',[loader.beacon_context,id,name,channel.port2],{transfer:[channel.port2]})).catch(()=>{
+    worker_task(rpc.call_procedure(rpc.host,'broadcast_open',[loader.beacon_context,id,name,channel.port2],{transfer:[channel.port2]}),{kind:'broadcast',id}).catch(()=>{
       if(!state(port).closed)port.dispatchEvent(new MessageEvent('messageerror'));
     });
     return port;

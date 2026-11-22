@@ -32,7 +32,9 @@ export async function verifyWorkerBroadcastOrder(page){
         postMessage({kind:'after',detached:payload.bytes.byteLength===0});`;
       await page.evaluate(({source,type})=>main_frame.eval_js(`globalThis.messages=[];globalThis.portMessages=[];
         globalThis.workerURL=URL.createObjectURL(new Blob([${JSON.stringify(source)}],{type:'text/javascript'}));
-        globalThis.worker=new Worker(workerURL,{type:${JSON.stringify(type)}});
+        const entropyDescriptor=Object.getOwnPropertyDescriptor(crypto,'getRandomValues');
+        try{Object.defineProperty(crypto,'getRandomValues',{configurable:true,value(){throw new Error('Private worker entropy used an authored hook');}});globalThis.worker=new Worker(workerURL,{type:${JSON.stringify(type)}});}
+        finally{if(entropyDescriptor)Object.defineProperty(crypto,'getRandomValues',entropyDescriptor);else delete crypto.getRandomValues;}
         worker.onmessage=event=>{
           const data=event.data;
           if(data.kind==='ready'){messages.push({kind:data.kind,bytes:Array.from(data.bytes)});data.port.onmessage=event=>portMessages.push(event.data);data.port.postMessage('roundtrip');}
@@ -52,10 +54,11 @@ export async function verifyWorkerBroadcastOrder(page){
       await page.evaluate(()=>main_frame.eval_js('worker.terminate();channel.close();URL.revokeObjectURL(workerURL);true'));
     }finally{await page.evaluate(()=>broadcastOrder.restore());}
   }
-  for(const exit of ['close','error']){
+  for(const exit of ['close','error','busy']){
     const name='worker-exit-'+exit;await hold_registrations(page,name);
     try{
-      const source='new BroadcastChannel('+JSON.stringify(name)+');'+(exit==='close'?
+      const source='new BroadcastChannel('+JSON.stringify(name)+');'+(exit==='busy'?
+        'onmessage=event=>{postMessage("before busy");event.ports[0].postMessage("entered");while(true){}};':exit==='close'?
         'onmessage=()=>{postMessage("before close");close();};':
         'await new Promise(resolve=>onmessage=resolve);postMessage("before error");throw new Error("forced worker exit");');
       await page.evaluate(({source,type})=>main_frame.eval_js(`globalThis.exitEvents=[];
@@ -63,11 +66,33 @@ export async function verifyWorkerBroadcastOrder(page){
         globalThis.worker=new Worker(workerURL,{type:${JSON.stringify(type)}});
         worker.onmessage=event=>exitEvents.push(event.data);worker.onerror=event=>{event.preventDefault();exitEvents.push('error');};true`),{source,type:exit==='close'?'classic':'module'});
       await page.waitForFunction(()=>broadcastOrder.held.length===1);
-      await page.evaluate(()=>main_frame.eval_js('worker.postMessage("finish");true'));
-      await wait_for(async()=>await page.evaluate(count=>main_frame.eval_js('exitEvents.length==='+count),exit==='close'?1:2));
-      assert.deepEqual(JSON.parse(await page.evaluate(()=>main_frame.eval_js('JSON.stringify(exitEvents)'))),exit==='close'?['before close']:['before error','error']);
+      if(exit==='busy'){
+        await page.evaluate(()=>main_frame.eval_js('globalThis.busyEntered=false;globalThis.busyPort=new MessageChannel();busyPort.port1.onmessage=()=>busyEntered=true;worker.postMessage("finish",[busyPort.port2]);true'));
+        await wait_for(async()=>await page.evaluate(()=>main_frame.eval_js('busyEntered')));
+        assert.equal(await page.evaluate(()=>main_frame.eval_js('exitEvents.length')),0);
+        await page.evaluate(()=>broadcastOrder.held.shift()());
+      }else await page.evaluate(()=>main_frame.eval_js('worker.postMessage("finish");true'));
+      await wait_for(async()=>await page.evaluate(count=>main_frame.eval_js('exitEvents.length==='+count),exit==='error'?2:1));
+      assert.deepEqual(JSON.parse(await page.evaluate(()=>main_frame.eval_js('JSON.stringify(exitEvents)'))),exit==='error'?['before error','error']:['before '+exit]);
       await page.evaluate(()=>main_frame.eval_js('worker.terminate();URL.revokeObjectURL(workerURL);true'));
     }finally{await page.evaluate(()=>broadcastOrder.restore());}
   }
-  return ['Classic/module worker readiness follows every pending BroadcastChannel registration','Held worker messages retain FIFO, synchronous snapshots, buffer detachment and MessagePort transfers','Worker close and startup failure deliver earlier messages without waiting for registrations'];
+  await page.evaluate(()=>{
+    const target=main_frame.rpc_target,authorize=target.authorize;
+    globalThis.restoreResourcePolicy=()=>{target.authorize=authorize;};
+    target.authorize=(message,...args)=>{
+      if(message.procedure==='broadcast_open'&&message.arguments[2]==='worker-resource-rejected')throw new DOMException('Forced registration denial','SecurityError');
+      return authorize(message,...args);
+    };
+  });
+  try{
+    const source='const channel=new BroadcastChannel("worker-resource-rejected");channel.onmessageerror=()=>postMessage("registration error");postMessage("ready");';
+    await page.evaluate(source=>main_frame.eval_js(`globalThis.rejectedEvents=[];
+      globalThis.workerURL=URL.createObjectURL(new Blob([${JSON.stringify(source)}],{type:'text/javascript'}));
+      globalThis.worker=new Worker(workerURL);worker.onmessage=event=>rejectedEvents.push(event.data);true`),source);
+    await wait_for(async()=>await page.evaluate(()=>main_frame.eval_js('rejectedEvents.length===2')));
+    assert.deepEqual(JSON.parse(await page.evaluate(()=>main_frame.eval_js('JSON.stringify(rejectedEvents)'))),['ready','registration error']);
+    await page.evaluate(()=>main_frame.eval_js('worker.terminate();URL.revokeObjectURL(workerURL);true'));
+  }finally{await page.evaluate(()=>restoreResourcePolicy());}
+  return ['Classic/module worker readiness follows every pending BroadcastChannel registration','Held worker messages retain FIFO, synchronous snapshots, buffer detachment and MessagePort transfers','Worker close and startup failure deliver earlier messages without waiting for registrations','Host registration releases posted messages even when a worker never yields again','Rejected registration RPCs release earlier worker messages and deliver their error'];
 }

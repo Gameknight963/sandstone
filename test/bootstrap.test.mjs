@@ -9,6 +9,16 @@ test('Bootstrap nonces use native random bytes without requiring randomUUID',()=
   assert.equal(calls,1);
 });
 
+test('Private nonce generation remains independent of authored crypto and number formatting hooks',()=>{
+  const crypto=globalThis.crypto,descriptor=Object.getOwnPropertyDescriptor(crypto,'getRandomValues'),Bytes=globalThis.Uint8Array,format=Number.prototype.toString;let first,second;
+  try{
+    Object.defineProperty(crypto,'getRandomValues',{configurable:true,value(){throw new Error('Authored entropy hook');}});
+    globalThis.Uint8Array=function(){throw new Error('Authored typed-array constructor');};Number.prototype.toString=function(){throw new Error('Authored formatter');};
+    first=create_bootstrap_nonce();second=create_bootstrap_nonce();
+  }finally{globalThis.Uint8Array=Bytes;Number.prototype.toString=format;if(descriptor)Object.defineProperty(crypto,'getRandomValues',descriptor);else delete crypto.getRandomValues;}
+  assert.match(first,/^[a-f0-9]{32}$/);assert.match(second,/^[a-f0-9]{32}$/);assert.notEqual(first,second);
+});
+
 test('HTML bootstrap binds the existing runtime script without adding executable markup',()=>{
   const source='<!doctype html><head><script type="text/javascript">runtime();</script><script>other();</script>';
   const output=bootstrap_html(source,'first',2);

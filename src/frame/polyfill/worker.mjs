@@ -39,6 +39,8 @@ const native_timeout=globalThis.setTimeout.bind(globalThis),native_clear_timeout
 const native_dispatch=globalThis.dispatchEvent?.bind(globalThis);
 const imported_blobs = new Map();
 const service_profiles=new WeakMap(),worker_instances=document_states('worker-instances');
+const resource_clients=document_states('worker-resource-clients',{weak:false});
+rpc.rpc_handlers.worker_resource_done=(id,kind,resource)=>resource_clients.get(id)?.(kind,resource);
 export function create_service_worker(profile){
   if(typeof profile?.source!=='string')throw new TypeError('A validated service worker script is required');
   const options={type:profile.type||'classic'};service_profiles.set(options,profile);
@@ -290,8 +292,8 @@ function worker_dictionary(input){
 
 export class FakeWorker extends EventTarget {
   #url; #options; #worker; #port; #receiver; #terminated = false;
-  #id = "" + Math.random();
-  #token = "" + Math.random();
+  #id = create_bootstrap_nonce();
+  #token = create_bootstrap_nonce();
   #registered = false;
   #bootstrap;
   #bootstrap_nonce=create_bootstrap_nonce();
@@ -302,7 +304,8 @@ export class FakeWorker extends EventTarget {
   #referrerPolicy;
   #serviceProfile;
   #serviceScripts;
-  #pending_tasks=new Set();
+  #pending_tasks=new Map();
+  #completed_resources=new Set();
   #pending_messages=[];
 
   constructor(url, options = {}) {
@@ -320,6 +323,7 @@ export class FakeWorker extends EventTarget {
     this.#port = channel.port1;
     this.#receiver = channel.port2;
     worker_instances.set(this,{post:args=>this.#post_message(args),terminate:()=>this.#terminate()});
+    resource_clients.set(this.#id,(kind,id)=>this.#resource_done(kind,id));
     this.#removeUnload = on_document_unload(() => this.#terminate());
     this.#referrerPolicy=document_referrer_policy();
     this.#start().catch(error => { if (!this.#terminated) { this.#error(error); this.#terminate(); } });
@@ -442,8 +446,19 @@ export class FakeWorker extends EventTarget {
           this.#error(Object.assign(new Error(event.data.message), {name: event.data.name, stack: event.data.stack}));
           this.#terminate();
         }
-        else if(event.data.type==='task-pending'&&Number.isSafeInteger(event.data.id)&&event.data.id>0)this.#pending_tasks.add(event.data.id);
-        else if(event.data.type==='task-settled'){this.#pending_tasks.delete(event.data.id);this.#flush_messages();}
+        else if(event.data.type==='task-pending'&&Number.isSafeInteger(event.data.id)&&event.data.id>0){
+          const resource=event.data.resource,key=resource?.kind==='broadcast'&&typeof resource.id==='string'?resource.kind+':'+resource.id:null;
+          if(!key||!this.#completed_resources.delete(key))this.#pending_tasks.set(event.data.id,key);
+          this.#flush_messages();
+        }
+        else if(event.data.type==='task-settled'){
+          // Tagged registrations are completed by the host even if this
+          // worker never processes the RPC acknowledgement.
+          const key=this.#pending_tasks.get(event.data.id);
+          if(event.data.failed&&key){this.#pending_tasks.delete(event.data.id);this.#completed_resources.add(key);}
+          else if(!key)this.#pending_tasks.delete(event.data.id);
+          this.#flush_messages();
+        }
         return;
       }
       this.#message('message',event);
@@ -467,6 +482,15 @@ export class FakeWorker extends EventTarget {
     while(!this.#terminated&&!this.#pending_tasks.size&&this.#pending_messages.length){
       const {type,event}=this.#pending_messages.shift();this.#message(type,event);
     }
+  }
+
+  #resource_done(kind,id){
+    if(this.#terminated||kind!=='broadcast'||typeof id!=='string')return;
+    const key=kind+':'+id;let found=false;
+    if(this.#completed_resources.delete(key))return;
+    for(const [task,resource] of this.#pending_tasks)if(resource===key){this.#pending_tasks.delete(task);found=true;}
+    if(!found)this.#completed_resources.add(key);
+    this.#flush_messages();
   }
 
   postMessage(message) {
@@ -496,6 +520,7 @@ export class FakeWorker extends EventTarget {
   #terminate() {
     if (this.#terminated) return;
     this.#terminated = true;
+    resource_clients.delete(this.#id);this.#completed_resources.clear();
     this.#pending_tasks.clear();for(const {event} of this.#pending_messages)for(const port of event.ports)port.close();this.#pending_messages=[];
     this.#controller.abort();
     this.#worker?.terminate();

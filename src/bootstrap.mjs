@@ -7,10 +7,11 @@ export function runtime_content_type(type='text/html'){
   return type;
 }
 const native_crypto=globalThis.crypto;
+const nonce_bytes=Uint8Array,native_random=typeof native_crypto?.getRandomValues==='function'?native_crypto.getRandomValues.bind(native_crypto):undefined;
 export const seed_encoder={encode:encodeURIComponent};
 export function create_bootstrap_nonce(crypto=native_crypto){
-  const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
-  return Array.from(bytes,value=>value.toString(16).padStart(2,'0')).join('');
+  const bytes=new nonce_bytes(16);if(crypto===native_crypto)native_random(bytes);else crypto.getRandomValues(bytes);
+  const digits='0123456789abcdef';let result='';for(let index=0;index<16;index++)result+=digits[bytes[index]>>4]+digits[bytes[index]&15];return result;
 }
 export function bootstrap_html(html,nonce,channels=1){
   const value=encodeURIComponent(JSON.stringify({nonce,channels}));
