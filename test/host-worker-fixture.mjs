@@ -47,7 +47,23 @@ function shared_host_main(){
   };
 }
 
+function prepared_classic(){
+  onconnect=event=>{
+    const port=event.ports[0];port.onmessage=async event=>{
+      try{
+        if(event.data==='missing'){try{globalThis.loadMissing();}catch(error){port.postMessage({missing:error.name});}return;}
+        const headers=await(await fetch('/host-worker/prepare-echo',{credentials:'include'})).json();
+        const target=new URL('/host-worker/socket',location.href);target.protocol=target.protocol==='https:'?'wss:':'ws:';
+        const socket=new WebSocket(target.href,['retained']);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=()=>reject(new Error('Prepared worker socket failed'));});
+        const protocol=socket.protocol;socket.close();
+        port.postMessage({url:location.href,origin,dependency:globalThis.preparedDependency,local:globalThis.preparedLocal,headers,protocol});
+      }catch(error){port.postMessage({error:error.message});}
+    };port.start();
+  };
+}
+
 export async function host_worker_fixture(){
+  const preparationRequests=[],heldPreparations=new Set();
   const heldCookies=new Set();
   const heldWebSockets=new Set();
   const websockets=new WebSocketServer({noServer:true,handleProtocols:protocols=>protocols.has('retained')?'retained':false});
@@ -63,7 +79,7 @@ export async function host_worker_fixture(){
   const bundle=await readFile(new URL('../dist/sandstone.js',import.meta.url));
   const runtime=await readFile(new URL('../dist/sandstone_frame.js',import.meta.url));
   const main='importScripts("/host-worker/bundle.js");('+shared_host_main.toString()+')();';
-  return {upgrade(request,socket,head){
+  return {preparationRequests,heldPreparations,releasePreparations(){for(const response of heldPreparations){response.writeHead(200,{'content-type':'text/javascript'});response.end('export const prepared=true;');}heldPreparations.clear();},upgrade(request,socket,head){
     const path=new URL(request.url,'http://fixture').pathname;
     if(path==='/host-worker/socket-held'){
       const held={request,socket,head};heldWebSockets.add(held);socket.on('close',()=>heldWebSockets.delete(held));return true;
@@ -76,8 +92,17 @@ export async function host_worker_fixture(){
   },handle(request,response){
     const path=new URL(request.url,'http://fixture').pathname;
     if(!path.startsWith('/host-worker/'))return false;
+    if(path.startsWith('/host-worker/prepare'))preparationRequests.push({path,headers:{...request.headers}});
     let body,type='text/javascript';
-    if(path==='/host-worker/bundle.js')body=bundle;
+    if(path==='/host-worker/prepare-entry.js'){response.writeHead(302,{location:'/host-worker/prepared/entry.js','set-cookie':'prepare_after=visible; HttpOnly; SameSite=Strict; Path=/host-worker/','cache-control':'no-store'});response.end();return true;}
+    if(path==='/host-worker/prepared/entry.js'){response.writeHead(200,{'content-type':'text/javascript','referrer-policy':'origin','cache-control':'no-store'});response.end('importScripts("./dependency.js","blob:null/prepared-local");globalThis.loadMissing=()=>importScripts("/host-worker/prepare-failed.js");('+prepared_classic.toString()+')();');return true;}
+    if(path==='/host-worker/prepared/dependency.js')body='globalThis.preparedDependency="relayed";';
+    else if(path==='/host-worker/prepare-failed.js'){response.writeHead(404,{'content-type':'text/javascript'});response.end('throw new Error("must not execute");');return true;}
+    else if(path==='/host-worker/prepare-module.js')body='import "/host-worker/prepare-never.js";export const prepared=true;';
+    else if(path==='/host-worker/prepare-mime.js'){body='0';type='text/plain';}
+    else if(path==='/host-worker/prepare-echo'){body=JSON.stringify(request.headers);type='application/json';}
+    else if(path==='/host-worker/prepare-held.js'){heldPreparations.add(response);response.on('close',()=>heldPreparations.delete(response));return true;}
+    else if(path==='/host-worker/bundle.js')body=bundle;
     else if(path==='/host-worker/registry.js')body='importScripts("/host-worker/bundle.js");('+shared_worker_registry_main.toString()+')();';
     else if(['/host-worker/identity-worker.js','/host-worker/identity-other.js','/host-worker/identity-module.js'].includes(path))body=shared_worker_identity_script;
     else if(path==='/host-worker/identity-redirect'){response.writeHead(302,{location:'/host-worker/identity-worker.js','cache-control':'no-store'});response.end();return true;}

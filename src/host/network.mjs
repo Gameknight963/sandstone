@@ -93,6 +93,7 @@ rpc_handlers["fetch"] = async function(frame_id, request_id, url, options, navig
     top_url: iframes[frame.root_id]?.url?.href || frame.url.href,
     referrer_url:frame.referrer_url,
     broadcast_origin:frame.broadcast_origin,
+    cookieAuthority:frame.cookie_authority,
     navigation: options?.mode === 'navigate',request_metadata:options?.mode==='navigate'&&frame.pending_navigation?.traversed?frame.history.current?.request_metadata:undefined,
     history_user_activation:options?.mode==='navigate'&&frame.pending_navigation?.traversed&&iframes[frame.root_id]?.history.current?.request_metadata?.user,
     user_activation:!!options?.sandstone_navigation_activation,nested:true,cross_site:frame_cross_site(frame,iframes),frame_id:frame.id,service_worker_client:frame.document_context
@@ -177,7 +178,7 @@ rpc_handlers["ws_new"] = function (frame_id, url, protocols) {
   if (!frame) throw new TypeError('Unknown frame');
   const source = frame.request_url || (frame.url.origin === 'null' && frame.origin && frame.origin !== 'null' ? frame.origin + '/' : frame.url.href);
   const context = {
-    url: source, top_url: iframes[frame.root_id]?.url.href || source, userAgent: navigator.userAgent,cross_site:frame_cross_site(frame,iframes),broadcast_origin:frame.broadcast_origin
+    url: source, top_url: iframes[frame.root_id]?.url.href || source, userAgent: navigator.userAgent,cross_site:frame_cross_site(frame,iframes),broadcast_origin:frame.broadcast_origin,cookieAuthority:frame.cookie_authority
   };
   const RelayWebSocket = relay_websocket_class(libcurl.CurlWebSocket);
   let ws = frame.cookie_policy?new CookieWebSocket(RelayWebSocket,frame.cookie_policy,url,protocols,context):new RelayWebSocket(url,protocols,websocket_options(site_data,url,context));

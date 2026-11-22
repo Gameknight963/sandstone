@@ -33,6 +33,7 @@ import {verify_shared_owners} from './shared-owner.playwright.mjs';
 import {verify_shared_worker_owners} from './shared-worker-owners.playwright.mjs';
 import {verify_shared_bootstrap} from './shared-bootstrap.playwright.mjs';
 import {verify_worker_host_origins} from './worker-host-origins.playwright.mjs';
+import {verify_worker_preparation} from './worker-preparation.playwright.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -363,6 +364,7 @@ try{
   console.log(JSON.stringify({fixture:'Delegated shared worker registry controls',passed:await verify_shared_worker_owners(browser,origin)}));
   console.log(JSON.stringify({fixture:'Opaque shared actor bootstrap controls',passed:await verify_shared_bootstrap(browser,origin)}));
   console.log(JSON.stringify({fixture:'Retained worker origin controls',passed:await verify_worker_host_origins(browser,origin)}));
+  console.log(JSON.stringify({fixture:'Retained worker script preparation controls',passed:await verify_worker_preparation(browser,origin,hostWorker)}));
   const nativeContext=await browser.newContext(),nativePage=await nativeContext.newPage();
   const nativeMetadata=await verify_metadata({
     navigate:url=>nativePage.goto(url),evaluate:source=>metadata_evaluate(nativePage,false,source),

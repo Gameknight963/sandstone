@@ -102,6 +102,9 @@ globalThis.onconnect=event=>{
         }else if(message.op==='open'){
           const host=new WorkerServiceHost({...message.context,cookie_policy},event.ports[0]);
           opened=host.id;hosts.set(host.id,{host,bridges:new Map()});value={id:host.id,profile:host.profile};
+        }else if(message.op==='prepare'){
+          const entry=hosts.get(message.worker);if(!entry)throw new DOMException('Unknown worker service','InvalidStateError');
+          const scripts=await entry.host.prepare(message.options);value={profile:entry.host.profile,scripts};
         }else if(message.op==='bridge'){
           const entry=hosts.get(message.worker);if(!entry)throw new DOMException('Unknown worker service','InvalidStateError');
           if(event.ports.length!==2)throw new TypeError('Two worker communication ports are required');
