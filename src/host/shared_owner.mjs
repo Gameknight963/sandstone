@@ -1,4 +1,6 @@
 import {create_bootstrap_nonce} from '../bootstrap.mjs';
+import {hold_lock} from './worker_discovery.mjs';
+import {delegate_prefix} from '../shared_worker/owners.mjs';
 
 // Only this trusted constructor bootstrap runs in the host origin. Remote
 // worker code must run in an opaque data: worker, never a host-origin blob.
@@ -74,4 +76,53 @@ export async function create({url,name='',credentials='same-origin',extendedLife
     }
     await ready;return {connect,close,closed:ended,events,get isClosed(){return closed;}};
   }catch(error){close(error);throw error;}
+}
+
+export function serve(port){
+  if(!(port instanceof MessagePort))throw new TypeError('A private delegate port is required');
+  const owners=new Map();let closed=false,clientSequence=0;
+  const close=()=>{
+    if(closed)return;closed=true;port.removeEventListener('message',receive);
+    for(const entry of owners.values())entry.controller.abort();owners.clear();
+    try{port.postMessage({type:'closed'});}catch{}port.close();
+  };
+  const receive=async event=>{
+    const message=event.data;if(message?.type==='closed'){close();return;}
+    if(closed||message?.type!=='request'||!Number.isSafeInteger(message.id))return;
+    let connected;
+    try{
+      let value,transfer=[];
+      if(message.op==='owner'){
+        if(typeof message.actor!=='string'||!message.actor)throw new TypeError('An actor identity is required');
+        let entry=owners.get(message.actor);
+        if(!entry){
+          entry={controller:new AbortController(),profile:JSON.stringify(message.profile),clients:new Map()};owners.set(message.actor,entry);
+          entry.ready=create({...message.profile,signal:entry.controller.signal}).then(owner=>{
+            entry.owner=owner;
+            owner.events.addEventListener('error',event=>{
+              const client=entry.clients.get(event.data.client);
+              if(!closed&&client!==undefined)port.postMessage({...event.data,type:'constructor-error',actor:message.actor,client});
+            });
+            owner.closed.then(()=>{if(owners.get(message.actor)===entry){owners.delete(message.actor);if(!closed)port.postMessage({type:'owner-closed',actor:message.actor});}});
+            return owner;
+          }).catch(error=>{if(owners.get(message.actor)===entry)owners.delete(message.actor);throw error;});
+        }else if(entry.profile!==JSON.stringify(message.profile))throw new DOMException('Actor owner profile changed','InvalidStateError');
+        await entry.ready;value=true;
+      }else if(message.op==='connect'){
+        const entry=owners.get(message.actor);if(!entry)throw new DOMException('Actor owner is unavailable','InvalidStateError');
+        const owner=await entry.ready;connected=await owner.connect();const client=++clientSequence;entry.clients.set(connected.id,client);transfer=[connected.port];value={client};
+      }else if(message.op==='close'){
+        const entry=owners.get(message.actor);value=!!entry;
+        if(entry){owners.delete(message.actor);entry.controller.abort();}
+      }else throw new TypeError('Unknown actor delegate operation');
+      if(closed){connected?.port.close();return;}
+      port.postMessage({type:'reply',id:message.id,ok:true,value},transfer);
+    }catch(error){connected?.port.close();if(!closed)try{port.postMessage({type:'reply',id:message.id,ok:false,error:{name:String(error.name||'Error'),message:String(error.message||error)}});}catch{}}
+  };
+  port.addEventListener('message',receive);port.start();return {close};
+}
+
+export async function delegate(){
+  const lease=await hold_lock(delegate_prefix+create_bootstrap_nonce()),channel=new MessageChannel(),server=serve(channel.port1);let closed=false;
+  return {port:channel.port2,lease:lease.name,close(){if(closed)return;closed=true;server.close();lease.close();}};
 }

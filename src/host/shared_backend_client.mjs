@@ -4,9 +4,22 @@ import {libcurl_binary} from './libcurl_wasm.mjs';
 import {version} from './version.mjs';
 import {owner_prefix,hold_lock,watch_backend,find_backend,backend_live,backend_gone} from './worker_discovery.mjs';
 import {crypto_service} from './crypto.mjs';
+import {delegate as create_owner_delegate} from './shared_owner.mjs';
 
 const NativeSharedWorker=globalThis.SharedWorker;
 const unavailable=()=>new DOMException('Worker backend connection is closed','InvalidStateError');
+const owner_delegates=new WeakMap();
+export function register_owners(connection){
+  if(owner_delegates.has(connection))return owner_delegates.get(connection);
+  const registering=(async()=>{
+    const delegate=await create_owner_delegate();
+    try{
+      const value=await connection.request('actor-ui',{lease:delegate.lease},[delegate.port]);
+      connection.closed.then(()=>delegate.close());return {...value,close:()=>delegate.close()};
+    }catch(error){delegate.close();throw error;}
+  })();
+  owner_delegates.set(connection,registering);registering.catch(()=>{if(owner_delegates.get(connection)===registering)owner_delegates.delete(connection);});return registering;
+}
 
 export async function share_crypto(connection){
   const detach=crypto_service.setVault({
@@ -36,10 +49,10 @@ export async function connect(url,{name,websocket,binary,signal}={}){
   const failed=event=>close(new Error(event.message||'Worker backend failed'));
   const receive=event=>{
     const reply=event.data;
-    if(reply?.type==='bridge-error'){events.dispatchEvent(new MessageEvent('bridge-error',{data:reply}));return;}
+    if(reply?.type==='bridge-error'||reply?.type==='actor-error'){events.dispatchEvent(new MessageEvent(reply.type,{data:reply}));return;}
     const call=pending.get(reply?.id);if(!call)return;
     pending.delete(reply.id);
-    if(reply.ok===true)call.resolve(reply.value);
+    if(reply.ok===true)call.resolve(event.ports.length?{...reply.value,ports:event.ports}:reply.value);
     else{const error=new Error(reply.error?.message||'Worker backend request failed');error.name=reply.error?.name||'Error';call.reject(error);}
   };
   const request=(op,message={},transfer=[])=>new Promise((resolve,reject)=>{

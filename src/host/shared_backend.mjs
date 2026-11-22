@@ -9,6 +9,7 @@ import {set_role} from '../rpc.mjs';
 import {owner_prefix,publish_backend} from './worker_discovery.mjs';
 import {crypto_service} from './crypto.mjs';
 import {PortRelay} from './port_relay.mjs';
+import {SharedWorkerOwners} from '../shared_worker/owners.mjs';
 
 // This bundle runs only in a trusted host-origin worker. Authored JavaScript
 // belongs in a separate opaque runtime, connected through WorkerServiceHost.
@@ -16,13 +17,17 @@ set_role('host');
 const hosts=new Map(),providers=new PolicyProviders();
 const cookie_policy=new CookiePolicyBridge((message,options)=>providers.request(message,options));
 const identity=create_bootstrap_nonce();
+const actorTargets=new Map();
+const actors=new SharedWorkerOwners({createProfile:(_,initialization)=>({url:initialization.native_url}),onUIClosed:id=>actorTargets.delete(id),onError:error=>{
+  try{actorTargets.get(error.ui)?.postMessage({type:'actor-error',worker:error.actor,client:error.client,message:String(error.message||'Shared worker failed'),filename:String(error.filename||'')});}catch{}
+}});
 let websocket,ready,publication,publishedKey,ending=false;
 const owners=new Map();
 
 function shutdown(){
   if(ending)return;ending=true;publication?.close();
   for(const watch of owners.values())watch.abort();owners.clear();
-  for(const id of [...hosts.keys()])close(id);providers.close();globalThis.close();
+  actors.close();for(const id of [...hosts.keys()])close(id);providers.close();globalThis.close();
 }
 
 function add_owner(lease){
@@ -52,7 +57,7 @@ function close(id){
 }
 
 globalThis.onconnect=event=>{
-  const port=event.ports[0];let initialized=false;
+  const port=event.ports[0];let initialized=false,actorUI;
   port.onmessage=async event=>{
     const message=event.data;if(!Number.isSafeInteger(message?.id))return;
     let opened;
@@ -75,6 +80,18 @@ globalThis.onconnect=event=>{
           add_owner(message.lease);value=true;
         }else if(message.op==='shutdown'){
           port.postMessage({id:message.id,ok:true,value:true});shutdown();return;
+        }else if(message.op==='actor-ui'){
+          if(actorUI)throw new DOMException('Actor UI is already registered','InvalidStateError');
+          actorUI=actors.addUI(event.ports[0],{lease:message.lease});actorTargets.set(actorUI.id,port);value={id:actorUI.id};
+        }else if(message.op==='actor-acquire'){
+          if(!actorUI)throw new DOMException('Actor UI is not registered','InvalidStateError');
+          const actor=await actors.acquire(actorUI.id,message.document,message.descriptor,message.initialization);
+          port.postMessage({id:message.id,ok:true,value:{id:actor.id,profile:actor.profile,client:actor.client,created:actor.created}},[actor.port]);return;
+        }else if(message.op==='actor-release'){
+          if(!actorUI)throw new DOMException('Actor UI is not registered','InvalidStateError');
+          value=actors.release(actorUI.id,message.document);
+        }else if(message.op==='actor-close'){
+          value=actors.closeWorker(message.worker);
         }else if(message.op==='keys-store'){
           crypto_service.store(message.records);value=true;
         }else if(message.op==='keys-load'){

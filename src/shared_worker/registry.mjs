@@ -61,8 +61,8 @@ export class SharedWorkerRegistry {
     entry.owners.delete(owner);membership.reject(reason);
     const entries=this.owners.get(owner);entries?.delete(entry);if(!entries?.size)this.owners.delete(owner);
   }
-  releaseOwner(owner){
-    const entries=[...this.owners.get(owner)||[]],reason=aborted();
+  releaseOwner(owner,id){
+    const entries=id===undefined?[...this.owners.get(owner)||[]]:[this.ids.get(id)].filter(entry=>entry?.owners.has(owner)),reason=aborted();
     for(const entry of entries){
       this.forgetOwner(entry,owner,reason);
       if(entry.owners.size||entry.closed)continue;
