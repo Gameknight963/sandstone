@@ -29,6 +29,7 @@ import {verify_worker_backend} from './worker-backend.playwright.mjs';
 import {verify_worker_discovery} from './worker-discovery.playwright.mjs';
 import {verify_crypto_vault} from './crypto-vault.playwright.mjs';
 import {verify_port_relay} from './port-relay.playwright.mjs';
+import {verify_shared_owners} from './shared-owner.playwright.mjs';
 
 // Real libcurl/Wisp coverage, separate from the mocked transport fixtures. This
 // relay binds only loopback and permits connections only to this test's port.
@@ -355,6 +356,7 @@ try{
   console.log(JSON.stringify({fixture:'Worker backend discovery controls',passed:await verify_worker_discovery(browser,origin)}));
   console.log(JSON.stringify({fixture:'Shared crypto vault controls',passed:await verify_crypto_vault(browser,origin)}));
   console.log(JSON.stringify({fixture:'Retained worker port forwarding controls',passed:await verify_port_relay(browser,origin)}));
+  console.log(JSON.stringify({fixture:'Native shared worker owner controls',passed:await verify_shared_owners(browser,origin)}));
   const nativeContext=await browser.newContext(),nativePage=await nativeContext.newPage();
   const nativeMetadata=await verify_metadata({
     navigate:url=>nativePage.goto(url),evaluate:source=>metadata_evaluate(nativePage,false,source),

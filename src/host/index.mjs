@@ -2,6 +2,7 @@ export * as controller from "./controller.mjs";
 export * as network from "./network.mjs";
 export * as service_workers from './service_worker.mjs';
 export * as worker_backends from './shared_backend_client.mjs';
+export * as shared_worker_owners from './shared_owner.mjs';
 export {WorkerServiceHost} from './worker_host.mjs';
 export {SharedWorkerRegistry} from '../shared_worker/registry.mjs';
 export {CookiePolicyBridge,cookie_policy_handler} from './cookie_policy_bridge.mjs';
