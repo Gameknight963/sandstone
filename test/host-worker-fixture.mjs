@@ -78,6 +78,7 @@ export async function host_worker_fixture(){
   });
   const bundle=await readFile(new URL('../dist/sandstone.js',import.meta.url));
   const runtime=await readFile(new URL('../dist/sandstone_frame.js',import.meta.url));
+  const inboxSource=await readFile(new URL('../src/shared_worker/inbox.mjs',import.meta.url)),relaySource=await readFile(new URL('../src/host/port_relay.mjs',import.meta.url));
   const main='importScripts("/host-worker/bundle.js");('+shared_host_main.toString()+')();';
   return {preparationRequests,heldPreparations,releasePreparations(){for(const response of heldPreparations){response.writeHead(200,{'content-type':'text/javascript'});response.end('export const prepared=true;');}heldPreparations.clear();},upgrade(request,socket,head){
     const path=new URL(request.url,'http://fixture').pathname;
@@ -102,6 +103,8 @@ export async function host_worker_fixture(){
     else if(path==='/host-worker/prepare-mime.js'){body='0';type='text/plain';}
     else if(path==='/host-worker/prepare-echo'){body=JSON.stringify(request.headers);type='application/json';}
     else if(path==='/host-worker/prepare-held.js'){heldPreparations.add(response);response.on('close',()=>heldPreparations.delete(response));return true;}
+    else if(path==='/host-worker/src/shared_worker/inbox.mjs')body=inboxSource;
+    else if(path==='/host-worker/src/host/port_relay.mjs')body=relaySource;
     else if(path==='/host-worker/bundle.js')body=bundle;
     else if(path==='/host-worker/registry.js')body='importScripts("/host-worker/bundle.js");('+shared_worker_registry_main.toString()+')();';
     else if(['/host-worker/identity-worker.js','/host-worker/identity-other.js','/host-worker/identity-module.js'].includes(path))body=shared_worker_identity_script;
