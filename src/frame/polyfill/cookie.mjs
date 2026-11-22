@@ -1,3 +1,4 @@
+import {native_dom} from '../dom_operations.mjs';
 import {CookieReplica} from '../../cookie_replica.mjs';
 import * as loader from "../loader.mjs";
 import * as rpc from "../../rpc.mjs";
@@ -6,7 +7,16 @@ import {create_cookie_accessors} from '../../cookie_accessors.mjs';
 
 const fallback=new CookieReplica();
 const native_cookie=globalThis.Document&&Object.getOwnPropertyDescriptor(Document.prototype,'cookie');
-const accessors=native_cookie&&create_cookie_accessors(native_cookie);
+const native_view=native_dom?.view;
+const native_document=globalThis.document&&Object.getOwnPropertyDescriptor(globalThis,'document').get;
+const accessors=native_cookie&&create_cookie_accessors(native_cookie,{isActive(target){
+  // Firefox returns an empty native cookie string for active opaque documents;
+  // Chromium throws SecurityError. Neither result proves document liveness.
+  // Captured native accessors also reject a retained document after its Window
+  // has navigated or its iframe has been removed, without reading author hooks.
+  const view=Reflect.apply(native_view,target,[]);
+  return !!view&&Reflect.apply(native_document,view,[])===target;
+}});
 export const cookie_document_active=target=>!!accessors?.is_active(target);
 if(accessors)Object.defineProperty(Document.prototype,'cookie',accessors.descriptor);
 let configured_replica,configured_context;

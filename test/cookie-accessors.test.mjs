@@ -2,6 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {create_cookie_accessors} from '../src/cookie_accessors.mjs';
 
+test('Explicit document lifecycle probes do not mistake empty native cookies for an inactive document',()=>{
+  const target={},alias={},writes=[];
+  let active=true,nativeReads=0,value='session=present';
+  const native={get(){nativeReads++;return '';},set(){throw new Error('Native cookie writes must not be used');}};
+  const bridge=create_cookie_accessors(native,{isActive:document=>document===target&&active});
+  bridge.register(target,alias,{get:()=>value,set:text=>{writes.push(text);value=text;}});
+  assert.equal(bridge.is_active(alias),true);
+  assert.equal(bridge.descriptor.get.call(alias),'session=present');
+  bridge.descriptor.set.call(target,'session=updated');
+  assert.deepEqual(writes,['session=updated']);assert.equal(nativeReads,0);
+  active=false;
+  assert.equal(bridge.is_active(target),false);assert.equal(bridge.descriptor.get.call(alias),'');
+  bridge.descriptor.set.call(alias,'ignored=value');assert.deepEqual(writes,['session=updated']);
+});
+
 function fixture(){
   const documents=new WeakMap(),writes=[];
   const native={enumerable:true,configurable:true,get(){

@@ -1,10 +1,11 @@
-// Runtime documents have opaque physical origins: their native cookie getter
-// throws SecurityError while active and returns an empty string after removal.
-// Keep that lifecycle check while routing known document aliases to the relay.
-export function create_cookie_accessors(native){
+// Route registered document aliases to the relay. Browser runtimes supply a
+// document lifecycle probe: native cookie behavior is not portable across
+// engines or storage policies.
+export function create_cookie_accessors(native,{isActive}={}){
   const own=new WeakMap(),registries=new Set([own]);
   const lookup=value=>{for(const registry of registries){const record=registry.get(value);if(record)return record;}};
   function active(record){
+    if(isActive)return !!isActive(record.target);
     try{Reflect.apply(record.native.get,record.target,[]);}
     catch(error){if(error.name!=='SecurityError')throw error;return true;}
     return false;
