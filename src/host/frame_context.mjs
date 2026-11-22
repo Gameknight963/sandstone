@@ -16,7 +16,7 @@ export function frame_cross_site(frame,frames) {
   for(let current=frame;current;current=frames[current.parent_id]){
     if(current.broadcast_origin?.startsWith('opaque:'))return true;
     let url=new URL(current.url);
-    if(url.origin==='null'&&current.origin&&current.origin!=='null')url=new URL(current.origin);
+    if((url.origin==='null'||url.protocol==='blob:')&&current.origin&&current.origin!=='null')url=new URL(current.origin);
     if(!same_site(top,url))return true;
   }
   return false;
