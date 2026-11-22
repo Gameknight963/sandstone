@@ -23,6 +23,7 @@ import {configure_filesystem_sync} from './filesystem.mjs';
 import {configure_service_worker_scripts,service_worker_script_snapshot,remember_service_worker_script} from '../service_worker_scripts.mjs';
 import {define_event_handlers} from '../event_handlers.mjs';
 import {document_states} from '../document_identity.mjs';
+import {configure_worker_tasks} from '../worker_tasks.mjs';
 
 const NativeWorker = globalThis.Worker;
 const native_import_scripts = globalThis.importScripts?.bind(globalThis);
@@ -161,6 +162,7 @@ function import_worker_scripts(paths,entry=false) {
 export function initialize_worker(options,transport) {
   if(worker_options)throw new DOMException('Worker runtime is already initialized','InvalidStateError');
   worker_report=transport?.report||native_post;
+  configure_worker_tasks(packet=>worker_report({sandstone_worker:options.token,...packet}));
   const ready=transport?new Promise((resolve,reject)=>worker_start={resolve,reject}):undefined;
   options.source??=options.sources?.[options.url];
   worker_options = options;
@@ -300,6 +302,8 @@ export class FakeWorker extends EventTarget {
   #referrerPolicy;
   #serviceProfile;
   #serviceScripts;
+  #pending_tasks=new Set();
+  #pending_messages=[];
 
   constructor(url, options = {}) {
     super();
@@ -426,23 +430,43 @@ export class FakeWorker extends EventTarget {
     // origins, where native module-worker construction rejects parent blobs.
     this.#worker = new NativeWorker(this.#bootstrap, {...this.#options, type: "classic"});
     this.#worker.onmessage = event => {
+      if(this.#terminated){for(const port of event.ports)port.close();return;}
       if (event.data?.sandstone_worker === this.#token) {
+        // A closing scope cannot acknowledge more registrations. Preserve
+        // messages it already posted before reporting its final lifecycle.
+        if(event.data.type==='closed'||event.data.type==='error'){
+          this.#pending_tasks.clear();this.#flush_messages();if(this.#terminated)return;
+        }
         if (event.data.type === "closed") this.#terminate();
         else if (event.data.type === "error") {
           this.#error(Object.assign(new Error(event.data.message), {name: event.data.name, stack: event.data.stack}));
           this.#terminate();
         }
+        else if(event.data.type==='task-pending'&&Number.isSafeInteger(event.data.id)&&event.data.id>0)this.#pending_tasks.add(event.data.id);
+        else if(event.data.type==='task-settled'){this.#pending_tasks.delete(event.data.id);this.#flush_messages();}
         return;
       }
-      this.dispatchEvent(new NativeMessageEvent("message", {data: event.data, ports: [...event.ports]}));
+      this.#message('message',event);
     };
-    this.#worker.onmessageerror = event => this.dispatchEvent(new NativeMessageEvent("messageerror", {data: event.data}));
+    this.#worker.onmessageerror = event => this.#message('messageerror',event);
     this.#worker.onerror = event => { event.preventDefault(); this.#error(event.error || new Error(event.message)); };
     const channel = new MessageChannel();
     rpc.attach_host(channel.port1, this.#id);
     rpc.set_host(this.#worker, channel.port2,{nonce:this.#bootstrap_nonce});
     this.#worker.postMessage({sandstone_worker: this.#token, type: "connect"}, [this.#receiver]);
     this.#receiver = null;
+  }
+
+  #message(type,event){
+    if(this.#terminated){for(const port of event.ports)port.close();return;}
+    if(this.#pending_tasks.size){this.#pending_messages.push({type,event});return;}
+    this.dispatchEvent(new NativeMessageEvent(type,{data:event.data,ports:[...event.ports]}));
+  }
+
+  #flush_messages(){
+    while(!this.#terminated&&!this.#pending_tasks.size&&this.#pending_messages.length){
+      const {type,event}=this.#pending_messages.shift();this.#message(type,event);
+    }
   }
 
   postMessage(message) {
@@ -472,6 +496,7 @@ export class FakeWorker extends EventTarget {
   #terminate() {
     if (this.#terminated) return;
     this.#terminated = true;
+    this.#pending_tasks.clear();for(const {event} of this.#pending_messages)for(const port of event.ports)port.close();this.#pending_messages=[];
     this.#controller.abort();
     this.#worker?.terminate();
     this.#port.close();

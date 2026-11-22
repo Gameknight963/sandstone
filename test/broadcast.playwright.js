@@ -52,13 +52,14 @@ async page=>{
     await evaluate(proxy,'rootChannel.close();true');
     const workers=[];
     for(const type of ['classic','module']){
+      console.log(JSON.stringify({fixture:'Broadcast worker',proxy,type}));
       workers.push(JSON.parse(await evaluate(proxy,`(async()=>{
         const channel=new BroadcastChannel('worker-sync'),worker=new Worker(${JSON.stringify(origin+'/broadcast/worker.')}+${JSON.stringify(type==='module'?'mjs':'js')},{type:${JSON.stringify(type)}});
         try{
           await new Promise((resolve,reject)=>{worker.onmessage=()=>resolve();worker.onerror=event=>reject(new Error(event.message));});
           const key=await crypto.subtle.importKey('raw',new TextEncoder().encode('secret'),{name:'HMAC',hash:'SHA-256'},false,['sign']);
           return JSON.stringify(await new Promise((resolve,reject)=>{
-            const timer=setTimeout(()=>reject(new Error('Worker channel did not deliver')),5000);
+            const timer=setTimeout(()=>reject(new Error('Worker channel did not deliver (${proxy?'proxy':'native'} ${type})')),5000);
             channel.onmessage=event=>{clearTimeout(timer);resolve({...event.data,responseOrigin:event.origin,responseTrusted:event.isTrusted});};
             channel.postMessage({key});
           }));

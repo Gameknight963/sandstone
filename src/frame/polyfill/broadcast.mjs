@@ -1,6 +1,7 @@
 import * as loader from '../loader.mjs';
 import * as rpc from '../../rpc.mjs';
 import {encode_message} from './crypto.mjs';
+import {worker_task} from '../worker_tasks.mjs';
 
 const states=new WeakMap(),Port=globalThis.MessagePort;
 const close=Port.prototype.close,start=Port.prototype.start,clone=globalThis.structuredClone;
@@ -29,7 +30,7 @@ export class BroadcastChannel extends EventTarget {
       Object.defineProperties(event,{data:{value:value.data},origin:{value:value.origin}});
     },true);
     start.call(port);
-    rpc.call_procedure(rpc.host,'broadcast_open',[loader.beacon_context,id,name,channel.port2],{transfer:[channel.port2]}).catch(()=>{
+    worker_task(rpc.call_procedure(rpc.host,'broadcast_open',[loader.beacon_context,id,name,channel.port2],{transfer:[channel.port2]})).catch(()=>{
       if(!state(port).closed)port.dispatchEvent(new MessageEvent('messageerror'));
     });
     return port;
