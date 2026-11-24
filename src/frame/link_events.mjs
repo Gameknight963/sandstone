@@ -1,7 +1,7 @@
 // Suppress the sandbox's physical link/form activation without presenting that
 // internal cancellation to page listeners. Run the virtual default action only
 // after dispatch, including when propagation stops before document/window.
-import {unwrap_global_target} from './global_functions.mjs';
+import {unwrap_global_target,register_global_receiver_adapter} from './global_functions.mjs';
 import {on_shadow_root} from './shadow_roots.mjs';
 import {listen_runtime,unlisten_runtime} from './runtime_events.mjs';
 import {document_states,unwrap_frame_document} from './document_identity.mjs';
@@ -186,6 +186,7 @@ export function install_link_events({enabled,activate,submit,prepareActivation})
     const result=Reflect.apply(target,receiver,args),record=records.get(event);mark_authored_event(event,document_event_alias(receiver,alias));flush();
     return record?!record.cancelled:result;
   }});
+  for(const name of ['addEventListener','removeEventListener','dispatchEvent'])register_global_receiver_adapter(targetProto[name]);
   // Native property handlers cancel internally when returning false. Mirror
   // that cancellation through the tracked method while preserving identity.
   const handlers=document_states('link-properties');

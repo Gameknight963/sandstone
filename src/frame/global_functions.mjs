@@ -5,6 +5,9 @@ const native_targets=new WeakMap();
 const native_bindings=new WeakMap();
 const virtual_accessor_functions=new WeakMap();
 const native_function_targets=new WeakMap();
+const receiver_adapters=new WeakSet();
+// These methods already convert virtual receivers at the native boundary.
+export function register_global_receiver_adapter(method){receiver_adapters.add(method);return method;}
 export function unwrap_global_function(value){while(native_function_targets.has(value))value=native_function_targets.get(value);return value;}
 export function bind_native_property(proxy,key){native_bindings.get(proxy)?.(key);}
 export function bind_declared_property(proxy,key){native_bindings.get(proxy)?.(key,true);}
@@ -47,8 +50,12 @@ export function bind_global_function(target, method, virtual_target) {
   native_function_targets.set(bound,method);return bound;
 }
 
-export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,write_native,{virtual_accessors=false,read_accessor=read_native}={}) {
+export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,write_native,{virtual_accessors=false,read_accessor=read_native,preserve_method_replacements=false}={}) {
   const methods = new WeakMap(),overrides=new Map(),deleted=new Set(),accessors=new Map(),generated_accessors=new Map(),live=new Set();
+  const initial_methods=new WeakSet();
+  if(preserve_method_replacements)for(let owner=target;owner;owner=Object.getPrototypeOf(owner)){
+    for(const property of Object.values(Object.getOwnPropertyDescriptors(owner)))if(typeof property.value==='function')initial_methods.add(property.value);
+  }
   const originalOwn=new Set(Reflect.ownKeys(target));
   const descriptor=(object,key)=>{while(object){const found=Reflect.getOwnPropertyDescriptor(object,key);if(found)return found;object=Reflect.getPrototypeOf(object);}};
   const remember=value=>{if(typeof value==='function'&&!methods.has(value))methods.set(value,value);return value;};
@@ -76,7 +83,12 @@ export function create_obj_proxy(obj, ctx_vars, target, map_value,read_native,wr
       // Event-handler getters expose the assigned callback, even for arrows
       // and native functions. They are callback values, not global methods.
       if(typeof value==='function'&&typeof key==='string'&&key.startsWith('on'))return value;
+      if(typeof value==='function'&&receiver_adapters.has(value))return value;
       if (typeof value === 'function' && methods.has(value))return methods.get(value);
+      // An authored replacement must observe the virtual receiver itself. Its
+      // saved native adapter handles brand checks when it delegates the call.
+      // Binding an outer author Proxy leaks the physical Window to its trap.
+      if(typeof value==='function'&&preserve_method_replacements&&!initial_methods.has(value))return remember(value);
       if (typeof value === 'function' && !value.prototype) {
         // Sites patch globals after first use. Cache by function identity so a
         // replacement takes effect, and restoring a method restores its wrapper.

@@ -133,6 +133,19 @@ test('Virtual global getters run once and preserve virtual overrides', () => {
   assert.equal(target.custom, undefined);
 });
 
+test('Authored prototype replacements retain identity and receive the virtual global',()=>{
+  let reads=0;
+  const prototype={method(){return this;}},original=prototype.method,target=Object.create(prototype);
+  Object.defineProperty(prototype,'unrelated',{get(){reads++;throw new Error('Must not read getters');}});
+  const virtual=create_obj_proxy({},[],target,undefined,undefined,undefined,{preserve_method_replacements:true});
+  const saved=virtual.method,seen=[];
+  const replacement=new Proxy(original,{apply(method,receiver,args){seen.push(receiver);return Reflect.apply(method,receiver,args);}});
+  prototype.method=replacement;
+  assert.equal(virtual.method,replacement);assert.equal(virtual.method(),virtual);assert.deepEqual(seen,[virtual]);
+  const other={};assert.equal(virtual.method.call(other),other);assert.equal(seen[1],other);
+  prototype.method=original;assert.equal(virtual.method,saved);assert.equal(virtual.method(),target);assert.equal(reads,0);
+});
+
 test('Assigned callback values retain identity through properties, getters and reflection',()=>{
   const target={},virtual=create_obj_proxy({},[],target),callback=()=>42;
   Object.defineProperty(target,'forwarded',{configurable:true,get(){return target.callback;}});

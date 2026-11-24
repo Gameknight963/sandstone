@@ -95,6 +95,7 @@ import {verifyQueuedJavascriptNavigation} from './queued-javascript-navigation.p
 import {verifyInitialJavascriptQueue} from './initial-javascript-queue.playwright.mjs';
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
+import {verifyGlobalMethodInstrumentation} from './global-method-instrumentation.playwright.mjs';
 
 const testSource = await readFile(new URL("browser.playwright.js", import.meta.url), "utf8");
 const dexieSource = await readFile(new URL("../node_modules/dexie/dist/dexie.js", import.meta.url), "utf8");
@@ -403,6 +404,7 @@ try {
     })()`)));
     assert.deepEqual(globalPatch, {stable:true, restored:true, calls:['patched','callback','restored']});
     result.passed.push('Global function instrumentation and restoration');
+    result.passed.push(...await timed(verifyGlobalMethodInstrumentation(page),'Prototype method instrumentation fixture'));
     const schedulers=JSON.parse(await timed(page.evaluate(()=>main_frame.eval_js(`(async()=>{
       const idle=requestIdleCallback.bind(globalThis),cancel=cancelIdleCallback.bind(window);
       let cancelled=false;
