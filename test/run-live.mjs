@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {chromium} from 'playwright-core';
+import {chromium,firefox} from 'playwright-core';
 import {create_relay_server} from '../example/http.mjs';
 import {server as wisp,logging} from '../example/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/server.mjs';
 import {track_client_sockets} from './client-sockets.mjs';
@@ -35,9 +35,11 @@ const selected=process.argv.slice(2);
 for(const id of selected)if(!sites.some(site=>site.id===id))throw new Error('Unknown live site: '+id+'; choose '+sites.map(site=>site.id).join(', '));
 const targets=sites.filter(site=>!selected.length||selected.includes(site.id));
 const storageDenied=process.env.LIVE_STORAGE_DENIED==='1';
+const engine=process.env.LIVE_BROWSER||'chromium';
+if(!['chromium','firefox'].includes(engine))throw new Error('LIVE_BROWSER must be chromium or firefox');
 const isolated=process.env.LIVE_ISOLATED==='1';
 let artifact=pathToFileURL(fileURLToPath(new URL('../example/bundled.html',import.meta.url))).href;
-const reportURL=new URL('../.temp/live-compatibility'+(isolated?'-isolated':'')+(storageDenied?'-storage-denied':'')+'.json',import.meta.url);
+const reportURL=new URL('../.temp/live-compatibility'+(engine==='firefox'?'-firefox':'')+(isolated?'-isolated':'')+(storageDenied?'-storage-denied':'')+'.json',import.meta.url);
 const results=[];
 const hostedHTML=isolated?await readFile(new URL('../example/bundled.html',import.meta.url),'utf8'):null;
 const server=create_relay_server((request,response)=>{
@@ -233,14 +235,17 @@ async function context(denyStorage=storageDenied){
 }
 try{
   const channel=process.env.BROWSER_CHANNEL||'chrome';
-  browser=await chromium.launch({headless:true,channel:channel==='headless'?undefined:channel});
-  const browserDiagnostics=await browser.newBrowserCDPSession();
-  await browserDiagnostics.send('Target.setDiscoverTargets',{discover:true});
-  browserDiagnostics.on('Target.targetCrashed',event=>console.log(JSON.stringify({browserCrash:{status:event.status,errorCode:event.errorCode}})));
+  browser=await (engine==='firefox'?firefox:chromium).launch({headless:true,...(engine==='chromium'?{channel:channel==='headless'?undefined:channel}:{})});
+  if(engine==='chromium'){
+    const browserDiagnostics=await browser.newBrowserCDPSession();
+    await browserDiagnostics.send('Target.setDiscoverTargets',{discover:true});
+    browserDiagnostics.on('Target.targetCrashed',event=>console.log(JSON.stringify({browserCrash:{status:event.status,errorCode:event.errorCode}})));
+  }
   for(const site of targets){
     // Compare the site's ordinary native behavior with a standalone host whose
     // real storage may be denied. Proxied sites should still have virtual stores.
-    const result={site:site.id,url:site.url,storageDenied,isolated},nativeContext=await context(false);
+    console.log(JSON.stringify({checking:site.id,engine}));
+    const result={site:site.id,url:site.url,engine,storageDenied,isolated},nativeContext=await context(false);
     try{
       const native=await nativeContext.newPage();
       const response=await native.goto(site.url,{waitUntil:'domcontentloaded'});
