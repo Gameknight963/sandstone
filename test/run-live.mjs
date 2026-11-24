@@ -248,13 +248,15 @@ try{
     const result={site:site.id,url:site.url,engine,storageDenied,isolated},nativeContext=await context(false);
     try{
       const native=await nativeContext.newPage();
+      console.log(JSON.stringify({checking:site.id,engine,phase:'native navigation'}));
       const response=await native.goto(site.url,{waitUntil:'domcontentloaded'});
       assert.ok(response.ok(),'Native page returned '+response.status());
       await native.waitForTimeout(1000);
+      console.log(JSON.stringify({checking:site.id,engine,phase:'native interaction'}));
       const interaction=await deadline(interact(native,false,site),'Native interaction',site.timeout??(site.id==='react'?40000:25000));
       result.native={status:response.status(),...await summary(native,false),interaction};
     }catch(error){result.status='baseline-unavailable';result.error=error.message;}
-    finally{await nativeContext.close();}
+    finally{console.log(JSON.stringify({checking:site.id,engine,phase:'native cleanup'}));await nativeContext.close();}
     if(!result.native){results.push(result);console.log(JSON.stringify(result));continue;}
     const proxyContext=await context(),page=await proxyContext.newPage(),errors=[],diagnostics=[],direct=[];
     page.on('pageerror',error=>errors.push(error.message));
@@ -275,8 +277,10 @@ try{
         };
       });
       await page.evaluate(port=>sandstone.network.set_websocket('ws://127.0.0.1:'+port+'/'),server.address().port);
+      console.log(JSON.stringify({checking:site.id,engine,phase:'proxy navigation'}));
       await deadline(page.evaluate(url=>main_frame.navigate_to(url),site.url),'Proxy navigation',site.timeout??25000);
       await page.waitForTimeout(1000);
+      console.log(JSON.stringify({checking:site.id,engine,phase:'proxy interaction'}));
       const interaction=await deadline(interact(page,true,site),'Proxy interaction',site.timeout??(site.id==='react'?40000:25000));
       result.proxy={...await summary(page,true),interaction};
       assert.equal(result.proxy.title,result.native.title,'Document title differs after interaction');
@@ -291,6 +295,7 @@ try{
     }
     finally{
       result.scriptErrors=[...new Set(errors)];result.consoleDiagnostics=[...new Set(diagnostics)];result.directHTTP=[...new Set(direct)];
+      console.log(JSON.stringify({checking:site.id,engine,phase:'proxy cleanup'}));
       await proxyContext.close();
     }
     results.push(result);console.log(JSON.stringify(result));

@@ -58,6 +58,6 @@ export async function interact_tool(page,proxy,site,{surface,read,wait}){
   const source='(async()=>{const link=document.querySelector('+JSON.stringify(webp)+'),response=await fetch(link.href),blob=await response.blob(),bytes=new Uint8Array(await blob.arrayBuffer()),bitmap=await createImageBitmap(blob);const result={name:link.download,type:blob.type,width:bitmap.width,height:bitmap.height,signature:String.fromCharCode(...bytes.slice(0,4)),format:String.fromCharCode(...bytes.slice(8,12)),changed:link.href!=='+JSON.stringify(initial)+'};bitmap.close();return JSON.stringify(result);})()';
   const image=JSON.parse(proxy?await page.evaluate(source=>main_frame.eval_js(source),source):await page.evaluate(source=>eval(source),source));
   assert.deepEqual(image,{name:'sandstone.webp',type:'image/webp',width:128,height:96,signature:'RIFF',format:'WEBP',changed:true});
-  const download=page.waitForEvent('download');await surface.locator('a[download="sandstone.webp"]').click();const saved=await download;assert.equal(saved.suggestedFilename(),'sandstone.webp');assert.equal(await saved.failure(),null);
+  const [saved]=await Promise.all([page.waitForEvent('download'),surface.locator('a[download="sandstone.webp"]').click()]);assert.equal(saved.suggestedFilename(),'sandstone.webp');assert.equal(await saved.failure(),null);
   return {...image,downloaded:true};
 }

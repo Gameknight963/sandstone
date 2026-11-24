@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 export const documentSites=[
   {id:'pdfjs',url:'https://mozilla.github.io/pdf.js/web/viewer.html',editor:true,timeout:90000},
-  {id:'cyberchef',url:'https://gchq.github.io/CyberChef/',editor:true,timeout:90000}
+  {id:'cyberchef',url:'https://gchq.github.io/CyberChef/',editor:true,timeout:90000},
+  {id:'cyberchef-hash',url:'https://gchq.github.io/CyberChef/',editor:true,timeout:90000}
 ];
 export async function interactDocumentTool(page,proxy,site,{surface,read,wait}){
   if(site.id==='pdfjs'){
@@ -27,9 +28,9 @@ export async function interactDocumentTool(page,proxy,site,{surface,read,wait}){
   await surface.locator('li.operation:visible').filter({hasText:/^From Base64$/}).first().dblclick();
   await wait(page,proxy,'document.querySelector("#output-text .cm-content")?.textContent.includes("sandstone")');
   assert.equal(await read(page,proxy,'document.querySelector("#output-text .cm-content").textContent'),'sandstone');
-  // The hashing module URL is computed after a message. Its synchronous import
-  // needs the shared-memory relay; file hosts still exercise the built-in codec.
-  if(process.env.LIVE_ISOLATED!=='1')return {decoded:'sandstone'};
+  // The hashing module URL is computed after a message. The explicit hash
+  // variant tests this late synchronous worker import on file hosts too.
+  if(site.id==='cyberchef'&&process.env.LIVE_ISOLATED!=='1')return {decoded:'sandstone'};
   await surface.locator('#search').fill('SHA2');await surface.locator('#search').press('Enter');await surface.locator('li.operation:visible').filter({hasText:/^SHA2$/}).first().dblclick();
   const hash=createHash('sha512').update('sandstone').digest('hex');
   await wait(page,proxy,'document.querySelector("#output-text .cm-content")?.textContent==='+JSON.stringify(hash));
