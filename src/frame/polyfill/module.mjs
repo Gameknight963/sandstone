@@ -37,7 +37,9 @@ export const modules = new ModuleLoader({
     if (loader.is_loaded) flush_import_map();
   },
   execute: native_import,
-  compileCycles:typeof document==='undefined'?compile_worker_cycles:undefined
+  // Documents need the worker resolver too: Firefox accepts only the first
+  // import map, so later cyclic graphs cannot register new native specifiers.
+  compileCycles:compile_worker_cycles
 });
 
 // Worker startup evaluates an entry without Promise-assimilating an authored

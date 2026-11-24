@@ -114,7 +114,7 @@ bundles.push({
 });
 
 // Embed the compiler as source text. Ordinary documents and acyclic workers
-// carry its bytes but only cyclic workers parse/initialize its JavaScript/WASM.
+// carry its bytes but only cyclic graphs parse/initialize its JavaScript/WASM.
 bundles.unshift({
   name:'sandstone_worker_bundler',
   entry:{main:{import:'./src/frame/worker_bundler.mjs',baseUri:'about:blank'}},

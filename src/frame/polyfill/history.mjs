@@ -12,12 +12,15 @@ import {listen_runtime} from '../runtime_events.mjs';
 const views=document_states('history-views');
 const NativeHistory=globalThis.History,native=NativeHistory&&Object.getOwnPropertyDescriptors(NativeHistory.prototype);
 const physicalHistory=globalThis.history,physicalLocation=globalThis.location,replaceLocation=physicalLocation?.replace;
+const physicalNavigation=globalThis.navigation,navigateNative=physicalNavigation?.navigate;
+const setPhysicalHash=physicalLocation&&Object.getOwnPropertyDescriptor(physicalLocation,'hash')?.set;
 const stopEvent=Event.prototype.stopImmediatePropagation;
 const focusWindow=globalThis.focus,query=globalThis.Document?.prototype.querySelector,hasFocus=globalThis.Document?.prototype.hasFocus;
+let fragmentPopstate;
 if(NativeHistory){
   // Fragment processing below uses the browser's own document navigation. Its
   // physical history events must not escape alongside the virtual URL events.
-  for(const type of ['popstate','hashchange'])listen_runtime(globalThis,type,event=>{if(event.isTrusted)Reflect.apply(stopEvent,event,[]);},true);
+  for(const type of ['popstate','hashchange'])listen_runtime(globalThis,type,event=>{if(event.isTrusted){Reflect.apply(stopEvent,event,[]);if(type==='popstate')fragmentPopstate?.();}},true);
 }
 const text=value=>{if(typeof value==='symbol')throw new TypeError('Cannot convert a Symbol to a string');return String(value);};
 if(NativeHistory){
@@ -40,13 +43,34 @@ const mutate = rpc.create_rpc_wrapper(rpc.host, "history_mutate");
 const traverse = rpc.create_rpc_wrapper(rpc.host, "history_go");
 const scroll = () => [globalThis.scrollX || 0, globalThis.scrollY || 0];
 
-function scroll_fragment(url) {
-  // Replacing the current physical entry before navigating to the same URL
-  // keeps native history bounded and avoids a second hashchange. Let the UA
-  // handle :target, ancestor revealing, focus and the next Tab starting point.
-  const physical=physicalLocation.href.split('#')[0]+(new URL(url).hash||'#');
-  Reflect.apply(native.replaceState.value,physicalHistory,[Reflect.apply(native.state.get,physicalHistory,[]),'',physical]);
-  Reflect.apply(replaceLocation,physicalLocation,[physical]);
+function scroll_fragment(url,onpopstate) {
+  // Let the UA handle :target, ancestor revealing, focus and the next Tab
+  // starting point. Replace physical history where the browser permits it.
+  const fragment=new URL(url).hash||'#',state=Reflect.apply(native.state.get,physicalHistory,[]),previous=physicalLocation.href;
+  const physical=previous.split('#')[0]+fragment;
+  const opaqueBlob=physicalLocation.protocol==='blob:'&&physicalLocation.origin==='null';
+  const saved=fragmentPopstate;let notified=false;
+  fragmentPopstate=()=>{if(!notified){notified=true;onpopstate?.();}};
+  try{
+    if(navigateNative&&(!opaqueBlob||!query.call(document,'base[href]'))){
+      // Firefox rejects absolute opaque blob URLs, including Location.replace.
+      // Fragment-only Navigation API calls retain native replacement behavior.
+      const transition=Reflect.apply(navigateNative,physicalNavigation,[opaqueBlob?fragment:physical,{history:'replace',state}]);
+      // Opaque documents expose no NavigationHistoryEntries; completion can
+      // remain pending until a later navigation aborts it. Do not await it.
+      transition.committed.catch(()=>{});transition.finished.catch(()=>{});
+    }else{
+      try{Reflect.apply(replaceLocation,physicalLocation,[physical]);}
+      catch(error){
+        if(!opaqueBlob)throw error;
+        // Relative Navigation API URLs use the authored base. The hash setter
+        // stays in this document instead of issuing a remote navigation. This
+        // fallback may add a physical entry; authored history stays virtual.
+        Reflect.apply(setPhysicalHash,physicalLocation,[fragment]);
+      }
+    }
+    fragmentPopstate();
+  }finally{fragmentPopstate=saved;}
   // A virtual top-level page still occupies a native subframe. Its viewport
   // must receive keyboard routing when a non-focusable fragment is selected.
   if(!loader.is_iframe&&query.call(document,':target')&&!hasFocus.call(document))Reflect.apply(focusWindow,globalThis,[]);
@@ -131,8 +155,7 @@ export class FakeHistory {
     if (oldURL !== url) this.#mutate(replace ? "replace" : "push", null, url);
     setTimeout(() => {
       if(!cookie_document_active(this.#document))return;
-      if (oldURL !== url) globalThis.dispatchEvent(new PopStateEvent("popstate", {state: this.#state}));
-      scroll_fragment(url);
+      scroll_fragment(url,()=>{if(oldURL!==url)globalThis.dispatchEvent(new PopStateEvent('popstate',{state:this.#state}));});
       if (oldURL !== url) globalThis.dispatchEvent(new HashChangeEvent("hashchange", {oldURL, newURL: url}));
     }, 0);
   }

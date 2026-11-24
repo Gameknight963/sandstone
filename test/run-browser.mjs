@@ -22,7 +22,9 @@ import {verifyMetaRefresh} from './meta-refresh.playwright.mjs';
 import {verifyClientRedirects} from './client-redirect.playwright.mjs';
 import {verifyMediaSource} from './media-source.playwright.mjs';
 import {verifyMediaSession} from './media-session.playwright.mjs';
+import {verifyDocumentCycles} from './document-cycles.playwright.mjs';
 import {verifyFragmentNavigation} from './fragment-navigation.playwright.mjs';
+import {verifyFragmentFallbacks} from './fragment-fallback.playwright.mjs';
 import {verifyIframeFragments} from './iframe-fragments.playwright.mjs';
 import {verifyIframeLocationEncoding} from './iframe-location-encoding.playwright.mjs';
 import {verifyRedirectNavigation} from './redirect-navigation.playwright.mjs';
@@ -547,6 +549,8 @@ try {
     result.passed.push(...await timed(verifyClientRedirects(page), 'Client-side redirect fixture'));
     result.passed.push(...await timed(verifyMediaSource(page), 'MediaSource playback fixture'));
     result.passed.push(...await timed(verifyMediaSession(page), 'Media Session artwork fixture'));
+    result.passed.push(...await timed(verifyDocumentCycles(page), 'Document module cycle fixture'));
+    result.passed.push(...await timed(verifyFragmentFallbacks(page), 'Fragment fallback fixture'));
     result.passed.push(...await timed(verifyLocks(page), 'Web Locks fixture'));
     result.passed.push(...await timed(verifyIframeRaces(page), 'Iframe race fixture'));
     result.passed.push(...await timed(verifyIframeLifecycle(page), 'Iframe lifecycle fixture'));

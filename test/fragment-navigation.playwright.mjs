@@ -33,11 +33,12 @@ const snapshot='({active:document.activeElement.id,target:document.querySelector
 const documentHTML=test=>test.nested?'<!doctype html><iframe id="nested" style="border:0;width:100%;height:100vh" srcdoc="'+html(test).replaceAll('&','&amp;').replaceAll('"','&quot;')+'"></iframe>':html(test);
 
 export async function verifyFragmentNavigation(page,{batch=0,batches=1}={}){
-  const selected=cases.filter((_,index)=>index%batches===batch),native=await page.context().newPage(),errors=[],direct=[];
+  const selected=cases.filter((_,index)=>index%batches===batch),nativeContext=await page.context().browser().newContext({viewport:page.viewportSize()}),errors=[],direct=[];
+  let native;
   const onError=error=>errors.push(error.message),onRequest=request=>{if(/^https?:/.test(request.url()))direct.push(request.url());};
   const evaluate=(proxy,source)=>proxy?page.evaluate(source=>main_frame.eval_js(source),source):native.evaluate(source=>eval(source),source);
   const read=async(proxy,source)=>JSON.parse(await evaluate(proxy,'JSON.stringify('+source+')'));
-  await native.route(origin+'/**',route=>route.fulfill({contentType:'text/html',body:documentHTML(cases.find(test=>'/'+test.id===new URL(route.request().url()).pathname))}));
+  await nativeContext.route(origin+'/**',route=>route.fulfill({contentType:'text/html',body:documentHTML(cases.find(test=>'/'+test.id===new URL(route.request().url()).pathname))}));
   try{
     await page.evaluate(({origin,documents})=>{
       globalThis.fragmentPrevious=sandstone.network.session.fetch;
@@ -45,12 +46,16 @@ export async function verifyFragmentNavigation(page,{batch=0,batches=1}={}){
     },{origin,documents:Object.fromEntries(cases.map(test=>['/'+test.id,documentHTML(test)]))});
     page.on('pageerror',onError);page.on('request',onRequest);
     for(const test of selected){
+      // Isolate native history and focus between scenarios.
+      await native?.close();native=await nativeContext.newPage();
       const url=origin+'/'+test.id+(test.initial?'#'+test.target:'');
       const source=value=>test.nested?'document.getElementById("nested").contentWindow.eval('+JSON.stringify(value)+')':value;
       const results=[];
       for(const proxy of [false,true]){
         const surface=proxy?page:native;await surface.bringToFront();
         if(proxy)await page.evaluate(url=>main_frame.navigate_to(url),url);else await native.goto(url);
+        // Settle the initial paint/viewport before comparing fragment scrolling.
+        await evaluate(proxy,source('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))'));
         const physicalLength=await surface.evaluate(()=>history.length),physicalURL=surface.url();
         if(!test.initial){
           await evaluate(proxy,source('document.getElementById("start").focus();events=[];true'));
@@ -83,6 +88,6 @@ export async function verifyFragmentNavigation(page,{batch=0,batches=1}={}){
   }finally{
     page.off('pageerror',onError);page.off('request',onRequest);
     await page.evaluate(()=>{if(globalThis.fragmentPrevious){sandstone.network.session.fetch=fragmentPrevious;delete globalThis.fragmentPrevious;}});
-    await native.close();await page.bringToFront();
+    await nativeContext.close();await page.bringToFront();
   }
 }

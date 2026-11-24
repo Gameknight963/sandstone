@@ -2,8 +2,8 @@ import {parse} from './javascript_parser.mjs';
 import {rewrite_source} from './rewrite/javascript.mjs';
 import {WorkerNames} from './rewrite/worker_names.mjs';
 
-// Compile only unresolved worker graphs. Each record is an entry, so Rollup
-// emits native ESM facades for later imports of any member of the cycle.
+// Compile unresolved cyclic graphs in workers and documents. Every record is
+// an entry, so Rollup emits native ESM facades for later imports of any member.
 export async function compile_worker_cycles(entry,records,loader,rollup){
   const byId=new Map([...records].map(record=>[record.nativeKey,record]));
   const names=new WorkerNames([...records].map(record=>record.source));

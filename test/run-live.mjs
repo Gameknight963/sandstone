@@ -267,6 +267,8 @@ try{
       await page.waitForFunction(()=>globalThis.main_frame&&sandstone.libcurl.ready&&!main_frame.is_navigating);
       await page.evaluate(()=>{
         const session=sandstone.network.session,fetch=session.fetch;globalThis.liveRequestProgress=[];
+        const send=main_frame.send_page;globalThis.liveDocumentErrors=[];
+        main_frame.send_page=function(...args){return send.apply(this,args).catch(error=>{liveDocumentErrors.push({error:String(error),stack:error?.stack});throw error;});};
         session.fetch=function(url,...args){
           const record={url:String(url),phase:'waiting for headers'};liveRequestProgress.push(record);
           return fetch.call(this,url,...args).then(response=>{record.phase='headers received';record.status=response.status;return response;},error=>{record.phase='failed';record.error=String(error);throw error;});
@@ -285,7 +287,7 @@ try{
       result.status=diagnostics.length?'passed-with-diagnostics':'passed';
     }catch(error){
       result.status='failed';result.error=error.message;
-      try{result.progress=await deadline(page.evaluate(()=>({navigating:main_frame.is_navigating,url:String(main_frame.url),requests:liveRequestProgress.filter(record=>record.phase==='waiting for headers'),recent:liveRequestProgress.slice(-10)})),'Failure diagnostics',2000);}catch{}
+      try{result.progress=await deadline(page.evaluate(()=>({navigating:main_frame.is_navigating,url:String(main_frame.url),documentErrors:liveDocumentErrors,requests:liveRequestProgress.filter(record=>record.phase==='waiting for headers'),recent:liveRequestProgress.slice(-10)})),'Failure diagnostics',2000);}catch{}
     }
     finally{
       result.scriptErrors=[...new Set(errors)];result.consoleDiagnostics=[...new Set(diagnostics)];result.directHTTP=[...new Set(direct)];
