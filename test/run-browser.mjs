@@ -20,6 +20,8 @@ import {verifyCookieExpiry} from './cookie-expiry.playwright.mjs';
 import {verifyWorkerBroadcastOrder} from './worker-broadcast-order.playwright.mjs';
 import {verifyMetaRefresh} from './meta-refresh.playwright.mjs';
 import {verifyClientRedirects} from './client-redirect.playwright.mjs';
+import {verifyMediaSource} from './media-source.playwright.mjs';
+import {verifyMediaSession} from './media-session.playwright.mjs';
 import {verifyFragmentNavigation} from './fragment-navigation.playwright.mjs';
 import {verifyIframeFragments} from './iframe-fragments.playwright.mjs';
 import {verifyIframeLocationEncoding} from './iframe-location-encoding.playwright.mjs';
@@ -543,6 +545,8 @@ try {
     result.passed.push(...await timed(verifyWorkerBroadcastOrder(page), 'Worker broadcast registration fixture'));
     result.passed.push(...await timed(verifyMetaRefresh(page), 'Meta refresh fixture'));
     result.passed.push(...await timed(verifyClientRedirects(page), 'Client-side redirect fixture'));
+    result.passed.push(...await timed(verifyMediaSource(page), 'MediaSource playback fixture'));
+    result.passed.push(...await timed(verifyMediaSession(page), 'Media Session artwork fixture'));
     result.passed.push(...await timed(verifyLocks(page), 'Web Locks fixture'));
     result.passed.push(...await timed(verifyIframeRaces(page), 'Iframe race fixture'));
     result.passed.push(...await timed(verifyIframeLifecycle(page), 'Iframe lifecycle fixture'));

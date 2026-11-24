@@ -13,6 +13,8 @@
     "test": "node --test test/*.test.mjs",
     "test:browser": "node test/run-browser.mjs",
     "test:browser:redirects": "node test/run-client-redirect.mjs",
+    "test:browser:media-source": "node test/run-media-source.mjs",
+    "test:youtube": "node test/run-youtube.mjs",
     "test:relay": "node test/run-relay.mjs",
     "test:live": "node test/run-live.mjs",
     "build": "npx webpack",

@@ -33,7 +33,12 @@ export function placeholder_media_attribute(element,key){
 export function register_media_attributes(element,authored,update,remove,pending){
   if(states.has(element))return;
   inert??=document.implementation.createHTMLDocument('');
-  const mirror=create.call(inert,'http://www.w3.org/1999/xhtml',element.localName);
+  // Firefox loads media/images even without a browsing context: a mirror can
+  // consume a one-use MediaSource URL or make a direct remote image request.
+  // Only iframe mirrors need their native interface (for sandbox's token list);
+  // other mirrors need attribute operations, with no resource loader attached.
+  const tag=element.localName==='iframe'?'iframe':'span';
+  const mirror=create.call(inert,'http://www.w3.org/1999/xhtml',tag);
   for(const [key,source] of authored)if(source!==null)methods.setAttribute.call(mirror,key,source);
   const state={element,mirror,authored,update,remove,pending,values:new WeakMap()};
   states.set(element,state);maps.set(attributes.call(element),state);

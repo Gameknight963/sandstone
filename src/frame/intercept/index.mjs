@@ -9,6 +9,7 @@ export * as ranges from './ranges.mjs';
 export * as function from "./function.mjs";
 import './crypto.mjs';
 import './fonts.mjs';
+import './media_session.mjs';
 import './links.mjs';
 import './focus.mjs';
 import './open.mjs';
