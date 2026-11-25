@@ -42,6 +42,12 @@
         </select>
       </div>
 
+      <div>
+        <label><input id="allow_webrtc_input" type="checkbox" aria-describedby="webrtc_description"> Allow WebRTC</label>
+        <p id="webrtc_description" style="font-size: 12px;">WebRTC connects outside the Wisp relay and may expose your IP address. Changing this setting reloads the current site.</p>
+        <p id="webrtc_status" role="status" style="font-size: 12px;"></p>
+      </div>
+
       <details id="site_data_details">
         <summary>Stored site data</summary>
         <p id="storage_status" role="status"></p>

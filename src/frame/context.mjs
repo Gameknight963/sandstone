@@ -20,6 +20,7 @@ import {create_runtime_helpers} from './runtime_helpers.mjs';
 import {install_node_documents} from './node_documents.mjs';
 import {document_base_url} from './document_base.mjs';
 import {create_response_redirect} from './response.mjs';
+import {configure_webrtc} from './webrtc.mjs';
 export {get_runtime_context} from './runtime_context.mjs';
 export {get_global_reflection_group} from './global_reflection.mjs';
 export {is_default_open,default_open} from './intercept/open.mjs';
@@ -274,11 +275,13 @@ export function update_ctx(options = {}) {
   if(!is_worker)install_node_documents(intercept.document);
   // Native Navigation targets the physical sandbox document. Hide its feature
   // flags until it can use virtual history, so routers use their History fallback.
-  // Native network APIs without relay adapters must not connect directly.
+  // WebRTC is a separate opt-in because its native connections bypass Wisp.
+  configure_webrtc(loader.site_settings.allow_webrtc===true);
+  // Other native network APIs without relay adapters must not connect directly.
   // WebSocketStream needs backpressure and close metadata the current socket
   // transport cannot supply; SharedWorker cannot run in this opaque origin.
   // Remove configurable properties so `in` checks also select site fallbacks.
-  for (const key of ["navigation", "NavigationPrecommitController", "RTCPeerConnection", "webkitRTCPeerConnection", "WebSocketStream", "WebTransport", "SharedWorker"]) {
+  for (const key of ["navigation", "NavigationPrecommitController", "WebSocketStream", "WebTransport", "SharedWorker"]) {
     try { if(!Reflect.deleteProperty(globalThis,key))Object.defineProperty(globalThis,key,{value:undefined,configurable:true}); } catch {}
   }
 

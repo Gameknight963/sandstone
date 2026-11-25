@@ -83,7 +83,8 @@ export class ProxyFrame {
     this.special_pages = {};
     this.site_settings = [];
     this.default_settings = {
-      allow_js: true
+      allow_js: true,
+      allow_webrtc: false
     };
   }
 

@@ -16,6 +16,7 @@ const close_options_button = from_id("close_options_button");
 const eval_js_input = from_id("eval_js_input");
 const eval_js_button = from_id("eval_js_button");
 const theme_select = from_id("theme_select");
+const allow_webrtc_input = from_id('allow_webrtc_input');
 const site_data = sandstone.controller.site_data;
 const indexed_db = sandstone.controller.indexed_db;
 const cache_storage=sandstone.controller.cache_storage;
@@ -29,6 +30,12 @@ function apply_theme(value) {
   if (value === "system") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = value;
   try { localStorage.setItem("sandstone_theme", value); } catch {}
+}
+
+function apply_webrtc(allowed){
+  main_frame.default_settings.allow_webrtc=allowed===true;
+  allow_webrtc_input.checked=allowed===true;
+  try{localStorage.setItem('sandstone_allow_webrtc',allowed===true?'true':'false');}catch{}
 }
 
 function set_ui_hidden(hidden) {
@@ -169,6 +176,15 @@ async function main() {
   try { theme = localStorage.getItem("sandstone_theme") || theme; } catch {}
   apply_theme(["system", "light", "dark"].includes(theme) ? theme : "system");
   theme_select.onchange = () => apply_theme(theme_select.value);
+  let allow_webrtc=false;
+  try{allow_webrtc=localStorage.getItem('sandstone_allow_webrtc')==='true';}catch{}
+  apply_webrtc(allow_webrtc);
+  allow_webrtc_input.onchange=async()=>{
+    apply_webrtc(allow_webrtc_input.checked);
+    const status=from_id('webrtc_status');status.textContent='';
+    if(main_frame.url)try{await main_frame.navigate_to(main_frame.url.href,null,{history_mode:'reload'});}
+    catch(error){status.textContent='Could not reload the site: '+error.message;}
+  };
   from_id("hide_ui_button").onclick = () => set_ui_hidden(true);
   from_id("show_ui_button").onclick = () => set_ui_hidden(false);
   from_id("site_data_details").ontoggle = render_site_data;

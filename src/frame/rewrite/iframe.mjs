@@ -243,7 +243,7 @@ export function rewrite_iframe(iframe_element) {
         inherited_base_url:ctx.document.baseURI,document_referrer:javascript_source()?'':loader.url.startsWith('blob:')?loader.url:request_referrer(creator_url,creator_url,policy),referrer_policy:policy,
         message_origin:ctx.origin,message_parent:child_message_parent(message_token),is_iframe:true,window_name:window_name,
         crypto_available:loader.crypto_available,local_storage:local,session_storage:session,cookies:cookie_snapshot(),
-        cookie_cross_site:loader.cookie_cross_site,settings:{allow_js:loader.site_settings.allow_js!==false&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts'))},
+        cookie_cross_site:loader.cookie_cross_site,settings:{allow_js:loader.site_settings.allow_js!==false&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts')),allow_webrtc:loader.site_settings.allow_webrtc===true},
         default_settings:loader.default_settings,version:loader.version};
       const ready=runtime.loader.initialize_blank(options,completion=>{if(document_current()&&(!javascript_source()||completion?.written))iframe_element.dispatchEvent(new Event('load'));},value=>{
           if(!document_current())return;
@@ -612,7 +612,7 @@ export function rewrite_iframe(iframe_element) {
             ...state,
             referrer_policy,document_referrer,
             inherited_base_url,
-            settings: {allow_js:loader.site_settings.allow_js!==false&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts'))},
+            settings: {allow_js:loader.site_settings.allow_js!==false&&(sandbox===null||sandbox_tokens(sandbox).has('allow-scripts')),allow_webrtc:loader.site_settings.allow_webrtc===true},
             default_settings: loader.default_settings,
             version: loader.version,
             is_iframe: true,
@@ -643,7 +643,7 @@ export function rewrite_iframe(iframe_element) {
             prepared_context:state.beacon_context,
             error: error_msg,
             local_storage: undefined,
-            settings: {},
+            settings: {allow_webrtc:loader.site_settings.allow_webrtc===true},
             default_settings: loader.default_settings,
             version: loader.version
           });

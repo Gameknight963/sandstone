@@ -16,6 +16,7 @@
     "test:browser:media-source": "node test/run-media-source.mjs",
     "test:browser:document-cycles": "node test/run-document-cycles.mjs",
     "test:browser:fragments": "node test/run-fragments.mjs",
+    "test:browser:webrtc": "node test/run-webrtc.mjs",
     "test:youtube": "node test/run-youtube.mjs",
     "test:relay": "node test/run-relay.mjs",
     "test:live": "node test/run-live.mjs",
