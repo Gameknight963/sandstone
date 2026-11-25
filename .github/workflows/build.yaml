@@ -35,6 +35,16 @@ jobs:
           npm ci
           npm ci --prefix example
 
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: test/Sandstone.BrowserTests/packages.lock.json
+
+      - name: Restore locked C# test dependencies
+        run: dotnet restore test/Sandstone.BrowserTests --locked-mode
+
       - name: Run unit tests
         run: npm test
 
@@ -44,7 +54,9 @@ jobs:
           npm run build:prod --prefix example
 
       - name: Install test browser
-        run: npx --no-install playwright-core install --with-deps --only-shell chromium
+        run: |
+          npx --no-install playwright-core install --with-deps --only-shell chromium
+          npm run test:browser:install -- --with-deps --only-shell chromium
 
       - name: Test the standalone file
         env:

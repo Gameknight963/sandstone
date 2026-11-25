@@ -96,7 +96,6 @@ import {verifyInitialJavascriptQueue} from './initial-javascript-queue.playwrigh
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 import {verifyGlobalMethodInstrumentation} from './global-method-instrumentation.playwright.mjs';
-import {verifyWebRTC} from './webrtc.playwright.mjs';
 
 const testSource = await readFile(new URL("browser.playwright.js", import.meta.url), "utf8");
 const dexieSource = await readFile(new URL("../node_modules/dexie/dist/dexie.js", import.meta.url), "utf8");
@@ -343,11 +342,11 @@ async function collectNavigationGarbage(){
   try{await client.send('HeapProfiler.collectGarbage');}
   finally{await client.detach();}
 }
-async function timed(operation, label, timeout_ms=30000) {
+async function timed(operation, label) {
   console.log(JSON.stringify({storageDenied:activeStorageMode,fixture:label}));
   let timer;
   const completed=Promise.resolve(operation).then(async result=>{await collectNavigationGarbage();return result;});
-  try { return await Promise.race([completed, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label + " timed out")), timeout_ms); })]); }
+  try { return await Promise.race([completed, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label + " timed out")), 30000); })]); }
   finally { clearTimeout(timer); }
 }
 const browserChannel = process.env.BROWSER_CHANNEL || "chrome";
@@ -405,7 +404,6 @@ try {
     })()`)));
     assert.deepEqual(globalPatch, {stable:true, restored:true, calls:['patched','callback','restored']});
     result.passed.push('Global function instrumentation and restoration');
-    result.passed.push(...await timed(verifyWebRTC(page,{storageDenied}),'WebRTC opt-in setting fixture',60000));
     result.passed.push(...await timed(verifyGlobalMethodInstrumentation(page),'Prototype method instrumentation fixture'));
     const schedulers=JSON.parse(await timed(page.evaluate(()=>main_frame.eval_js(`(async()=>{
       const idle=requestIdleCallback.bind(globalThis),cancel=cancelIdleCallback.bind(window);

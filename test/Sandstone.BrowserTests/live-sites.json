@@ -1,0 +1,179 @@
+[
+  {
+    "id": "discord",
+    "url": "https://discord.com/login",
+    "timeout": 60000,
+    "editor": true
+  },
+  {
+    "id": "hls",
+    "url": "https://hlsjs.video-dev.org/demo/",
+    "timeout": 60000,
+    "editor": true
+  },
+  {
+    "id": "hls-aes",
+    "url": "https://hlsjs.video-dev.org/demo/",
+    "timeout": 60000,
+    "editor": true
+  },
+  {
+    "id": "pdfjs",
+    "url": "https://mozilla.github.io/pdf.js/web/viewer.html",
+    "editor": true,
+    "timeout": 90000
+  },
+  {
+    "id": "cyberchef",
+    "url": "https://gchq.github.io/CyberChef/",
+    "editor": true,
+    "timeout": 90000
+  },
+  {
+    "id": "cyberchef-hash",
+    "url": "https://gchq.github.io/CyberChef/",
+    "editor": true,
+    "timeout": 90000
+  },
+  {
+    "id": "xtype",
+    "url": "https://phoboslab.org/xtype/",
+    "editor": true,
+    "timeout": 60000
+  },
+  {
+    "id": "swooop",
+    "url": "https://playcanv.as/p/JtL2iqIH/",
+    "editor": true,
+    "timeout": 90000
+  },
+  {
+    "id": "wikipedia-search",
+    "url": "https://www.wikipedia.org/",
+    "editor": true,
+    "timeout": 60000
+  },
+  {
+    "id": "scratch",
+    "url": "https://scratchfoundation.github.io/scratch-gui/",
+    "editor": true,
+    "timeout": 90000
+  },
+  {
+    "id": "jspaint-files",
+    "url": "https://jspaint.app/",
+    "editor": true,
+    "timeout": 60000
+  },
+  {
+    "id": "dillinger",
+    "url": "https://dillinger.io/",
+    "editor": true,
+    "timeout": 90000
+  },
+  {
+    "id": "jsoncrack",
+    "url": "https://jsoncrack.com/editor",
+    "editor": true,
+    "timeout": 90000
+  },
+  {
+    "id": "vscode",
+    "url": "https://vscode.dev/",
+    "editor": true,
+    "timeout": 90000
+  },
+  {
+    "id": "flems",
+    "url": "https://flems.io/",
+    "editor": true
+  },
+  {
+    "id": "squoosh",
+    "url": "https://squoosh.app/",
+    "editor": true
+  },
+  {
+    "id": "sqlime",
+    "url": "https://sqlime.org/",
+    "editor": true
+  },
+  {
+    "id": "photopea",
+    "url": "https://www.photopea.com/",
+    "editor": true
+  },
+  {
+    "id": "geogebra",
+    "url": "https://www.geogebra.org/graphing",
+    "editor": true
+  },
+  {
+    "id": "desmos",
+    "url": "https://www.desmos.com/calculator",
+    "editor": true
+  },
+  {
+    "id": "jspaint",
+    "url": "https://jspaint.app/",
+    "editor": true
+  },
+  {
+    "id": "mermaid",
+    "url": "https://mermaid.live/",
+    "editor": true
+  },
+  {
+    "id": "diagrams",
+    "url": "https://app.diagrams.net/",
+    "editor": true
+  },
+  {
+    "id": "discourse",
+    "url": "https://discuss.python.org/latest"
+  },
+  {
+    "id": "openstreetmap",
+    "url": "https://www.openstreetmap.org/#map=5/39.828/-98.579"
+  },
+  {
+    "id": "mastodon",
+    "url": "https://mastodon.social/explore"
+  },
+  {
+    "id": "excalidraw",
+    "url": "https://excalidraw.com/"
+  },
+  {
+    "id": "hn",
+    "url": "https://news.ycombinator.com/"
+  },
+  {
+    "id": "mdn",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript"
+  },
+  {
+    "id": "wikipedia",
+    "url": "https://en.wikipedia.org/wiki/Main_Page"
+  },
+  {
+    "id": "github",
+    "url": "https://github.com/octocat/Hello-World"
+  },
+  {
+    "id": "react",
+    "url": "https://react.dev/learn"
+  },
+  {
+    "id": "vue",
+    "url": "https://vuejs.org/guide/introduction.html"
+  },
+  {
+    "id": "svelte",
+    "url": "https://svelte.dev/docs/svelte/overview"
+  },
+  {
+    "id": "angular",
+    "url": "https://angular.dev/overview"
+  }
+]

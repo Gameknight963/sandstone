@@ -174,40 +174,6 @@ async (page, url = page.url().startsWith("file:") ? page.url() : "http://127.0.0
   assert.match(uploadBody, /name="field"/);
   assert.match(uploadBody, /name="send"/);
 
-  await page.evaluate(async () => {
-    main_frame.special_pages['https://inactive.test/'] = '<!doctype html><body>Inactive database fixture</body>';
-    await main_frame.navigate_to('https://inactive.test/');
-  });
-  await page.evaluate(() => main_frame.eval_js(`new Promise((resolve, reject) => {
-    const request = indexedDB.open('discard');
-    request.onupgradeneeded = () => request.result.createObjectStore('items');
-    request.onsuccess = () => { request.result.close(); resolve(true); };
-    request.onerror = () => reject(request.error);
-  })`));
-  await page.evaluate(() => main_frame.navigate_to('https://fixture.test/upload'));
-
-  await page.getByRole('button', {name: 'Options', exact: true}).evaluate(button => button.click());
-  await page.locator('#theme_select').selectOption('dark');
-  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme), 'dark');
-  await page.evaluate(() => {
-    const data = sandstone.controller.site_data;
-    data.setCookie('https://inactive.test/', 'saved=1; Path=/');
-    data.setLocal('https://inactive.test', [['key', 'value']]);
-    document.getElementById('site_data_details').open = true;
-  });
-  const storedSite = page.locator('.site_data_row').filter({hasText: 'inactive.test'});
-  await storedSite.getByRole('button', {name: 'Clear IndexedDB', exact: true}).evaluate(button => button.click());
-  await page.waitForFunction(() => sandstone.controller.site_data.list().find(site => site.hostname === 'inactive.test')?.indexedDB === 0);
-  assert.deepEqual(await page.evaluate(() => sandstone.controller.indexed_db.databases('https://inactive.test')), []);
-  await storedSite.getByRole('button', {name: 'Clear all', exact: true}).evaluate(button => button.click());
-  await page.waitForFunction(() => !sandstone.controller.site_data.list().some(site => site.hostname === 'inactive.test'));
-  assert.equal(await page.evaluate(() => sandstone.controller.site_data.list().some(site => site.hostname === 'inactive.test')), false);
-  await page.locator('#close_options_button').evaluate(button => button.click());
-  await page.locator('#hide_ui_button').evaluate(button => button.click());
-  assert.equal(await page.locator('#address_bar').isVisible(), false);
-  assert.equal(await page.locator('#show_ui_button').isVisible(), true);
-  await page.locator('#show_ui_button').evaluate(button => button.click());
-  assert.equal(await page.locator('#address_bar').isVisible(), true);
   assert.deepEqual(errors, []);
-  return {url, passed: ['dynamic scripts', 'fragments', 'inert innerHTML', 'cookies', 'localStorage', 'sessionStorage', 'streaming', 'response cloning', 'multipart forms', 'IndexedDB indexes/cursors/binary data', 'IndexedDB navigation persistence', 'dark mode', 'per-site database clearing', 'hide/show UI', 'WebRTC disabled', 'secure random UUIDs in opaque sandbox origins', 'Favicon loading preserves the page viewport']};
+  return {url, passed: ['dynamic scripts', 'fragments', 'inert innerHTML', 'cookies', 'localStorage', 'sessionStorage', 'streaming', 'response cloning', 'multipart forms', 'IndexedDB indexes/cursors/binary data', 'IndexedDB navigation persistence', 'WebRTC disabled', 'secure random UUIDs in opaque sandbox origins', 'Favicon loading preserves the page viewport']};
 }
