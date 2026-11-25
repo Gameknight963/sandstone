@@ -4,11 +4,11 @@
 
 Sandstone is an experimental web proxy utilizing sandboxed iframes and no service worker. 
 
-Traditional web proxies like [Ultraviolet](https://github.com/titaniumnetwork-dev/Ultraviolet) require you to visit a domain that is unblocked, leading to a whack-a-mole situation of having these domains be blocked and trying to find new ones. Sandstone on the other hand is able to run from within a local HTML file, so it can avoid being blocked in many situations. Additionally, traditional web proxies do not sandbox the proxied pages, so any site can take control of the proxy as a whole and steal credentials. Sandstone avoids this by putting the proxied pages inside a [sandboxed iframe](https://www.w3schools.com/tags/att_iframe_sandbox.asp), so they absolutely cannot access the parent page.
+Traditional web proxies like [Ultraviolet](https://github.com/titaniumnetwork-dev/Ultraviolet) require you to visit a domain that is unblocked, leading to a whack-a-mole situation of having these domains be blocked and trying to find new ones. Sandstone on the other hand is able to run from within a local HTML file.
 
-Try it here: https://sandstone.pages.dev/
+Additionally, traditional web proxies do not sandbox the proxied pages, so any site can take control of the proxy as a whole and steal credentials. Sandstone avoids this by putting the proxied pages inside a [sandboxed iframe](https://www.w3schools.com/tags/att_iframe_sandbox.asp), so they absolutely cannot access the parent page.
 
-[Download the latest build (ZIP)](https://nightly.link/Gameknight963/sandstone/workflows/build.yaml/main/sandstone.zip). Extract the ZIP and open `sandstone.html` in your browser. The download is available after the first successful build on this fork's `main` branch.
+To try: [download the latest build](https://nightly.link/Gameknight963/sandstone/workflows/build.yaml/main/sandstone.zip), extract it, and open _sandstone.html_ in your browser.
 
 ## Features
 - Every proxied page runs in a sandboxed iframe
@@ -17,64 +17,37 @@ Try it here: https://sandstone.pages.dev/
 - Uses [libcurl.js](https://www.npmjs.com/package/libcurl.js) and [Wisp](https://github.com/MercuryWorkshop/wisp-protocol) for end-to-end encryption
 
 ## Site Support
-- [Discord](https://discord.com/app)
-  - The login page does work, but not the captcha
-  - Note: works in v0.1.1 but not v0.2.0
-- [Amazon](https://www.amazon.com/)
-- [v86](https://copy.sh/v86/)
-- Youtube embeds
-- Some HTML5 games, such as:
-  - [Minecraft Classic](https://classic.minecraft.net/)
-  - [Slither.io](https://slither.io/)
+
+Many sites are supported, for example:
+
+- [YouTube](https://www.youtube.com/)
+- [JS Paint](https://jspaint.app/)
+- [Photopea](https://www.photopea.com/)
+- [diagrams.net](https://app.diagrams.net/)
+- [Scratch editor](https://scratchfoundation.github.io/scratch-gui/)
+- [Flems](https://flems.io/)
+- [PDF.js](https://mozilla.github.io/pdf.js/web/viewer.html)
+- [SQLime](https://sqlime.org/)
+- [Discord](https://discord.com/login)
 - Most static sites
 
 ## Status
-This is at a very early stage of development and lacks support for most web APIs. 
 
 ### Working Features
-- Fetch API
-- Basic javascript
-- Local storage
-- Web workers
-- XMLHttpRequest
-- Media elements such as `<img>`
-- CSS rewriting
-- Anchor tags 
-- HTML redirects
-- HTML forms
+- JavaScript rewriting, dynamic scripts, and `eval`
+- ES modules, import maps, dynamic imports, and top-level await
+- Fetch API and XMLHttpRequest, including streaming responses
+- WebSockets, EventSource, and `sendBeacon`
+- Cookies and isolated per-site storage
+- localStorage, sessionStorage, IndexedDB, and CacheStorage
+- HTTP request caching and conditional revalidation
+- Classic and module web workers
+- Web Crypto
+- Images, audio, video, and MediaSource playback
+- CSS rewriting, dynamic stylesheets, and CSSOM updates
+- Links, redirects, HTML forms, and downloads
+- History API, iframe navigation, and cross-frame messaging
 
-### Notable Unimplemented Features
-- Cookies
-- ES6 modules
-- HTTP request caching
-
-## Usage
-### Building
-1. Clone this repository and cd into it.
-2. Run `npm i` to install the dependencies.
-3. Run `npm run build:prod` to bundle the client JS. You may also use `npm run dev`.
-
-### Running the Example Frontend
-1. Cd into the `example` subdirectory
-2. Run `npm i` to install the server dependencies
-3. Run `npm run build:prod` to bundle the frontend JS.
-4. Run `npm run start` which will start the web server
-
-## License
-```
-ading2210/sandstone - A web proxy using sandboxed iframes 
-Copyright (C) 2025 ading2210
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-```
+### Notable Limitations
+- Cloudflare verification fails (and probably will, forever).
+- WebRTC is deliberately disabled. WebTransport and WebSocketStream are not supported.
