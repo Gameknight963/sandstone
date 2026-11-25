@@ -47,7 +47,8 @@ Many sites are supported, for example:
 - CSS rewriting, dynamic stylesheets, and CSSOM updates
 - Links, redirects, HTML forms, and downloads
 - History API, iframe navigation, and cross-frame messaging
+- WebRTC (must be enabled in settings)
 
 ### Notable Limitations
 - Cloudflare verification fails (and probably will, forever).
-- WebRTC is deliberately disabled. WebTransport and WebSocketStream are not supported.
+- WebTransport and WebSocketStream are not supported.
