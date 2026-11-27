@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
+import {test_font} from './test-font.mjs';
 
-const font=await readFile(new URL('./fonts/fixture.ttf',import.meta.url));
+const font=await test_font();
 const origin='https://url-surfaces.test',encodings=['windows-1251','Shift_JIS','windows-1252','UTF-8'];
 const query='?q=Тест&japanese=日本',escaped=String.raw`?q=\0422\0435\0441\0442&japanese=\65e5\672c`;
 const html='<!doctype html><base href="/assets/base/"><link rel="stylesheet" href="/sheet.css"><style id="inline">.inline{background-image:url("/inline'+escaped+'")}</style><div class="external">External</div><div class="child">Child</div><div class="inline">Inline</div><div style="background-image:url(/initial'+escaped+')">Initial</div><main id="mount"></main>';

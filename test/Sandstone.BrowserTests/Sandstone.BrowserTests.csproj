@@ -17,6 +17,9 @@
     <Using Include="Sandstone.BrowserTests.Infrastructure" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../Sandstone.TestFixtures/Sandstone.TestFixtures.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

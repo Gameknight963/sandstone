@@ -1,6 +1,6 @@
-import {readFile} from 'node:fs/promises';
+import {test_font} from './test-font.mjs';
 
-const font = await readFile(new URL('./fonts/fixture.ttf', import.meta.url));
+const font = await test_font();
 
 export function font_fixture() {
   const requests = [];

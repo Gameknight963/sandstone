@@ -167,6 +167,9 @@
           "xunit.v3.extensibility.core": "[4.0.3]",
           "xunit.v3.runner.common": "[4.0.3]"
         }
+      },
+      "sandstone.testfixtures": {
+        "type": "Project"
       }
     }
   }

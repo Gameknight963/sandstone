@@ -58,6 +58,13 @@ The framework isolates browser contexts between scenarios. Public network
 requests from a proxied page are blocked and recorded; site traffic must use
 the relay. WebRTC tests use local peers without external STUN/TURN servers.
 
+Font tests use the C# `FontFixture` class to create a tiny square-glyph TrueType
+font in memory. xUnit owns its lifetime through `IClassFixture<FontFixture>`.
+The JavaScript font/URL fixtures use the same generator through stdout, cached
+once per process. No `.ttf` file or Python/fontTools generator is needed. Run
+`dotnet test --filter-class Sandstone.BrowserTests.FontTests` for its native and
+proxied rendering checks.
+
 The CSS accelerator is built from C++ and included as checked-in WASM. Ordinary
 builds and tests do not require Emscripten. Build-time hashes reject a stale
 native binary; see `../native/css/BUILDING.md` when editing its C++ source.
