@@ -1,6 +1,6 @@
 import {ctx} from '../context.mjs';
 import {parse_css} from './css.mjs';
-import {prepare_css, restore_css, edit_css_parts, css_references} from '../css.mjs';
+import {prepare_css, restore_css, restore_css_parts, edit_css_parts, css_references} from '../css.mjs';
 import {track_style_request} from '../style_requests.mjs';
 import {document_states} from '../document_identity.mjs';
 
@@ -54,10 +54,10 @@ function update(element) {
   const generation = ++state.generation;
   const markers = new Map(state.markers);
   for (const node of nodes) for (const entry of node_markers.get(node) || []) markers.set(...entry);
-  parts = restore_css(parts.join(''), markers, edits => edit_css_parts(parts, edits), true);
+  parts = restore_css_parts(parts,markers,true);
   const source = parts.join('');
   const serialization_markers=new Map(state.serializationMarkers);
-  const authored_parts=restore_css(source,serialization_markers,edits=>edit_css_parts(parts,edits),true);
+  const authored_parts=restore_css_parts(parts,serialization_markers,true);
   const prepared = prepare_css(source, 'sandstone-style-' + ++sequence + '-', supports);
   state.markers = prepared.markers;
   const safe = edit_css_parts(parts, prepared.edits);
@@ -161,7 +161,7 @@ export function clone_style(source,copy){
   const state=states.get(source);if(!state)return;
   const nodes=text_nodes(source),targets=text_nodes(copy),parts=nodes.map(node=>data.get.call(node)),markers=new Map(state.markers);
   for(const node of nodes)for(const entry of node_markers.get(node)||[])markers.set(...entry);
-  const restored=restore_css(parts.join(''),markers,edits=>edit_css_parts(parts,edits),true);
+  const restored=restore_css_parts(parts,markers,true);
   if(targets.length===restored.length)write(targets,restored);
 }
 export function capture_style(source,serializing=false){
@@ -179,7 +179,7 @@ export function capture_style(source,serializing=false){
   return (copy,partial=false)=>{
     if(getAttribute.call(copy,'type')==='text/sandstone-pending'){if(type===null)removeAttribute.call(copy,'type');else setAttribute.call(copy,'type',type);}
     const targets=text_nodes(copy),values=partial?targets.map(node=>data.get.call(node)):parts;
-    const restored=serialized||restore_css(values.join(''),serializing?new Map([...state.serializationMarkers||[],...markers]):markers,edits=>edit_css_parts(values,edits),true);
+    const restored=serialized||restore_css_parts(values,serializing?new Map([...state.serializationMarkers||[],...markers]):markers,true);
     if(targets.length===restored.length)write(targets,restored);
   };
 }

@@ -9,6 +9,9 @@ export * as storage_sync from './storage_sync.mjs';
 export * as javascript_navigation from './javascript_navigation.mjs';
 export {navigate_fragment} from './navigation_targets.mjs';
 export {seed_encoder} from '../bootstrap.mjs';
+export {native_css_status} from '../native/css.mjs';
+import {start_native_css} from '../native/css_binary.mjs';
+if(typeof document!=='undefined')start_native_css();
 
 export * as rpc from "../rpc.mjs";
 

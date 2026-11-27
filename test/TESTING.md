@@ -35,6 +35,7 @@ npm test                       # JavaScript unit tests
 dotnet test                    # C# workflows; public-site tests are skipped
 npm run test:browser:ui         # C# deterministic workflows only
 npm run test:browser:runtime    # JavaScript browser API/semantic tests
+npm run test:browser:native-css # Native CSS/fallback matrix and CSS fixtures
 npm run test:browser            # Both deterministic browser suites
 npm run test:relay              # Real local HTTP/WebSocket relay fixtures
 ```
@@ -56,6 +57,13 @@ npm run test:browser:webrtc      # WebRTC workflows in Firefox and Chromium
 The framework isolates browser contexts between scenarios. Public network
 requests from a proxied page are blocked and recorded; site traffic must use
 the relay. WebRTC tests use local peers without external STUN/TURN servers.
+
+The CSS accelerator is built from C++ and included as checked-in WASM. Ordinary
+builds and tests do not require Emscripten. Build-time hashes reject a stale
+native binary; see `../native/css/BUILDING.md` when editing its C++ source.
+Native CSS tests cover enabled and compilation-blocked paths under `file://`,
+in both storage modes. Set `NATIVE_CSS_BROWSER=chromium` for a single browser and
+`NATIVE_CSS_ONLY=1` to run just that focused matrix without the existing CSS suites.
 
 ## Opt-in public sites
 

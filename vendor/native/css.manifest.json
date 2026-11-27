@@ -1,0 +1,11 @@
+{
+  "abi": 1,
+  "binary": "1b41601ca41a2ced14e1b134ebaa173851c4bc8536d9e04649e01b6cc24e2a31",
+  "sources": {
+    "native/css/css.cpp": "44d209aa6029c4a861c5a8a407dad0a912dcc56cbd6de243916090c31553c3c9",
+    "native/css/core.cpp": "ec479b954c3dcbf5432492d2be0ba3a9c1627f9ad69f744bcbdb5ff7d453baeb",
+    "native/css/exports.json": "27def3d8bca7854bf6d35301ab75ba396282e4123216fbf1359377e536b581b5",
+    "native/css/build.sh": "2c3127d80d7ddc79f12d04569929591968ce6d472989aeed4a7739fc962b1b00"
+  },
+  "compiler": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.72 (437140d149d9c977ffc8b09dbaf9b0f5a02db190)"
+}

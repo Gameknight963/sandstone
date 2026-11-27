@@ -19,6 +19,7 @@ import {configure_autofocus} from './autofocus.mjs';
 import {configure_filesystem} from './polyfill/filesystem.mjs';
 import {create_runtime_script,append_runtime_script} from './runtime_script.mjs';
 import {refresh_document} from './active_document.mjs';
+import {native_css_ready} from '../native/css.mjs';
 
 const navigate_rpc = rpc.create_rpc_wrapper(rpc.host, "navigate");
 export function navigate(id, url, reload = true, form_data = null, navigation = {}) {
@@ -183,7 +184,10 @@ function prepare_html(options) {
   configure_filesystem();
   configure_document_encoding(document,ctx.document,character_encoding);
   configure_window_messages(options);
-  return document_preparation=Promise.all([ready,configure_cookies(options.cookies,ctx.document),configure_service_workers(options)]).then(result=>{configure_autofocus();return result;});
+  return document_preparation=Promise.all([
+    Promise.all([ready,configure_cookies(options.cookies,ctx.document),configure_service_workers(options)]),
+    native_css_ready()
+  ]).then(([result])=>{configure_autofocus();return result;});
 }
 
 export function initialize_blank(options,onload,onurl){

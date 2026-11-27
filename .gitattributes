@@ -1,0 +1,2 @@
+native/css/build.sh text eol=lf
+vendor/native/*.wasm binary

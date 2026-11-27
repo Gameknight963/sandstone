@@ -2,7 +2,9 @@ const webpack = require("webpack");
 const TerserPlugin = require('terser-webpack-plugin');
 const frame_realm = require('./build/frame-realm.cjs');
 const path = require('node:path');
+require('./build/native-css.cjs')();
 const rollup_license = require('node:fs').readFileSync(path.join(path.dirname(require.resolve('@rollup/browser')), '..', 'LICENSE.md'), 'utf8');
+const native_css_license = require('node:fs').readFileSync(path.join(__dirname,'vendor/native/LICENSES.txt'),'utf8');
 
 const pkg = require("./package.json");
 const { execSync } = require("child_process");
@@ -45,10 +47,14 @@ const bundles = [
       }
     },
     plugins: [
+      new webpack.BannerPlugin({banner:native_css_license,entryOnly:true}),
       new webpack.BannerPlugin({banner:frame_realm.header,raw:true,entryOnly:true}),
       new webpack.BannerPlugin({banner:frame_realm.footer,raw:true,entryOnly:true,footer:true})
     ],
-    module: {rules:[{resource:/dist[\\/]sandstone_worker_bundler\.js$/,type:'asset/source'}]},
+    module: {rules:[
+      {resource:/dist[\\/]sandstone_worker_bundler\.js$/,type:'asset/source'},
+      {resource:/vendor[\\/]native[\\/]css\.wasm$/,type:'asset/inline',generator:{dataUrl:{mimetype:'application/wasm'}}}
+    ]},
     // Preserve dependency notices inside the standalone runtime, rather than
     // referring to an extra LICENSE.txt file beside the downloaded HTML.
     optimization:{minimizer:[new TerserPlugin({extractComments:false})]},

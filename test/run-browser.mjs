@@ -96,6 +96,7 @@ import {verifyInitialJavascriptQueue} from './initial-javascript-queue.playwrigh
 import {blockFunctionCases,globalBlockFunctionCases} from './javascript-block-functions-cases.mjs';
 import {globalFunctionCases} from './javascript-global-functions-cases.mjs';
 import {verifyGlobalMethodInstrumentation} from './global-method-instrumentation.playwright.mjs';
+import {verifyNativeCSS} from './native-css.playwright.mjs';
 
 const testSource = await readFile(new URL("browser.playwright.js", import.meta.url), "utf8");
 const dexieSource = await readFile(new URL("../node_modules/dexie/dist/dexie.js", import.meta.url), "utf8");
@@ -694,6 +695,7 @@ try {
     const cacheReload=await page.evaluate(()=>main_frame.eval_js('(async()=>{const response=await caches.match("/persisted");return response?response.text():null;})()'));
     assert.equal(cacheReload,storageDenied?null:'saved cache','CacheStorage persistence did not match the storage capability');
     result.passed.push('CacheStorage survives standalone-file reloads when storage is available');
+    result.passed.push(...await timed(verifyNativeCSS(page),'Native CSS integration fixture'));
     // Chrome can replay invalid-base diagnostics when another frame is loaded.
     // Exercise those native diagnostics last, with no subsequent navigation.
     try{result.passed.push(...await timed(verifyBase(page,warnings=>warnings.forEach(message=>expectedDiagnostics.add(message))), 'Document base fixture'));}

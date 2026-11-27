@@ -58,6 +58,12 @@ jobs:
           npx --no-install playwright-core install --with-deps --only-shell chromium
           npm run test:browser:install -- --with-deps --only-shell chromium
 
+      - name: Test native CSS and compilation fallback
+        env:
+          NATIVE_CSS_BROWSER: chromium
+          NATIVE_CSS_ONLY: '1'
+        run: npm run test:browser:native-css
+
       - name: Test the standalone file
         env:
           # Use Playwright's bundled headless shell. The full Chromium channel

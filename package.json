@@ -14,6 +14,7 @@
     "test:browser": "npm run test:browser:ui && npm run test:browser:runtime",
     "test:browser:ui": "dotnet test --project test/Sandstone.BrowserTests --filter-not-trait Category=Live",
     "test:browser:runtime": "node test/run-browser.mjs",
+    "test:browser:native-css": "node test/run-native-css.mjs",
     "test:browser:install": "node test/install-browser-workflows.mjs",
     "test:browser:redirects": "node test/run-client-redirect.mjs",
     "test:browser:media-source": "node test/run-media-source.mjs",
@@ -55,6 +56,9 @@
   },
   "files": [
     "src",
+    "native",
+    "build/native-css.cjs",
+    "vendor/native",
     "dist",
     "vendor/scramjet",
     "vendor/libcurl"

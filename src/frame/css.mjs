@@ -1,6 +1,7 @@
 import {parse_referrer_policy} from '../referrer.mjs';
 import {decode_stylesheet_response} from '../text_encoding.mjs';
 import {encoding_parse_url} from '../url_encoding.mjs';
+import {native_css_references,native_prepare_css,native_restore_css,native_restore_css_parts,native_apply_css} from '../native/css.mjs';
 
 const whitespace = character => /[\t\n\f\r ]/.test(character || "\0");
 const name_character = character => /[\w\u0080-\uffff-]/.test(character || "\0");
@@ -75,6 +76,8 @@ function import_supports(source, index) {
 
 // Preserve @import layers, supports() and media conditions while replacing URLs.
 export function css_references(source) {
+  const native=native_css_references(source);
+  if(native!==null)return native;
   const references = [];
   const functions = [];
   const blocks = [];
@@ -174,6 +177,8 @@ export function css_resource_references(source) {
 // finishes. Preserve token boundaries so comments, strings and data URLs survive.
 export function prepare_css(source, prefix, supports) {
   source = String(source);
+  const native=native_prepare_css(source,prefix,supports);
+  if(native!==null)return native;
   const markers = new Map();
   const edits = [];
   for (const reference of css_resource_references(source)) {
@@ -191,6 +196,9 @@ export function prepare_css(source, prefix, supports) {
 }
 
 export function restore_css(source, markers, transform, prefixes = false) {
+  if(!markers.size)return transform?transform([]):source;
+  const native=native_restore_css(source,markers,!!transform,prefixes);
+  if(native!==null)return transform?transform(native.edits):native.css;
   const references = css_references(source);
   const edits = [];
   for (let index = references.length - 1; index >= 0; index--) {
@@ -202,6 +210,12 @@ export function restore_css(source, markers, transform, prefixes = false) {
     source = source.slice(0, start) + replacement + source.slice(end);
   }
   return transform ? transform(edits) : source;
+}
+
+export function restore_css_parts(parts,markers,prefixes=false){
+  if(!markers.size)return parts.slice();
+  const native=native_restore_css_parts(parts,markers,prefixes);
+  return native!==null?native:restore_css(parts.join(''),markers,edits=>edit_css_parts(parts,edits),prefixes);
 }
 
 // Keep unaffected prefixes/suffixes in their original text nodes. A token
@@ -276,6 +290,7 @@ export function rewrite_css(source, base, {fetch, createURL, supports, transform
     return pending.get(key).then(value => value + (value.startsWith("blob:") ? hash : ""));
   });
   return Promise.all(replacements).then(values => {
+    if(!transform){const native=native_apply_css(source,references,values);if(native!==null)return native.css;}
     const edits = [];
     for (let index = 0; index < references.length; index++) {
       const {start, end} = references[index];

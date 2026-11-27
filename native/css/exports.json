@@ -1,0 +1,12 @@
+[
+  "_reserve_input",
+  "_scan_css",
+  "_prepare_css",
+  "_reserve_edits",
+  "_reserve_parts",
+  "_restore_stylesheet",
+  "_restore_css_nodes",
+  "_apply_css_values",
+  "_scan_srcset",
+  "_apply_srcset_urls"
+]
